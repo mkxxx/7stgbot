@@ -1,0 +1,17 @@
+# [Begin ignore without extensions]
+# Ignore all
+*
+# Unignore all with extensions
+!*.*
+# Unignore all dirs
+!*/
+# [End ignore without extensions]
+
+*.exe
+.idea
+*.prof
+*.log
+*.cfg*
+config.toml
+*.png
+

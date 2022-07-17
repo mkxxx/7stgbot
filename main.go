@@ -59,15 +59,7 @@ func main() {
 		flag.PrintDefaults()
 		return
 	}
-	cfg.QR["Sum"] = "0"
-	cfg.QR["Purpose"] = ""
-	qr := "ST00011"
-	for k, v := range cfg.QR {
-		qr += "|" + k + "=" + v
-	}
-	//qrcode.WriteFile(qr, qrcode.Medium, 256, "qr.png")
-
-	srv := tgsrv.StartWebServer(cfg.Port, cfg.StaticDir)
+	srv := tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfg.QR, cfg.Price, cfg.Coef)
 
 	abort := make(chan struct{})
 	sigs := make(chan os.Signal, 1)
@@ -91,5 +83,7 @@ type Config struct {
 	Port      int
 	StaticDir string
 	TgToken   string
+	Price     string
+	Coef      string
 	QR        map[string]string
 }

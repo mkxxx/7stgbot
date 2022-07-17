@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/skip2/go-qrcode"
@@ -30,6 +31,19 @@ const (
 	payPath             = "/docs/оплата/"
 	payElectrPath       = "/docs/оплата-эл/"
 )
+const (
+	// required
+	QRHeader          = "ST00011"
+	QRNameName        = "Name"        // <= 160
+	QRNamePersonalAcc = "PersonalAcc" // <= 20
+	QRNameBankName    = "BankName"    // <= 45
+	QRNameBIC         = "BIC"         // <= 9
+	QRNameCorrespAcc  = "CorrespAcc"  // <= 20
+	// optional
+	QRNamePurpose  = "Purpose"  // <= 210
+	QRNameSum      = "Sum"      // <= 18
+	QRNamePayeeINN = "PayeeINN" // <= 12
+)
 
 var Location *time.Location
 
@@ -41,14 +55,17 @@ func init() {
 	}
 }
 
-func StartWebServer(port int, staticDir string) *http.Server {
-	webServer := newWebServer(port, staticDir)
+func StartWebServer(port int, staticDir string, QRElements map[string]string, price, coef string) *http.Server {
+	webServer := newWebServer(port, staticDir, QRElements, price, coef)
 	webServer.start(port)
 	return webServer.httpServer
 }
 
-func newWebServer(port int, staticDir string) *webSrv {
+func newWebServer(port int, staticDir string, QRElements map[string]string, price, coef string) *webSrv {
 	ws := new(webSrv)
+	ws.price = price
+	ws.coef = coef
+	ws.QRElements = QRElements
 	ws.staticDir = staticDir
 	fs := http.FileServer(http.Dir(staticDir))
 	//ws.staticHandler = http.StripPrefix("/static/", fs)
@@ -60,6 +77,9 @@ func newWebServer(port int, staticDir string) *webSrv {
 }
 
 type webSrv struct {
+	price         string
+	coef          string
+	QRElements    map[string]string
 	staticDir     string
 	staticHandler http.Handler
 	httpServer    *http.Server
@@ -93,6 +113,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			params.Add(paramNameSum, r.FormValue(paramNameSum))
 			params.Add(paramNamePurpose, r.FormValue(paramNamePurpose))
 			http.Redirect(w, r, r.URL.Path+"?"+params.Encode(), http.StatusFound)
+			Logger.Info("POST: ", join(params))
 			return
 		}
 		return
@@ -118,6 +139,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			params.Add(paramNameFio, r.FormValue(paramNameFio))
 			params.Add(paramNameNumber, r.FormValue(paramNameNumber))
 			http.Redirect(w, r, r.URL.Path+"?"+params.Encode(), http.StatusFound)
+			Logger.Info("POST: ", join(params))
 			return
 		}
 		return
@@ -137,7 +159,23 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	s.staticHandler.ServeHTTP(w, r)
 }
 
-func (s *webSrv) calculate(query url.Values) (string, string) {
+func join(p url.Values) string {
+	kvkv := make([]string, 0, 20)
+	for k, vv := range p {
+		if len(vv) == 0 {
+			kvkv = append(kvkv, k+"=")
+		} else if len(vv) == 1 {
+			kvkv = append(kvkv, k+"="+vv[0])
+		} else {
+			for _, v := range vv {
+				kvkv = append(kvkv, k+"="+v)
+			}
+		}
+	}
+	return strings.Join(kvkv, ",")
+}
+
+func (s *webSrv) calculate(query url.Values) (sum string, purpose string) {
 	year, err := strconv.Atoi(query.Get(paramNameYear))
 	if err != nil || year > 2050 || year < 2022 {
 		year = 0
@@ -176,22 +214,39 @@ func (s *webSrv) calculate(query url.Values) (string, string) {
 	fio := query.Get(paramNameFio)
 	number := query.Get(paramNameNumber)
 
-	sum := debt + float64(curr-prev)*5*1.09
-	var purpose string
-	if debt != 0 {
-		purpose = fmt.Sprintf("За %d %d %s участок %s %f + (%d - %d)x5x1.09 = %f",
-			month, year, fio, number, debt, curr, prev, sum)
-	} else {
-		purpose = fmt.Sprintf("За %d %d %s участок %s (%d - %d)x5x1.09 = %f",
-			month, year, fio, number, curr, prev, sum)
-
+	price, err := strconv.ParseFloat(s.price, 64)
+	if err != nil {
+		price = 0
+		Logger.Error("error parsing price %s %v", s.price, err)
 	}
-
-	return fmt.Sprintf("%f8.2", sum), purpose
+	coef, err := strconv.ParseFloat(s.coef, 64)
+	if err != nil {
+		coef = 0
+		Logger.Error("error parsing coef %s %v", s.coef, err)
+	}
+	sum = fmt.Sprintf("%.2f", debt+float64(curr-prev)*price*coef)
+	mnt := []string{"янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"}[month-1]
+	if debt != 0 {
+		purpose = fmt.Sprintf("За эл-энергию, %s %d, %s участок %s, %.2f + (%d - %d)x%sx%s = %s",
+			mnt, year, fio, number, debt, curr, prev, s.price, s.coef, sum)
+	} else {
+		purpose = fmt.Sprintf("За эл-энергию, %s %d, %s участок %s, (%d - %d)x%sx%s = %s",
+			mnt, year, fio, number, curr, prev, s.price, s.coef, sum)
+	}
+	return sum, purpose
 }
 
 func (s *webSrv) writeImage(w http.ResponseWriter, sum string, purpose string) {
-	imgBytes, err := qrcode.Encode(fmt.Sprintf("QRCodeTemplate", purpose, sum), qrcode.Medium, 256)
+	qr := QRHeader
+	for k, v := range s.QRElements {
+		qr += "|" + k + "=" + v
+	}
+	qr += "|" + QRNamePurpose + "=" + purpose
+	{
+		summa, _ := strconv.ParseFloat(sum, 64)
+		qr += "|" + QRNameSum + "=" + fmt.Sprintf("%.0f", summa*100)
+	}
+	imgBytes, err := qrcode.Encode(qr, qrcode.Medium, 256)
 	if err != nil {
 		Logger.Errorf("error encoding qr code: %v", err)
 		http.Error(w, fmt.Sprintf("500 error encoding qr code: %v", err), http.StatusInternalServerError)
@@ -249,7 +304,11 @@ func (s *webSrv) servePayTemplate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(500), 500)
 	} else {
 		html := w2.buf.String()
-		Logger.Debugf("HTML: %s", html)
+		for _, l := range strings.Split(html, "\n") {
+			if strings.Contains(l, ".jpeg") {
+				Logger.Debug(l)
+			}
+		}
 	}
 }
 
@@ -304,26 +363,35 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 	params.Add(paramNameDebt, debt)
 	params.Add(paramNameFio, fio)
 	params.Add(paramNameNumber, number)
-
 	urlLine := fmt.Sprintf(`<p><img src="/images/qre.jpg?%s" alt="Not so big"></p>`, params.Encode())
-	tdata := tmplData{
+	tdata := &tmplData{
 		Form:  template.HTML(formHtml),
 		QRImg: template.HTML(urlLine),
 	}
+	sum, purpose := s.calculate(query)
+	if len(sum) != 0 || len(purpose) != 0 {
+		tdata.FormFooter = template.HTML(fmt.Sprintf("Назначение платежа: <em>%s</em><br>Сумма: <em>%s</em><br>", purpose, sum))
+	}
 	w2 := newWriterInterceptor(w)
-	err = tmpl.Execute(w2, &tdata)
+	err = tmpl.Execute(w2, tdata)
 	if err != nil {
 		log.Print(err.Error())
 		http.Error(w, http.StatusText(500), 500)
 	} else {
 		html := w2.buf.String()
-		Logger.Debugf("HTML: %s", html)
+		for _, l := range strings.Split(html, "\n") {
+			//if strings.Contains(l, "<img ") || strings.Contains(l, "<img>") {
+			if strings.Contains(l, qrPath) || strings.Contains(l, qrePath) {
+				Logger.Debug(l)
+			}
+		}
 	}
 }
 
 type tmplData struct {
-	Form  template.HTML
-	QRImg template.HTML
+	Form       template.HTML
+	FormFooter template.HTML
+	QRImg      template.HTML
 }
 
 func newWriterInterceptor(w io.Writer) *writerInterceptor {

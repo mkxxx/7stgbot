@@ -1,9 +1,11 @@
 package tgsrv
 
 import (
+	"fmt"
 	"github.com/gocarina/gocsv"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 func LoadElectrForMonth(dir string, year, month int) map[string]*ElectrEvidence {
@@ -40,4 +42,19 @@ type ElectrEvidence struct {
 	PrevDebt        string `csv:"prev_debt"`
 	CurrDebt        string `csv:"curr_debt"`
 	NotUsed         string `csv:"-"`
+}
+
+func (e *ElectrEvidence) prepaidMinusDebt() string {
+	prepaid, err := strconv.ParseFloat(e.Prepaid, 64)
+	if err != nil {
+		prepaid = 0
+	}
+	debt, err := strconv.ParseFloat(e.PrevDebt, 64)
+	if err != nil {
+		debt = 0
+	}
+	if debt-prepaid == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%.2f", debt-prepaid)
 }

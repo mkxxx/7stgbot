@@ -244,17 +244,27 @@ func (s *webSrv) calculate(yyyy string, mm string, number string, prevStr string
 		coef = 0
 		Logger.Error("error parsing coef %s %v", s.coef, err)
 	}
-
 	coefMult := 1 + 0.01*coef
 	sum = fmt.Sprintf("%.2f", debt+(curr-prev)*price*coefMult)
 	mnt := []string{"янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"}[month-1]
+
+	debtText := ""
 	if debt != 0 {
-		purpose = fmt.Sprintf("За эл-энергию, %s %d, %s участок %s, %.2f + (%.2f - %.2f)x%sx%.4f = %s",
-			mnt, year, fio, number, debt, curr, prev, s.price, coefMult, sum)
-	} else {
-		purpose = fmt.Sprintf("За эл-энергию, %s %d, %s участок %s, (%.2f - %.2f)x%sx%.4f = %s",
-			mnt, year, fio, number, curr, prev, s.price, coefMult, sum)
+		debtText = fmt.Sprintf("%.2f + ", debt)
 	}
+	replacer := strings.NewReplacer(
+		"{mnt}", mnt,
+		"{year}", strconv.Itoa(year),
+		"{fio}", fio,
+		"{number}", number,
+		"{debt}", debtText,
+		"{curr}", fmt.Sprintf("%.2f", curr),
+		"{prev}", fmt.Sprintf("%.2f", prev),
+		"{price}", s.price,
+		"{coef}", fmt.Sprintf("%.4f", coefMult),
+		"{sum}", sum)
+
+	purpose = replacer.Replace("За эл-энергию, {mnt} {year}, {fio} участок {number}, {debt}({curr} - {prev})x{price}x{coef} = {sum}")
 	return sum, purpose
 }
 
@@ -384,7 +394,7 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 				curr = ev.CurrEvidence
 			}
 			if len(debt) == 0 {
-				debt = ev.PrevDebt
+				debt = ev.prepaidMinusDebt()
 			}
 		}
 	}

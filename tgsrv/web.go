@@ -25,7 +25,10 @@ const (
 	paramNameDebt       = "debt"
 	paramNameFio        = "fio"
 	paramNameNumber     = "n"
+	paramNamePrevNumber = "prevn"
 	paramNamePurpose    = "purpose"
+	paramNamePrice      = "price"
+	paramNameCoef       = "coef"
 	qrPath              = "/images/qr.jpg"
 	qrePath             = "/images/qre.jpg"
 	payPath             = "/docs/оплата/"
@@ -130,14 +133,26 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, fmt.Sprintf("500 error %v", err), http.StatusInternalServerError)
 				return
 			}
+			number := r.FormValue(paramNameNumber)
+			prevNumber := r.FormValue(paramNamePrevNumber)
+			prev := r.FormValue(paramNamePrevElectr)
+			curr := r.FormValue(paramNameCurrElectr)
+			debt := r.FormValue(paramNameDebt)
+			if len(number) != 0 && len(prevNumber) != 0 && number != prevNumber {
+				prev = ""
+				curr = ""
+				debt = ""
+			}
 			params := url.Values{}
 			params.Add(paramNameYear, r.FormValue(paramNameYear))
 			params.Add(paramNameMonth, r.FormValue(paramNameMonth))
-			params.Add(paramNamePrevElectr, r.FormValue(paramNamePrevElectr))
-			params.Add(paramNameCurrElectr, r.FormValue(paramNameCurrElectr))
-			params.Add(paramNameDebt, r.FormValue(paramNameDebt))
+			params.Add(paramNameNumber, number)
+			params.Add(paramNamePrevElectr, prev)
+			params.Add(paramNameCurrElectr, curr)
+			params.Add(paramNameDebt, debt)
 			params.Add(paramNameFio, r.FormValue(paramNameFio))
-			params.Add(paramNameNumber, r.FormValue(paramNameNumber))
+			params.Add(paramNamePrice, r.FormValue(paramNamePrice))
+			params.Add(paramNameCoef, r.FormValue(paramNameCoef))
 			http.Redirect(w, r, r.URL.Path+"?"+params.Encode(), http.StatusFound)
 			Logger.Info("POST: ", join(params))
 			return
@@ -152,7 +167,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == qrePath {
 		query := r.URL.Query()
-		sum, purpose := s.calculate(query)
+		sum, purpose := s.calculate(query.Get(paramNameYear), query.Get(paramNameMonth), query.Get(paramNameNumber), query.Get(paramNamePrevElectr), query.Get(paramNameCurrElectr), query.Get(paramNameDebt), query.Get(paramNamePrice), query.Get(paramNameCoef), query.Get(paramNameFio))
 		s.writeImage(w, sum, purpose)
 		return
 	}
@@ -175,12 +190,14 @@ func join(p url.Values) string {
 	return strings.Join(kvkv, ",")
 }
 
-func (s *webSrv) calculate(query url.Values) (sum string, purpose string) {
-	year, err := strconv.Atoi(query.Get(paramNameYear))
+func (s *webSrv) calculate(yyyy string, mm string, number string, prevStr string, currStr string, debtStr string,
+	priceStr string, coefStr string, fio string) (sum string, purpose string) {
+
+	year, err := strconv.Atoi(yyyy)
 	if err != nil || year > 2050 || year < 2022 {
 		year = 0
 	}
-	month, err := strconv.Atoi(query.Get(paramNameMonth))
+	month, err := strconv.Atoi(mm)
 	if err != nil || month > 12 || month < 1 {
 		month = 0
 	}
@@ -195,43 +212,48 @@ func (s *webSrv) calculate(query url.Values) (sum string, purpose string) {
 	if year == 0 || month == 0 {
 		return "", ""
 	}
-	prev, err := strconv.Atoi(query.Get(paramNamePrevElectr))
+	prev, err := strconv.ParseFloat(prevStr, 64)
 	if err != nil {
 		return "", ""
 	}
-	curr, err := strconv.Atoi(query.Get(paramNameCurrElectr))
+	curr, err := strconv.ParseFloat(currStr, 64)
 	if err != nil {
 		return "", ""
 	}
 	debt := 0.0
-	debtText := query.Get(paramNameDebt)
-	if len(debtText) > 0 {
-		debt, err = strconv.ParseFloat(debtText, 64)
+	if len(debtStr) > 0 {
+		debt, err = strconv.ParseFloat(debtStr, 64)
 		if err != nil {
 			return "", ""
 		}
 	}
-	fio := query.Get(paramNameFio)
-	number := query.Get(paramNameNumber)
-
-	price, err := strconv.ParseFloat(s.price, 64)
+	if len(priceStr) == 0 {
+		priceStr = s.price
+	}
+	price, err := strconv.ParseFloat(priceStr, 64)
 	if err != nil {
 		price = 0
 		Logger.Error("error parsing price %s %v", s.price, err)
 	}
-	coef, err := strconv.ParseFloat(s.coef, 64)
+
+	if len(coefStr) == 0 {
+		coefStr = s.coef
+	}
+	coef, err := strconv.ParseFloat(coefStr, 64)
 	if err != nil {
 		coef = 0
 		Logger.Error("error parsing coef %s %v", s.coef, err)
 	}
-	sum = fmt.Sprintf("%.2f", debt+float64(curr-prev)*price*coef)
+
+	coefMult := 1 + 0.01*coef
+	sum = fmt.Sprintf("%.2f", debt+(curr-prev)*price*coefMult)
 	mnt := []string{"янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"}[month-1]
 	if debt != 0 {
-		purpose = fmt.Sprintf("За эл-энергию, %s %d, %s участок %s, %.2f + (%d - %d)x%sx%s = %s",
-			mnt, year, fio, number, debt, curr, prev, s.price, s.coef, sum)
+		purpose = fmt.Sprintf("За эл-энергию, %s %d, %s участок %s, %.2f + (%.2f - %.2f)x%sx%.4f = %s",
+			mnt, year, fio, number, debt, curr, prev, s.price, coefMult, sum)
 	} else {
-		purpose = fmt.Sprintf("За эл-энергию, %s %d, %s участок %s, (%d - %d)x%sx%s = %s",
-			mnt, year, fio, number, curr, prev, s.price, s.coef, sum)
+		purpose = fmt.Sprintf("За эл-энергию, %s %d, %s участок %s, (%.2f - %.2f)x%sx%.4f = %s",
+			mnt, year, fio, number, curr, prev, s.price, coefMult, sum)
 	}
 	return sum, purpose
 }
@@ -337,38 +359,69 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 	query := r.URL.Query()
 	year := query.Get(paramNameYear)
 	month := query.Get(paramNameMonth)
+	number := query.Get(paramNameNumber)
 	prev := query.Get(paramNamePrevElectr)
 	curr := query.Get(paramNameCurrElectr)
 	debt := query.Get(paramNameDebt)
 	fio := query.Get(paramNameFio)
-	number := query.Get(paramNameNumber)
+	price := query.Get(paramNamePrice)
+	if len(price) == 0 {
+		price = s.price
+	}
+	coef := query.Get(paramNameCoef)
+	if len(coef) == 0 {
+		coef = s.coef
+	}
+	if len(year) != 0 && len(month) != 0 && len(number) != 0 && (len(prev) == 0 || len(curr) == 0 || len(debt) == 0) {
+		ev, err := s.loadFromFile(year, month, number)
+		if err != nil {
+			Logger.Error(err)
+		} else if ev != nil {
+			if len(prev) == 0 {
+				prev = ev.PrevEvidence
+			}
+			if len(curr) == 0 {
+				curr = ev.CurrEvidence
+			}
+			if len(debt) == 0 {
+				debt = ev.PrevDebt
+			}
+		}
+	}
 	formHtml := `<form action="/docs/оплата-эл/" method="post">
     Год:<input type="text" name="yyyy" size="4" value=%q>
     Месяц:<input type="text" name="mm" size="2" value=%q>
+    Номер участка:<input type="text" name="n" value=%q size="3">
+    <input type="hidden" name="prevn" value=%q>
     Предыдущее показание:<input type="text" name="prev" value=%q size="6">
     Текущее показание:<input type="text" name="curr" value=%q size="6">
     Долг:<input type="text" name="debt" value=%q size="8">
     ФИО:<input type="text" name="fio" value=%q size="15">
-    Номер участка:<input type="text" name="n" value=%q size="3">
+    Тариф:<input type="text" name="price" value=%q size="4">
+    Процент потерь:<input type="text" name="coef" value=%q size="5">
     <input type="submit" value="Ввод">
 </form>`
 
-	formHtml = fmt.Sprintf(formHtml, year, month, prev, curr, debt, fio, number)
+	formHtml = fmt.Sprintf(formHtml, year, month, number, number, prev, curr, debt, fio, price, coef)
 
 	params := url.Values{}
 	params.Add(paramNameYear, year)
 	params.Add(paramNameMonth, month)
+	params.Add(paramNameNumber, number)
 	params.Add(paramNamePrevElectr, prev)
 	params.Add(paramNameCurrElectr, curr)
 	params.Add(paramNameDebt, debt)
 	params.Add(paramNameFio, fio)
-	params.Add(paramNameNumber, number)
+	params.Add(paramNamePrice, price)
+	params.Add(paramNameCoef, coef)
 	urlLine := fmt.Sprintf(`<p><img src="/images/qre.jpg?%s" alt="Not so big"></p>`, params.Encode())
 	tdata := &tmplData{
 		Form:  template.HTML(formHtml),
 		QRImg: template.HTML(urlLine),
 	}
-	sum, purpose := s.calculate(query)
+
+	sum, purpose := s.calculate(year, month, month, prev, curr, debt, price, coef, fio)
+
 	if len(sum) != 0 || len(purpose) != 0 {
 		tdata.FormFooter = template.HTML(fmt.Sprintf("Назначение платежа: <em>%s</em><br>Сумма: <em>%s</em><br>", purpose, sum))
 	}
@@ -386,6 +439,19 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 	}
+}
+
+func (s *webSrv) loadFromFile(year string, month string, number string) (*ElectrEvidence, error) {
+	y, err := strconv.Atoi(year)
+	if err != nil {
+		return nil, err
+	}
+	m, err := strconv.Atoi(month)
+	if err != nil {
+		return nil, err
+	}
+	ev := LoadElectrForMonth(s.staticDir, y, m)[number]
+	return ev, nil
 }
 
 type tmplData struct {

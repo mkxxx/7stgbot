@@ -75,7 +75,6 @@ func main() {
 			}
 		}
 	}()
-
 	tgsrv.RunBot(cfg.TgToken, abort)
 }
 

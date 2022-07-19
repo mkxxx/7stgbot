@@ -116,6 +116,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			params := url.Values{}
 			params.Add(paramNameSum, r.FormValue(paramNameSum))
 			params.Add(paramNamePurpose, r.FormValue(paramNamePurpose))
+			params.Add(paramNameFio, r.FormValue(paramNameFio))
 			http.Redirect(w, r, r.URL.Path+"?"+params.Encode(), http.StatusFound)
 			Logger.Info("POST: ", join(params))
 			return
@@ -164,7 +165,9 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		s.writeImage(w,
 			query.Get(paramNameSum),
-			query.Get(paramNamePurpose))
+			query.Get(paramNamePurpose),
+			query.Get(paramNameFio),
+		)
 	}
 	if r.URL.Path == qrePath {
 		query := r.URL.Query()
@@ -179,7 +182,11 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			query.Get(paramNameCoef),
 			query.Get(paramNameFio),
 		)
-		s.writeImage(w, sum, purpose)
+		s.writeImage(w,
+			sum,
+			purpose,
+			query.Get(paramNameFio),
+		)
 		return
 	}
 	s.staticHandler.ServeHTTP(w, r)
@@ -279,12 +286,15 @@ func (s *webSrv) calculate(yyyy string, mm string, number string, prevStr string
 	return sum, purpose
 }
 
-func (s *webSrv) writeImage(w http.ResponseWriter, sum string, purpose string) {
+func (s *webSrv) writeImage(w http.ResponseWriter, sum, purpose, lastName string) {
 	qr := QRHeader
 	for k, v := range s.QRElements {
 		qr += "|" + k + "=" + v
 	}
 	qr += "|" + QRNamePurpose + "=" + purpose
+	if len(lastName) != 0 {
+		qr += "|" + QRNameLastName + "=" + lastName
+	}
 	{
 		summa, _ := strconv.ParseFloat(sum, 64)
 		qr += "|" + QRNameSum + "=" + fmt.Sprintf("%.0f", summa*100)
@@ -324,17 +334,27 @@ func (s *webSrv) servePayTemplate(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	sum := query.Get(paramNameSum)
 	purpose := query.Get(paramNamePurpose)
+	fio := query.Get(paramNameFio)
 	formHtml := `<form action="/docs/оплата/" method="post">
-    Сумма:<input type="text" name="sum" size="10" value=%q>
-    ФИО:<input type="text" name="" value=%q size="50">
-    Назначение перевода:<input type="text" name="purpose" value=%q size="50">
+    Сумма:<input type="text" name="{sum}" size="10" value="{sum_val}">
+    ФИО:<input type="text" name="{fio}" value="{fio_val}" size="50">
+    Назначение&nbsp;перевода:<input type="text" name="{purpose}" value="{purpose_val}" size="50">
     <input type="submit" value="Ввод">
 </form>`
-	formHtml = fmt.Sprintf(formHtml, sum, purpose)
+	replacer := strings.NewReplacer(
+		"{sum}", paramNameSum,
+		"{sum_val}", sum,
+		"{purpose}", paramNamePurpose,
+		"{purpose_val}", purpose,
+		"{fio}", paramNameFio,
+		"{fio_val}", fio,
+	)
+	formHtml = replacer.Replace(formHtml)
 
 	params := url.Values{}
 	params.Add(paramNameSum, sum)
 	params.Add(paramNamePurpose, purpose)
+	params.Add(paramNameFio, fio)
 
 	urlLine := fmt.Sprintf(`<p><img src="/images/qr.jpg?%s" alt="Not so big"></p>`, params.Encode())
 	tdata := tmplData{
@@ -413,14 +433,14 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 	formHtml := `<form action="/docs/оплата-эл/" method="post">
     Год:<input type="text" name="{yyyy}" size="4" value="{yyyy_val}">
     Месяц:<input type="text" name="{mm}" size="2" value="{mm_val}">
-    Номер участка:<input type="text" name="{n}" value="{n_val}" size="3">
+    Номер&nbsp;участка:<input type="text" name="{n}" value="{n_val}" size="3">
     <input type="hidden" name="{prevyyyymmnumber}" value="{prevyyyymmnumber_val}">
-    Предыдущее показание:<input type="text" name="{prev}" value="{prev_val}" size="6">
-    Текущее показание:<input type="text" name="{curr}" value="{curr_val}" size="6">
+    Предыдущее&nbsp;показание:<input type="text" name="{prev}" value="{prev_val}" size="6">
+    Текущее&nbsp;показание:<input type="text" name="{curr}" value="{curr_val}" size="6">
     Долг:<input type="text" name="{debt}" value="{debt_val}" size="8">
     ФИО:<input type="text" name="{fio}" value="{fio_val}" size="15">
     Тариф:<input type="text" name="{price}" value="{price_val}" size="4">
-    Процент потерь:<input type="text" name="{coef}" value="{coef_val}" size="5">
+    Процент&nbsp;потерь:<input type="text" name="{coef}" value="{coef_val}" size="5">
     <input type="submit" value="Ввод">
 </form>`
 

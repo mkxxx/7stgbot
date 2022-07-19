@@ -25,7 +25,7 @@ const (
 	paramNameDebt       = "debt"
 	paramNameFio        = "fio"
 	paramNameNumber     = "n"
-	paramNamePrevNumber = "prevn"
+	paramNamePrevKey    = "prevyyyymmnumber"
 	paramNamePurpose    = "purpose"
 	paramNamePrice      = "price"
 	paramNameCoef       = "coef"
@@ -45,6 +45,7 @@ const (
 	// optional
 	QRNamePurpose  = "Purpose"  // <= 210
 	QRNameSum      = "Sum"      // <= 18
+	QRNameLastName = "LastName" // <= 18
 	QRNamePayeeINN = "PayeeINN" // <= 12
 )
 
@@ -134,11 +135,11 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			number := r.FormValue(paramNameNumber)
-			prevNumber := r.FormValue(paramNamePrevNumber)
+			prevKey := r.FormValue(paramNamePrevKey)
 			prev := r.FormValue(paramNamePrevElectr)
 			curr := r.FormValue(paramNameCurrElectr)
 			debt := r.FormValue(paramNameDebt)
-			if len(number) != 0 && len(prevNumber) != 0 && number != prevNumber {
+			if len(number) != 0 && len(prevKey) != 0 && number != prevKey {
 				prev = ""
 				curr = ""
 				debt = ""
@@ -167,7 +168,17 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == qrePath {
 		query := r.URL.Query()
-		sum, purpose := s.calculate(query.Get(paramNameYear), query.Get(paramNameMonth), query.Get(paramNameNumber), query.Get(paramNamePrevElectr), query.Get(paramNameCurrElectr), query.Get(paramNameDebt), query.Get(paramNamePrice), query.Get(paramNameCoef), query.Get(paramNameFio))
+		sum, purpose := s.calculate(
+			query.Get(paramNameYear),
+			query.Get(paramNameMonth),
+			query.Get(paramNameNumber),
+			query.Get(paramNamePrevElectr),
+			query.Get(paramNameCurrElectr),
+			query.Get(paramNameDebt),
+			query.Get(paramNamePrice),
+			query.Get(paramNameCoef),
+			query.Get(paramNameFio),
+		)
 		s.writeImage(w, sum, purpose)
 		return
 	}
@@ -315,6 +326,7 @@ func (s *webSrv) servePayTemplate(w http.ResponseWriter, r *http.Request) {
 	purpose := query.Get(paramNamePurpose)
 	formHtml := `<form action="/docs/оплата/" method="post">
     Сумма:<input type="text" name="sum" size="10" value=%q>
+    ФИО:<input type="text" name="" value=%q size="50">
     Назначение перевода:<input type="text" name="purpose" value=%q size="50">
     <input type="submit" value="Ввод">
 </form>`
@@ -399,20 +411,42 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	formHtml := `<form action="/docs/оплата-эл/" method="post">
-    Год:<input type="text" name="yyyy" size="4" value=%q>
-    Месяц:<input type="text" name="mm" size="2" value=%q>
-    Номер участка:<input type="text" name="n" value=%q size="3">
-    <input type="hidden" name="prevn" value=%q>
-    Предыдущее показание:<input type="text" name="prev" value=%q size="6">
-    Текущее показание:<input type="text" name="curr" value=%q size="6">
-    Долг:<input type="text" name="debt" value=%q size="8">
-    ФИО:<input type="text" name="fio" value=%q size="15">
-    Тариф:<input type="text" name="price" value=%q size="4">
-    Процент потерь:<input type="text" name="coef" value=%q size="5">
+    Год:<input type="text" name="{yyyy}" size="4" value="{yyyy_val}">
+    Месяц:<input type="text" name="{mm}" size="2" value="{mm_val}">
+    Номер участка:<input type="text" name="{n}" value="{n_val}" size="3">
+    <input type="hidden" name="{prevyyyymmnumber}" value="{prevyyyymmnumber_val}">
+    Предыдущее показание:<input type="text" name="{prev}" value="{prev_val}" size="6">
+    Текущее показание:<input type="text" name="{curr}" value="{curr_val}" size="6">
+    Долг:<input type="text" name="{debt}" value="{debt_val}" size="8">
+    ФИО:<input type="text" name="{fio}" value="{fio_val}" size="15">
+    Тариф:<input type="text" name="{price}" value="{price_val}" size="4">
+    Процент потерь:<input type="text" name="{coef}" value="{coef_val}" size="5">
     <input type="submit" value="Ввод">
 </form>`
 
-	formHtml = fmt.Sprintf(formHtml, year, month, number, number, prev, curr, debt, fio, price, coef)
+	replacer := strings.NewReplacer(
+		"{yyyy}", paramNameYear,
+		"{yyyy_val}", year,
+		"{mm}", paramNameMonth,
+		"{mm_val}", month,
+		"{prev}", paramNamePrevElectr,
+		"{prev_val}", prev,
+		"{curr}", paramNameCurrElectr,
+		"{curr_val}", curr,
+		"{debt}", paramNameDebt,
+		"{debt_val}", debt,
+		"{fio}", paramNameFio,
+		"{fio_val}", fio,
+		"{n}", paramNameNumber,
+		"{n_val}", number,
+		"{prevyyyymmnumber}", paramNamePrevKey,
+		"{price}", paramNamePrice,
+		"{price_val}", price,
+		"{coef}", paramNameCoef,
+		"{coef_val}", coef,
+		"{prevyyyymmnumber_val}", fmt.Sprintf("%04s%02s", year, month),
+	)
+	formHtml = replacer.Replace(formHtml)
 
 	params := url.Values{}
 	params.Add(paramNameYear, year)
@@ -430,7 +464,7 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 		QRImg: template.HTML(urlLine),
 	}
 
-	sum, purpose := s.calculate(year, month, month, prev, curr, debt, price, coef, fio)
+	sum, purpose := s.calculate(year, month, number, prev, curr, debt, price, coef, fio)
 
 	if len(sum) != 0 || len(purpose) != 0 {
 		tdata.FormFooter = template.HTML(fmt.Sprintf("Назначение платежа: <em>%s</em><br>Сумма: <em>%s</em><br>", purpose, sum))

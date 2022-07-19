@@ -282,7 +282,7 @@ func (s *webSrv) calculate(yyyy string, mm string, number string, prevStr string
 		"{coef}", fmt.Sprintf("%.4f", coefMult),
 		"{sum}", sum)
 
-	purpose = replacer.Replace("За эл-энергию, {mnt} {year}, {fio} участок {number}, {debt}({curr} - {prev})x{price}x{coef} = {sum}")
+	purpose = replacer.Replace("За эл-энергию, {mnt} {year}, {fio} участок {number}, {debt}({curr} - {prev})x{price}x{coef} :: {sum}")
 	return sum, purpose
 }
 

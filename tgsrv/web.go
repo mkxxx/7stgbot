@@ -3,9 +3,11 @@ package tgsrv
 import (
 	"bytes"
 	"fmt"
+	"github.com/go-ping/ping"
 	"html/template"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -34,6 +36,7 @@ const (
 	payPath             = "/docs/оплата/"
 	payElectrPath       = "/docs/оплата-эл/"
 	contactsPath        = "/docs/contacts/"
+	internetPath        = "/docs/internet/"
 )
 const (
 	// required
@@ -49,6 +52,7 @@ const (
 	QRNameLastName = "LastName" // <= 18
 	QRNamePayeeINN = "PayeeINN" // <= 12
 )
+const PublicIp = "91.234.180.53"
 
 var Location *time.Location
 
@@ -191,10 +195,80 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/" || r.URL.Path == contactsPath {
-		s.serveTemplate(w, r)
+		type tdataType struct {
+			DivAlignRight template.HTML
+			DivEnd        template.HTML
+		}
+		tdata := &tdataType{
+			DivAlignRight: template.HTML(`<div style="text-align: right">`),
+			DivEnd:        template.HTML(`</div>`),
+		}
+		s.serveTemplate(w, r, tdata)
+		return
+	}
+	if r.URL.Path == internetPath {
+		type tdataType struct {
+			PingResult template.HTML
+		}
+		tdata := &tdataType{
+			PingResult: template.HTML(""),
+		}
+		query := r.URL.Query()
+		if !query.Has("ping") {
+			s.serveTemplate(w, r, tdata)
+			return
+		}
+		var buf bytes.Buffer
+		pingIp(&buf)
+		tdata.PingResult = template.HTML(buf.String())
+		s.serveTemplate(w, r, tdata)
 		return
 	}
 	s.staticHandler.ServeHTTP(w, r)
+}
+
+func pingIp(w io.Writer) {
+	pinger, err := ping.NewPinger(PublicIp)
+	if err != nil {
+		Logger.Errorf("could not create pinger 91.234.180.53")
+		return
+	}
+	go func() {
+		timer := time.NewTimer(time.Second * 5)
+		<-timer.C
+		pinger.Stop()
+	}()
+	pinger.OnRecv = func(pkt *ping.Packet) {
+		_, _ = fmt.Fprintf(w, "%d bytes from %s: icmp_seq=%d time=%v\n",
+			pkt.Nbytes, coverupIPAddr(pkt.IPAddr), pkt.Seq, pkt.Rtt)
+	}
+	pinger.OnDuplicateRecv = func(pkt *ping.Packet) {
+		_, _ = fmt.Fprintf(w, "%d bytes from %s: icmp_seq=%d time=%v ttl=%v (DUP!)\n",
+			pkt.Nbytes, coverupIPAddr(pkt.IPAddr), pkt.Seq, pkt.Rtt, pkt.Ttl)
+	}
+	pinger.OnFinish = func(stats *ping.Statistics) {
+		_, _ = fmt.Fprintf(w, "\n--- %s ping statistics ---\n", stats.Addr)
+		_, _ = fmt.Fprintf(w, "%d packets transmitted, %d packets received, %v%% packet loss\n",
+			stats.PacketsSent, stats.PacketsRecv, stats.PacketLoss)
+		_, _ = fmt.Fprintf(w, "round-trip min/avg/max/stddev = %v/%v/%v/%v\n",
+			stats.MinRtt, stats.AvgRtt, stats.MaxRtt, stats.StdDevRtt)
+	}
+	_, _ = fmt.Fprintf(w, "PING %s (%s):\n",
+		coverupIPString(pinger.Addr()),
+		coverupIPAddr(pinger.IPAddr()))
+
+	err = pinger.Run()
+	if err != nil {
+		Logger.Errorf("could not create pinger 91.234.180.53")
+	}
+}
+
+func coverupIPAddr(addr *net.IPAddr) string {
+	return coverupIPString(addr.String())
+}
+
+func coverupIPString(addr string) string {
+	return addr[:strings.LastIndex(addr, ".")+1] + "*"
 }
 
 func join(p url.Values) string {
@@ -510,21 +584,13 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (s *webSrv) serveTemplate(w http.ResponseWriter, r *http.Request) {
+func (s *webSrv) serveTemplate(w http.ResponseWriter, r *http.Request, tdata any) {
 	fp := filepath.Join(s.staticDir, filepath.Clean(r.URL.Path), "index.html")
 	tmpl, err := template.ParseFiles(fp)
 	if err != nil {
 		Logger.Error(err)
 		http.Error(w, http.StatusText(500), 500)
 		return
-	}
-	type html struct {
-		DivAlignRight template.HTML
-		DivEnd        template.HTML
-	}
-	tdata := &html{
-		DivAlignRight: template.HTML(`<div style="text-align: right">`),
-		DivEnd:        template.HTML(`</div>`),
 	}
 	w2 := newWriterInterceptor(w)
 	err = tmpl.Execute(w2, tdata)

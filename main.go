@@ -2,7 +2,6 @@ package main
 
 import (
 	"7stgbot/tgsrv"
-	"context"
 	"flag"
 	"log"
 	"os"
@@ -53,14 +52,6 @@ func main() {
 
 	log.SetOutput(w)
 
-	var cfg Config
-	if _, err := toml.DecodeFile(cfgPath, &cfg); err != nil {
-		logger.Errorf("error parsing toml config by path %q: %v", cfgPath, err)
-		flag.PrintDefaults()
-		return
-	}
-	srv := tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfg.QR, cfg.Price, cfg.Coef)
-
 	abort := make(chan struct{})
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt)
@@ -69,12 +60,21 @@ func main() {
 			logger.Infof("got OS signal %s", sig)
 			if sig == os.Interrupt {
 				logger.Info("Exiting...")
-				srv.Shutdown(context.Background())
 				close(abort)
 				break
 			}
 		}
 	}()
+
+	var cfg Config
+	if _, err := toml.DecodeFile(cfgPath, &cfg); err != nil {
+		logger.Errorf("error parsing toml config by path %q: %v", cfgPath, err)
+		flag.PrintDefaults()
+		return
+	}
+	pinger := tgsrv.StartPinger(abort)
+	tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger)
+
 	tgsrv.RunBot(cfg.TgToken, abort)
 }
 

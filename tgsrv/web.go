@@ -2,12 +2,12 @@ package tgsrv
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"github.com/go-ping/ping"
 	"html/template"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -52,7 +52,6 @@ const (
 	QRNameLastName = "LastName" // <= 18
 	QRNamePayeeINN = "PayeeINN" // <= 12
 )
-const PublicIp = "91.234.180.53"
 
 var Location *time.Location
 
@@ -64,18 +63,29 @@ func init() {
 	}
 }
 
-func StartWebServer(port int, staticDir string, QRElements map[string]string, price, coef string) *http.Server {
-	webServer := newWebServer(port, staticDir, QRElements, price, coef)
+func StartWebServer(port int, staticDir string, QRElements map[string]string, price, coef string,
+	abort chan struct{}, pinger *pingMonitor) *http.Server {
+
+	webServer := newWebServer(port, staticDir, QRElements, price, coef, pinger)
 	webServer.start(port)
-	return webServer.httpServer
+	srv := webServer.httpServer
+	go func() {
+		<-abort
+		srv.Shutdown(context.Background())
+	}()
+	return srv
 }
 
-func newWebServer(port int, staticDir string, QRElements map[string]string, price, coef string) *webSrv {
+func newWebServer(port int, staticDir string, QRElements map[string]string, price, coef string,
+	pinger *pingMonitor) *webSrv {
+
 	ws := new(webSrv)
 	ws.price = price
 	ws.coef = coef
 	ws.QRElements = QRElements
 	ws.staticDir = staticDir
+	ws.pinger = pinger
+
 	fs := http.FileServer(http.Dir(staticDir))
 	//ws.staticHandler = http.StripPrefix("/static/", fs)
 	ws.staticHandler = fs
@@ -92,6 +102,7 @@ type webSrv struct {
 	staticDir     string
 	staticHandler http.Handler
 	httpServer    *http.Server
+	pinger        *pingMonitor
 }
 
 func (s *webSrv) start(port int) {
@@ -208,18 +219,21 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == internetPath {
 		type tdataType struct {
-			PingResult template.HTML
+			PingResult     template.HTML
+			OnlineRecently int
+			Reached        int
 		}
 		tdata := &tdataType{
 			PingResult: template.HTML(""),
 		}
+		tdata.OnlineRecently, tdata.Reached = s.pinger.onlineCount()
 		query := r.URL.Query()
 		if !query.Has("ping") {
 			s.serveTemplate(w, r, tdata)
 			return
 		}
 		var buf bytes.Buffer
-		pingIp(&buf)
+		pingIp(&buf, s.pinger.bestIP())
 		tdata.PingResult = template.HTML(buf.String())
 		s.serveTemplate(w, r, tdata)
 		return
@@ -227,8 +241,8 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	s.staticHandler.ServeHTTP(w, r)
 }
 
-func pingIp(w io.Writer) {
-	pinger, err := ping.NewPinger(PublicIp)
+func pingIp(w io.Writer, ip string) {
+	pinger, err := ping.NewPinger(ip)
 	if err != nil {
 		Logger.Errorf("could not create pinger 91.234.180.53")
 		return
@@ -240,11 +254,11 @@ func pingIp(w io.Writer) {
 	}()
 	pinger.OnRecv = func(pkt *ping.Packet) {
 		_, _ = fmt.Fprintf(w, "%d bytes from %s: icmp_seq=%d time=%v\n",
-			pkt.Nbytes, coverupIPAddr(pkt.IPAddr), pkt.Seq, pkt.Rtt)
+			pkt.Nbytes, pkt.IPAddr, pkt.Seq, pkt.Rtt)
 	}
 	pinger.OnDuplicateRecv = func(pkt *ping.Packet) {
 		_, _ = fmt.Fprintf(w, "%d bytes from %s: icmp_seq=%d time=%v ttl=%v (DUP!)\n",
-			pkt.Nbytes, coverupIPAddr(pkt.IPAddr), pkt.Seq, pkt.Rtt, pkt.Ttl)
+			pkt.Nbytes, pkt.IPAddr, pkt.Seq, pkt.Rtt, pkt.Ttl)
 	}
 	pinger.OnFinish = func(stats *ping.Statistics) {
 		_, _ = fmt.Fprintf(w, "\n--- %s ping statistics ---\n", stats.Addr)
@@ -254,21 +268,12 @@ func pingIp(w io.Writer) {
 			stats.MinRtt, stats.AvgRtt, stats.MaxRtt, stats.StdDevRtt)
 	}
 	_, _ = fmt.Fprintf(w, "PING %s (%s):\n",
-		coverupIPString(pinger.Addr()),
-		coverupIPAddr(pinger.IPAddr()))
+		pinger.Addr(), pinger.IPAddr())
 
 	err = pinger.Run()
 	if err != nil {
 		Logger.Errorf("could not create pinger 91.234.180.53")
 	}
-}
-
-func coverupIPAddr(addr *net.IPAddr) string {
-	return coverupIPString(addr.String())
-}
-
-func coverupIPString(addr string) string {
-	return addr[:strings.LastIndex(addr, ".")+1] + "*"
 }
 
 func join(p url.Values) string {

@@ -33,6 +33,7 @@ const (
 	qrePath             = "/images/qre.jpg"
 	payPath             = "/docs/оплата/"
 	payElectrPath       = "/docs/оплата-эл/"
+	contactsPath        = "/docs/contacts/"
 )
 const (
 	// required
@@ -187,6 +188,10 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			purpose,
 			query.Get(paramNameFio),
 		)
+		return
+	}
+	if r.URL.Path == "/" || r.URL.Path == contactsPath {
+		s.serveTemplate(w, r)
 		return
 	}
 	s.staticHandler.ServeHTTP(w, r)
@@ -502,6 +507,30 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 				Logger.Debug(l)
 			}
 		}
+	}
+}
+
+func (s *webSrv) serveTemplate(w http.ResponseWriter, r *http.Request) {
+	fp := filepath.Join(s.staticDir, filepath.Clean(r.URL.Path), "index.html")
+	tmpl, err := template.ParseFiles(fp)
+	if err != nil {
+		Logger.Error(err)
+		http.Error(w, http.StatusText(500), 500)
+		return
+	}
+	type html struct {
+		DivAlignRight template.HTML
+		DivEnd        template.HTML
+	}
+	tdata := &html{
+		DivAlignRight: template.HTML(`<div style="text-align: right">`),
+		DivEnd:        template.HTML(`</div>`),
+	}
+	w2 := newWriterInterceptor(w)
+	err = tmpl.Execute(w2, tdata)
+	if err != nil {
+		log.Print(err.Error())
+		http.Error(w, http.StatusText(500), 500)
 	}
 }
 

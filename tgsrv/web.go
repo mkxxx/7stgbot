@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/go-ping/ping"
 	"html/template"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -235,6 +235,13 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		var buf bytes.Buffer
 		pingIp(&buf, s.pinger.bestIP())
 		tdata.PingResult = template.HTML(buf.String())
+		if query.Get("ping") == "2" {
+			tdata.PingResult += "\n\n"
+			ips := s.pinger.IPs()
+			for _, ip := range ips {
+				tdata.PingResult += template.HTML(ip + "\n")
+			}
+		}
 		s.serveTemplate(w, r, tdata)
 		return
 	}
@@ -242,38 +249,40 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func pingIp(w io.Writer, ip string) {
-	pinger, err := ping.NewPinger(ip)
-	if err != nil {
-		Logger.Errorf("could not create pinger 91.234.180.53")
-		return
-	}
-	go func() {
-		timer := time.NewTimer(time.Second * 5)
-		<-timer.C
-		pinger.Stop()
-	}()
-	pinger.OnRecv = func(pkt *ping.Packet) {
-		_, _ = fmt.Fprintf(w, "%d bytes from %s: icmp_seq=%d time=%v\n",
-			pkt.Nbytes, pkt.IPAddr, pkt.Seq, pkt.Rtt)
-	}
-	pinger.OnDuplicateRecv = func(pkt *ping.Packet) {
-		_, _ = fmt.Fprintf(w, "%d bytes from %s: icmp_seq=%d time=%v ttl=%v (DUP!)\n",
-			pkt.Nbytes, pkt.IPAddr, pkt.Seq, pkt.Rtt, pkt.Ttl)
-	}
-	pinger.OnFinish = func(stats *ping.Statistics) {
-		_, _ = fmt.Fprintf(w, "\n--- %s ping statistics ---\n", stats.Addr)
-		_, _ = fmt.Fprintf(w, "%d packets transmitted, %d packets received, %v%% packet loss\n",
-			stats.PacketsSent, stats.PacketsRecv, stats.PacketLoss)
-		_, _ = fmt.Fprintf(w, "round-trip min/avg/max/stddev = %v/%v/%v/%v\n",
-			stats.MinRtt, stats.AvgRtt, stats.MaxRtt, stats.StdDevRtt)
-	}
-	_, _ = fmt.Fprintf(w, "PING %s (%s):\n",
-		pinger.Addr(), pinger.IPAddr())
+	out, _ := exec.Command("ping", ip, "-c", "3", "-w", "5").CombinedOutput()
+	fmt.Fprintf(w, string(out))
+	/*	pinger, err := ping.NewPinger(ip)
+		if err != nil {
+			Logger.Errorf("could not create pinger 91.234.180.53")
+			return
+		}
+		go func() {
+			timer := time.NewTimer(time.Second * 5)
+			<-timer.C
+			pinger.Stop()
+		}()
+		pinger.OnRecv = func(pkt *ping.Packet) {
+			_, _ = fmt.Fprintf(w, "%d bytes from %s: icmp_seq=%d time=%v\n",
+				pkt.Nbytes, pkt.IPAddr, pkt.Seq, pkt.Rtt)
+		}
+		pinger.OnDuplicateRecv = func(pkt *ping.Packet) {
+			_, _ = fmt.Fprintf(w, "%d bytes from %s: icmp_seq=%d time=%v ttl=%v (DUP!)\n",
+				pkt.Nbytes, pkt.IPAddr, pkt.Seq, pkt.Rtt, pkt.Ttl)
+		}
+		pinger.OnFinish = func(stats *ping.Statistics) {
+			_, _ = fmt.Fprintf(w, "\n--- %s ping statistics ---\n", stats.Addr)
+			_, _ = fmt.Fprintf(w, "%d packets transmitted, %d packets received, %v%% packet loss\n",
+				stats.PacketsSent, stats.PacketsRecv, stats.PacketLoss)
+			_, _ = fmt.Fprintf(w, "round-trip min/avg/max/stddev = %v/%v/%v/%v\n",
+				stats.MinRtt, stats.AvgRtt, stats.MaxRtt, stats.StdDevRtt)
+		}
+		_, _ = fmt.Fprintf(w, "PING %s (%s):\n",
+			pinger.Addr(), pinger.IPAddr())
 
-	err = pinger.Run()
-	if err != nil {
-		Logger.Errorf("could not create pinger 91.234.180.53")
-	}
+		err = pinger.Run()
+		if err != nil {
+			Logger.Errorf("could not create pinger 91.234.180.53")
+		}*/
 }
 
 func join(p url.Values) string {

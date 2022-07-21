@@ -1,8 +1,9 @@
 package tgsrv
 
 import (
-	"github.com/go-ping/ping"
+	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -41,61 +42,79 @@ type pingTime struct {
 }
 
 func (m *pingMonitor) run(abort chan struct{}) {
-Loop:
+	//Loop:
 	for {
 		for i := 2; i < 255; i++ {
-			select {
-			case <-abort:
-				break Loop
-			default:
-			}
-			addr := PublicIpNet + strconv.Itoa(i)
 			/*
-				out, err := exec.Command("ping", addr, "-c", "3", "-w", "5").CombinedOutput()
-				if err != nil {
-					Logger.Errorf("ping -c 3 -w 5 %s: %v", addr, err)
-					time.Sleep(time.Second)
+				select {
+				case _, ok := <-abort:
+					if !ok {
+						break Loop
+					}
+				default:
+				}
+
+			*/
+			addr := PublicIpNet + strconv.Itoa(i)
+
+			out, err := exec.Command("ping", addr, "-c", "3", "-w", "5").CombinedOutput()
+			if err != nil {
+				if strings.Contains(string(out), "100% packet loss") {
+					m.mu.Lock()
+					if !m.offline[addr] {
+						m.online[addr] = pingTime{time.Now(), false}
+					}
+					m.mu.Unlock()
 					continue
 				}
-				m.mu.Lock()
-				if !strings.Contains(string(out), "100% packet loss") {
-					delete(m.offline, addr)
-					m.online[addr] = pingTime{time.Now(), true}
-				} else if !m.offline[addr] {
-					m.online[addr] = pingTime{time.Now(), false}
-				}
-				m.mu.Unlock()
-			*/
-
-			pinger, err := ping.NewPinger(addr)
-			if err != nil {
-				Logger.Errorf("could not create pinger %s", addr)
-				time.Sleep(time.Millisecond * 500)
+				Logger.Errorf("ping -c 3 -w 5 %s: %v", addr, err)
+				time.Sleep(time.Second)
 				continue
 			}
-			go func() {
-				timer := time.NewTimer(time.Second * 2)
-				<-timer.C
-				pinger.Stop()
-			}()
-			pinger.OnRecv = func(pkt *ping.Packet) {
-				pinger.Stop()
+			m.mu.Lock()
+			if !strings.Contains(string(out), "100% packet loss") {
+				delete(m.offline, addr)
+				m.online[addr] = pingTime{time.Now(), true}
+			} else if !m.offline[addr] {
+				m.online[addr] = pingTime{time.Now(), false}
 			}
-			done := make(chan struct{})
-			pinger.OnFinish = func(stats *ping.Statistics) {
-				addr := stats.IPAddr.String()
-				m.mu.Lock()
-				if stats.PacketsRecv > 0 {
-					delete(m.offline, addr)
-					m.online[addr] = pingTime{time.Now(), true}
-				} else if !m.offline[addr] {
-					m.online[addr] = pingTime{time.Now(), false}
-				}
-				m.mu.Unlock()
-				close(done)
-			}
-			err = pinger.Run()
-			<-done
+			m.mu.Unlock()
+
+			/*			pinger, err := ping.NewPinger(addr)
+						if err != nil {
+							Logger.Errorf("could not create pinger %s", addr)
+							time.Sleep(time.Millisecond * 500)
+							continue
+						}
+						pinger.OnRecv = func(pkt *ping.Packet) {
+							pinger.Stop()
+						}
+						done := make(chan struct{})
+						pinger.OnFinish = func(stats *ping.Statistics) {
+							addr := stats.IPAddr.String()
+							m.mu.Lock()
+							if stats.PacketsRecv > 0 {
+								delete(m.offline, addr)
+								m.online[addr] = pingTime{time.Now(), true}
+							} else if !m.offline[addr] {
+								m.online[addr] = pingTime{time.Now(), false}
+							}
+							m.mu.Unlock()
+							close(done)
+						}
+						err = pinger.Run()
+						if err != nil {
+							Logger.Errorf("ping -c 3 -w 5 %s: %v", addr, err)
+							time.Sleep(time.Second)
+							continue
+						}
+						timer := time.NewTimer(time.Second * 2)
+						select {
+						case <-done:
+						//case <-abort:
+						case <-timer.C:
+							pinger.Stop()
+						}*/
 		}
 	}
 }
@@ -129,4 +148,14 @@ func (m *pingMonitor) bestIP() string {
 		return addr
 	}
 	return PublicIpNet + "1"
+}
+
+func (m *pingMonitor) IPs() []string {
+	var ips []string = make([]string, 0, len(m.online))
+	m.mu.Lock()
+	for k, _ := range m.online {
+		ips = append(ips, k)
+	}
+	m.mu.Unlock()
+	return ips
 }

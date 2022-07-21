@@ -36,9 +36,8 @@ type pingMonitor struct {
 }
 
 type pingTime struct {
-	t   time.Time
-	ok  bool
-	rtt time.Duration
+	t  time.Time
+	ok bool
 }
 
 func (m *pingMonitor) run(abort chan struct{}) {
@@ -51,6 +50,23 @@ Loop:
 			default:
 			}
 			addr := PublicIpNet + strconv.Itoa(i)
+			/*
+				out, err := exec.Command("ping", addr, "-c", "3", "-w", "5").CombinedOutput()
+				if err != nil {
+					Logger.Errorf("ping -c 3 -w 5 %s: %v", addr, err)
+					time.Sleep(time.Second)
+					continue
+				}
+				m.mu.Lock()
+				if !strings.Contains(string(out), "100% packet loss") {
+					delete(m.offline, addr)
+					m.online[addr] = pingTime{time.Now(), true}
+				} else if !m.offline[addr] {
+					m.online[addr] = pingTime{time.Now(), false}
+				}
+				m.mu.Unlock()
+			*/
+
 			pinger, err := ping.NewPinger(addr)
 			if err != nil {
 				Logger.Errorf("could not create pinger %s", addr)
@@ -70,9 +86,9 @@ Loop:
 				m.mu.Lock()
 				if stats.PacketsRecv > 0 {
 					delete(m.offline, addr)
-					m.online[addr] = pingTime{time.Now(), true, stats.AvgRtt}
+					m.online[addr] = pingTime{time.Now(), true}
 				} else if !m.offline[addr] {
-					m.online[addr] = pingTime{time.Now(), false, 0}
+					m.online[addr] = pingTime{time.Now(), false}
 				}
 				m.mu.Unlock()
 				close(done)

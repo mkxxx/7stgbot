@@ -70,6 +70,7 @@ Loop:
 			pinger, err := ping.NewPinger(addr)
 			if err != nil {
 				Logger.Errorf("could not create pinger %s", addr)
+				time.Sleep(time.Millisecond * 500)
 				continue
 			}
 			go func() {

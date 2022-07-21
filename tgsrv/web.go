@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -238,6 +239,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		if query.Get("ping") == "2" {
 			tdata.PingResult += "\n\n"
 			ips := s.pinger.IPs()
+			sort.Strings(ips)
 			for _, ip := range ips {
 				tdata.PingResult += template.HTML(ip + "\n")
 			}

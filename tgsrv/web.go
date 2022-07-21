@@ -239,7 +239,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		if query.Get("ping") == "2" {
 			tdata.PingResult += "\n\n"
 			ips := s.pinger.IPs()
-			sort.Strings(ips)
+			sort.Sort(byIP(ips))
 			for _, ip := range ips {
 				tdata.PingResult += template.HTML(ip + "\n")
 			}
@@ -248,6 +248,16 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.staticHandler.ServeHTTP(w, r)
+}
+
+type byIP []string
+
+func (a byIP) Len() int      { return len(a) }
+func (a byIP) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+func (a byIP) Less(i, j int) bool {
+	x := "  " + a[i][strings.LastIndex(a[i], "."):]
+	y := "  " + a[j][strings.LastIndex(a[j], "."):]
+	return x[len(x)-3:] < y[len(y)-3:]
 }
 
 func pingIp(w io.Writer, ip string) {

@@ -233,8 +233,13 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			s.serveTemplate(w, r, tdata)
 			return
 		}
+		ip := s.pinger.bestIP(10)
+		if len(ip) == 0 {
+			s.serveTemplate(w, r, tdata)
+			return
+		}
 		var buf bytes.Buffer
-		pingIp(&buf, s.pinger.bestIP())
+		pingIp(&buf, ip)
 		tdata.PingResult = template.HTML(buf.String())
 		if query.Get("ping") == "2" {
 			tdata.PingResult += "\n\n"

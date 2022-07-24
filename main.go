@@ -72,17 +72,18 @@ func main() {
 		flag.PrintDefaults()
 		return
 	}
-	pinger := tgsrv.StartPinger(abort)
+	pinger := tgsrv.StartPinger(abort, cfg.DiscordAlertChannelURL)
 	tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger)
 
 	tgsrv.RunBot(cfg.TgToken, abort)
 }
 
 type Config struct {
-	Port      int
-	StaticDir string
-	TgToken   string
-	Price     string
-	Coef      string
-	QR        map[string]string
+	Port                   int
+	StaticDir              string
+	TgToken                string
+	Price                  string
+	Coef                   string
+	QR                     map[string]string
+	DiscordAlertChannelURL string
 }

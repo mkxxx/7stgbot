@@ -243,7 +243,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		tdata.PingResult = template.HTML(buf.String())
 		if query.Get("ping") == "2" {
 			tdata.PingResult += "\n\n"
-			ips := s.pinger.IPs()
+			ips := s.pinger.IPs(false)
 			sort.Sort(byIP(ips))
 			for _, ip := range ips {
 				tdata.PingResult += template.HTML(ip + "\n")

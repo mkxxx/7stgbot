@@ -59,6 +59,7 @@ type pingTime struct {
 
 func (m *pingMonitor) run(abort chan struct{}) {
 	//Loop:
+	t := time.Now()
 	for {
 		for i := 2; i < 255; i++ {
 			/*
@@ -71,42 +72,37 @@ func (m *pingMonitor) run(abort chan struct{}) {
 				}
 
 			*/
-			addr := PublicIpNet + strconv.Itoa(i)
-
-			var (
-				prevOnlineCnt = 0
-				onlineCnt     = -1
-			)
-			out, err := exec.Command("ping", addr, "-c", "3", "-w", "5").CombinedOutput()
-			if err != nil {
-				if strings.Contains(string(out), "100% packet loss") {
-					m.mu.Lock()
-					prevOnlineCnt = m.onlineCnt
-					if !m.offline[addr] {
-						wasOK := m.online[addr].ok
-						m.online[addr] = pingTime{time.Now(), false}
-						if wasOK {
-							m.onlineCnt--
-						}
+			now := time.Now()
+			// each minute check if some online ip went offline and recheck all online ips
+			// to report about network outage early
+			if now.Sub(t) >= time.Minute {
+				t = now
+				ok := m.ping(m.bestIP(1))
+				if !ok {
+					ips := m.IPs(true)
+					for _, ip := range ips {
+						m.ping(ip)
 					}
-					onlineCnt = m.onlineCnt
-					m.mu.Unlock()
-					continue
 				}
-				Logger.Errorf("ping -c 3 -w 5 %s: %v", addr, err)
-				time.Sleep(time.Second)
-				continue
 			}
+			addr := PublicIpNet + strconv.Itoa(i)
+			m.ping(addr)
+		}
+	}
+}
+
+func (m *pingMonitor) ping(addr string) bool {
+	var (
+		prevOnlineCnt = 0
+		onlineCnt     = -1
+	)
+	out, err := exec.Command("ping", addr, "-c", "3", "-w", "5").CombinedOutput()
+	ok := !strings.Contains(string(out), "100% packet loss")
+	if err != nil {
+		if !ok {
 			m.mu.Lock()
 			prevOnlineCnt = m.onlineCnt
-			if !strings.Contains(string(out), "100% packet loss") {
-				delete(m.offline, addr)
-				wasOK := m.online[addr].ok
-				m.online[addr] = pingTime{time.Now(), true}
-				if !wasOK {
-					m.onlineCnt++
-				}
-			} else if !m.offline[addr] {
+			if !m.offline[addr] {
 				wasOK := m.online[addr].ok
 				m.online[addr] = pingTime{time.Now(), false}
 				if wasOK {
@@ -115,46 +111,69 @@ func (m *pingMonitor) run(abort chan struct{}) {
 			}
 			onlineCnt = m.onlineCnt
 			m.mu.Unlock()
-			if onlineCnt != -1 && onlineCnt != prevOnlineCnt {
-				m.onlineChanged <- IntUpdate{prevOnlineCnt, onlineCnt}
-			}
-			/*			pinger, err := ping.NewPinger(addr)
-						if err != nil {
-							Logger.Errorf("could not create pinger %s", addr)
-							time.Sleep(time.Millisecond * 500)
-							continue
-						}
-						pinger.OnRecv = func(pkt *ping.Packet) {
-							pinger.Stop()
-						}
-						done := make(chan struct{})
-						pinger.OnFinish = func(stats *ping.Statistics) {
-							addr := stats.IPAddr.String()
-							m.mu.Lock()
-							if stats.PacketsRecv > 0 {
-								delete(m.offline, addr)
-								m.online[addr] = pingTime{time.Now(), true}
-							} else if !m.offline[addr] {
-								m.online[addr] = pingTime{time.Now(), false}
-							}
-							m.mu.Unlock()
-							close(done)
-						}
-						err = pinger.Run()
-						if err != nil {
-							Logger.Errorf("ping -c 3 -w 5 %s: %v", addr, err)
-							time.Sleep(time.Second)
-							continue
-						}
-						timer := time.NewTimer(time.Second * 2)
-						select {
-						case <-done:
-						//case <-abort:
-						case <-timer.C:
-							pinger.Stop()
-						}*/
+			return true
+		}
+		Logger.Errorf("ping -c 3 -w 5 %s: %v", addr, err)
+		time.Sleep(time.Second)
+		return true
+	}
+	m.mu.Lock()
+	prevOnlineCnt = m.onlineCnt
+	if ok {
+		delete(m.offline, addr)
+		wasOK := m.online[addr].ok
+		m.online[addr] = pingTime{time.Now(), true}
+		if !wasOK {
+			m.onlineCnt++
+		}
+	} else if !m.offline[addr] {
+		wasOK := m.online[addr].ok
+		m.online[addr] = pingTime{time.Now(), false}
+		if wasOK {
+			m.onlineCnt--
 		}
 	}
+	onlineCnt = m.onlineCnt
+	m.mu.Unlock()
+	if onlineCnt != -1 && onlineCnt != prevOnlineCnt {
+		m.onlineChanged <- IntUpdate{prevOnlineCnt, onlineCnt}
+	}
+	/*			pinger, err := ping.NewPinger(addr)
+				if err != nil {
+					Logger.Errorf("could not create pinger %s", addr)
+					time.Sleep(time.Millisecond * 500)
+					continue
+				}
+				pinger.OnRecv = func(pkt *ping.Packet) {
+					pinger.Stop()
+				}
+				done := make(chan struct{})
+				pinger.OnFinish = func(stats *ping.Statistics) {
+					addr := stats.IPAddr.String()
+					m.mu.Lock()
+					if stats.PacketsRecv > 0 {
+						delete(m.offline, addr)
+						m.online[addr] = pingTime{time.Now(), true}
+					} else if !m.offline[addr] {
+						m.online[addr] = pingTime{time.Now(), false}
+					}
+					m.mu.Unlock()
+					close(done)
+				}
+				err = pinger.Run()
+				if err != nil {
+					Logger.Errorf("ping -c 3 -w 5 %s: %v", addr, err)
+					time.Sleep(time.Second)
+					continue
+				}
+				timer := time.NewTimer(time.Second * 2)
+				select {
+				case <-done:
+				//case <-abort:
+				case <-timer.C:
+					pinger.Stop()
+				}*/
+	return ok
 }
 
 func (m *pingMonitor) onlineCount() (onlineRecently int, reached int) {
@@ -207,11 +226,13 @@ func (m *pingMonitor) bestIP(randomize int) string {
 	return ips[rand.Intn(len(ips))].ip
 }
 
-func (m *pingMonitor) IPs() []string {
-	var ips []string = make([]string, 0, len(m.online))
+func (m *pingMonitor) IPs(online bool) []string {
+	var ips = make([]string, 0, len(m.online))
 	m.mu.Lock()
-	for k, _ := range m.online {
-		ips = append(ips, k)
+	for k, v := range m.online {
+		if !online || v.ok {
+			ips = append(ips, k)
+		}
 	}
 	m.mu.Unlock()
 	return ips

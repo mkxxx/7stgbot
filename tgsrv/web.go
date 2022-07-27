@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -45,6 +46,7 @@ const (
 	contactsPath          = "/docs/contacts/"
 	internetPath          = "/docs/internet/"
 	internetElectrCSVPath = "/docs/electr.csv/"
+	internetDocsPath      = "/docs/"
 
 	site = "https://semislavka.win"
 
@@ -254,7 +256,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			DivAlignRight: template.HTML(`<div style="text-align: right">`),
 			DivEnd:        template.HTML(`</div>`),
 		}
-		s.serveTemplate(w, r, tdata)
+		s.serveTemplate(w, r, tdata, nil)
 		return
 	}
 	if r.URL.Path == internetPath {
@@ -269,12 +271,12 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		tdata.OnlineRecently, tdata.Reached = s.pinger.onlineCount()
 		query := r.URL.Query()
 		if !query.Has("ping") {
-			s.serveTemplate(w, r, tdata)
+			s.serveTemplate(w, r, tdata, nil)
 			return
 		}
 		ip := s.pinger.bestIP(10)
 		if len(ip) == 0 {
-			s.serveTemplate(w, r, tdata)
+			s.serveTemplate(w, r, tdata, nil)
 			return
 		}
 		var buf bytes.Buffer
@@ -288,7 +290,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 				tdata.PingResult += template.HTML(ip + "\n")
 			}
 		}
-		s.serveTemplate(w, r, tdata)
+		s.serveTemplate(w, r, tdata, nil)
 		return
 	}
 	if r.URL.Path == internetElectrCSVPath {
@@ -309,6 +311,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", "attachment;filename=electr_"+
 			year+month+".csv")
 		items := LoadElectrForMonth(s.staticDir, y, m)
+		items = anonymize(items)
 		for _, it := range items {
 			params := url.Values{}
 			params.Add("yyyy", year)
@@ -319,7 +322,42 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		gocsv.Marshal(items, w)
 	}
+
+	if r.URL.Path == internetDocsPath {
+		s.serveTemplate(w, r, Bool(false), func(s string) string {
+			return strings.Replace(s, "<script ", "{{end}}\n <script ", 1)
+		})
+		return
+	}
 	s.staticHandler.ServeHTTP(w, r)
+}
+
+type Bool bool
+
+func (b *Bool) OK() bool {
+	return bool(*b)
+}
+
+func (b *Bool) NotOK() bool {
+	return !b.OK()
+}
+
+func (b *Bool) True() bool {
+	return true
+}
+
+func (b *Bool) False() bool {
+	return false
+}
+
+func anonymize(p []*ElectrEvidence) []*ElectrEvidence {
+	items := make([]*ElectrEvidence, 0, len(p))
+	for _, ev := range p {
+		c := ev.Copy()
+		c.FIO = ""
+		items = append(items, c)
+	}
+	return items
 }
 
 type byIP []string
@@ -810,9 +848,29 @@ func sha1Hash(year string, month string, number string) string {
 	return h
 }
 
-func (s *webSrv) serveTemplate(w http.ResponseWriter, r *http.Request, tdata any) {
+func (s *webSrv) serveTemplate(w http.ResponseWriter, r *http.Request, tdata any,
+	tmplPreprocessor func(s string) string) {
+
 	fp := filepath.Join(s.staticDir, filepath.Clean(r.URL.Path), "index.html")
-	tmpl, err := template.ParseFiles(fp)
+	/*	tmpl, err := template.ParseFiles(fp)
+		if err != nil {
+			Logger.Error(err)
+			http.Error(w, http.StatusText(500), 500)
+			return
+		}
+	*/
+	name := filepath.Base(fp)
+	bb, err := os.ReadFile(fp)
+	if err != nil {
+		Logger.Error(err)
+		http.Error(w, http.StatusText(500), 500)
+		return
+	}
+	text := string(bb)
+	if tmplPreprocessor != nil {
+		text = tmplPreprocessor(text)
+	}
+	tmpl, err := template.New(name).Parse(text)
 	if err != nil {
 		Logger.Error(err)
 		http.Error(w, http.StatusText(500), 500)

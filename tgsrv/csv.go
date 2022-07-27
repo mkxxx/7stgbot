@@ -58,6 +58,27 @@ type ElectrEvidence struct {
 	NotUsed         string `csv:"-"`
 }
 
+func (e *ElectrEvidence) Copy() *ElectrEvidence {
+	return &ElectrEvidence{
+		N:               e.N,
+		FIO:             e.FIO,
+		Prepaid:         e.Prepaid,
+		LastPaymentDate: e.LastPaymentDate,
+		PlotNumber:      e.PlotNumber,
+		CurrEvidence:    e.CurrEvidence,
+		CurrEvidence2:   e.CurrEvidence2,
+		PrevEvidence:    e.PrevEvidence,
+		Spent:           e.Spent,
+		Losses:          e.Losses,
+		SpentAmount:     e.SpentAmount,
+		LossesAmount:    e.LossesAmount,
+		Total:           e.Total,
+		PrevDebt:        e.PrevDebt,
+		CurrDebt:        e.CurrDebt,
+		QRURL:           e.QRURL,
+	}
+}
+
 func (e *ElectrEvidence) prepaidMinusDebt() float64 {
 	prepaid, err := strconv.ParseFloat(e.Prepaid, 64)
 	if err != nil {

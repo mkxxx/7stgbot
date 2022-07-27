@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -16,13 +17,13 @@ import (
 
 var logger *zap.SugaredLogger
 var (
-	cfgPath string
+	cfgDir  string
 	logfile string
 )
 
 func main() {
 	flag.StringVar(&logfile, "logfile", "7stgbot.log", "log file")
-	flag.StringVar(&cfgPath, "cfg", "./config.toml", "Path to config file in toml format")
+	flag.StringVar(&cfgDir, "cfg", "./", "Path to config dir containing config.toml and data files")
 	flag.Parse()
 
 	zap.NewDevelopmentConfig()
@@ -67,13 +68,14 @@ func main() {
 	}()
 
 	var cfg Config
+	cfgPath := filepath.Join(cfgDir, "config.toml")
 	if _, err := toml.DecodeFile(cfgPath, &cfg); err != nil {
 		logger.Errorf("error parsing toml config by path %q: %v", cfgPath, err)
 		flag.PrintDefaults()
 		return
 	}
 	pinger := tgsrv.StartPinger(abort, cfg.DiscordAlertChannelURL)
-	tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger)
+	tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfgDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger)
 
 	tgsrv.RunBot(cfg.TgToken, abort)
 }

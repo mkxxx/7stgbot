@@ -113,7 +113,7 @@ func (m *pingMonitor) ping(addr string) bool {
 			m.mu.Unlock()
 			return true
 		}
-		Logger.Errorf("ping -c 3 -w 5 %s: %v", addr, err)
+		// Logger.Errorf("ping -c 3 -w 5 %s: %v", addr, err)
 		time.Sleep(time.Second)
 		return true
 	}

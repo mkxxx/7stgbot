@@ -3,10 +3,13 @@ package tgsrv
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
 	"fmt"
+	"github.com/gocarina/gocsv"
 	"html/template"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -20,26 +23,33 @@ import (
 )
 
 const (
-	paramNameSum        = "sum"
-	paramNameYear       = "yyyy"
-	paramNameMonth      = "mm"
-	paramNamePrevElectr = "prev"
-	paramNameCurrElectr = "curr"
-	paramNameDebt       = "debt"
-	paramNameFio        = "fio"
-	paramNameNumber     = "n"
-	paramNamePrevKey    = "prevyyyymmnumber"
-	paramNamePurpose    = "purpose"
-	paramNamePrice      = "price"
-	paramNameCoef       = "coef"
-	qrPath              = "/images/qr.jpg"
-	qrePath             = "/images/qre.jpg"
-	payPath             = "/docs/оплата/"
-	payElectrPath       = "/docs/оплата-эл/"
-	contactsPath        = "/docs/contacts/"
-	internetPath        = "/docs/internet/"
-)
-const (
+	paramNameSum          = "sum"
+	paramNameYear         = "yyyy"
+	paramNameMonth        = "mm"
+	paramNamePrevElectr   = "prev"
+	paramNameCurrElectr   = "curr"
+	paramNameDebt         = "debt"
+	paramNameFio          = "fio"
+	paramNameNumber       = "n"
+	paramNameHash         = "h"
+	paramNamePrevKey      = "prevyyyymmnumber"
+	paramNamePurpose      = "purpose"
+	paramNamePrice        = "price"
+	paramNameCoef         = "coef"
+	qrImgPath             = "/images/qr.jpg"
+	qreImgPath            = "/images/qre.jpg"
+	qrcImgPath            = "/images/qrc.jpg"
+	qrPath                = "/docs/qr/"
+	payPath               = "/docs/оплата/"
+	payElectrPath         = "/docs/оплата-эл/"
+	contactsPath          = "/docs/contacts/"
+	internetPath          = "/docs/internet/"
+	internetElectrCSVPath = "/docs/electr.csv/"
+
+	site = "https://semislavka.win"
+
+	QRSalt = "ee1e4a719ddac2689"
+
 	// required
 	QRHeader          = "ST00011"
 	QRNameName        = "Name"        // <= 160
@@ -54,20 +64,13 @@ const (
 	QRNamePayeeINN = "PayeeINN" // <= 12
 )
 
-var Location *time.Location
-
 func init() {
-	var err error
-	Location, err = time.LoadLocation("Europe/Moscow")
-	if err != nil {
-		log.Fatal(err)
-	}
+	rand.Seed(time.Now().Unix())
 }
 
-func StartWebServer(port int, staticDir string, QRElements map[string]string, price, coef string,
-	abort chan struct{}, pinger *pingMonitor) *http.Server {
+func StartWebServer(port int, staticDir, dir string, QRElements map[string]string, price, coef string, abort chan struct{}, pinger *pingMonitor) *http.Server {
 
-	webServer := newWebServer(port, staticDir, QRElements, price, coef, pinger)
+	webServer := newWebServer(port, staticDir, dir, QRElements, price, coef, pinger)
 	webServer.start(port)
 	srv := webServer.httpServer
 	go func() {
@@ -77,7 +80,7 @@ func StartWebServer(port int, staticDir string, QRElements map[string]string, pr
 	return srv
 }
 
-func newWebServer(port int, staticDir string, QRElements map[string]string, price, coef string,
+func newWebServer(port int, staticDir string, dir string, QRElements map[string]string, price, coef string,
 	pinger *pingMonitor) *webSrv {
 
 	ws := new(webSrv)
@@ -85,11 +88,15 @@ func newWebServer(port int, staticDir string, QRElements map[string]string, pric
 	ws.coef = coef
 	ws.QRElements = QRElements
 	ws.staticDir = staticDir
+	ws.dataDir = dir
 	ws.pinger = pinger
 
 	fs := http.FileServer(http.Dir(staticDir))
 	//ws.staticHandler = http.StripPrefix("/static/", fs)
 	ws.staticHandler = fs
+
+	ws.registry = loadRegistry(dir)
+
 	http.HandleFunc("/", ws.handle)
 
 	ws.httpServer = &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: nil}
@@ -101,9 +108,11 @@ type webSrv struct {
 	coef          string
 	QRElements    map[string]string
 	staticDir     string
+	dataDir       string
 	staticHandler http.Handler
 	httpServer    *http.Server
 	pinger        *pingMonitor
+	registry      *Registry
 }
 
 func (s *webSrv) start(port int) {
@@ -179,14 +188,22 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == qrPath {
+		if r.Method == "GET" {
+			s.serveQRTemplate(w, r)
+			return
+		}
+		return
+	}
+	if r.URL.Path == qrImgPath {
 		query := r.URL.Query()
 		s.writeImage(w,
 			query.Get(paramNameSum),
 			query.Get(paramNamePurpose),
 			query.Get(paramNameFio),
 		)
+		return
 	}
-	if r.URL.Path == qrePath {
+	if r.URL.Path == qreImgPath {
 		query := r.URL.Query()
 		sum, purpose := s.calculate(
 			query.Get(paramNameYear),
@@ -204,6 +221,28 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			purpose,
 			query.Get(paramNameFio),
 		)
+		return
+	}
+	if r.URL.Path == qrcImgPath {
+		query := r.URL.Query()
+		year := query.Get(paramNameYear)
+		month := query.Get(paramNameMonth)
+		number := query.Get(paramNameNumber)
+		hash := query.Get(paramNameHash)
+		var sum float64
+		var purpose template.HTML
+
+		var ok bool
+		if checkHash(year, month, number, hash) {
+			purpose, sum, ok = s.purpose(year, month, number)
+		}
+		if ok {
+			s.writeImage(w,
+				fmt.Sprintf("%.2f", sum),
+				string(purpose),
+				"",
+			)
+		}
 		return
 	}
 	if r.URL.Path == "/" || r.URL.Path == contactsPath {
@@ -251,6 +290,34 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		s.serveTemplate(w, r, tdata)
 		return
+	}
+	if r.URL.Path == internetElectrCSVPath {
+		query := r.URL.Query()
+		year := query.Get(paramNameYear)
+		y, err := strconv.Atoi(year)
+		if err != nil {
+			Logger.Errorf("expected 4-digits year %s %v", year, err)
+			return
+		}
+		month := query.Get(paramNameMonth)
+		m, err := strconv.Atoi(month)
+		if err != nil {
+			Logger.Errorf("expected 2-digits month %s %v", month, err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment;filename=electr_"+
+			year+month+".csv")
+		items := LoadElectrForMonth(s.staticDir, y, m)
+		for _, it := range items {
+			params := url.Values{}
+			params.Add("yyyy", year)
+			params.Add("mm", month)
+			params.Add("n", it.PlotNumber)
+			params.Add("h", sha1Hash(year, month, it.PlotNumber))
+			it.QRURL = site + qrPath + "?" + params.Encode()
+		}
+		gocsv.Marshal(items, w)
 	}
 	s.staticHandler.ServeHTTP(w, r)
 }
@@ -466,10 +533,11 @@ func (s *webSrv) servePayTemplate(w http.ResponseWriter, r *http.Request) {
 	params.Add(paramNamePurpose, purpose)
 	params.Add(paramNameFio, fio)
 
-	urlLine := fmt.Sprintf(`<p><img src="/images/qr.jpg?%s" alt="Not so big"></p>`, params.Encode())
-	tdata := tmplData{
-		Form:  template.HTML(formHtml),
-		QRImg: template.HTML(urlLine),
+	urlLine := fmt.Sprintf(`<p><img src="%s?%s" alt="Not so big"></p>`,
+		qrImgPath, params.Encode())
+	tdata := tmplFormData{
+		Form:   template.HTML(formHtml),
+		ImgURL: template.HTML(urlLine),
 	}
 	w2 := newWriterInterceptor(w)
 	err = tmpl.Execute(w2, &tdata)
@@ -525,10 +593,8 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 		coef = s.coef
 	}
 	if len(year) != 0 && len(month) != 0 && len(number) != 0 && (len(prev) == 0 || len(curr) == 0 || len(debt) == 0) {
-		ev, err := s.loadFromFile(year, month, number)
-		if err != nil {
-			Logger.Error(err)
-		} else if ev != nil {
+		ev := s.loadFromFile(year, month, number)
+		if ev != nil {
 			if len(prev) == 0 {
 				prev = ev.PrevEvidence
 			}
@@ -536,7 +602,7 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 				curr = ev.CurrEvidence
 			}
 			if len(debt) == 0 {
-				debt = ev.prepaidMinusDebt()
+				debt = ev.prepaidMinusDebtAsStr()
 			}
 		}
 	}
@@ -588,10 +654,11 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 	params.Add(paramNameFio, fio)
 	params.Add(paramNamePrice, price)
 	params.Add(paramNameCoef, coef)
-	urlLine := fmt.Sprintf(`<p><img src="/images/qre.jpg?%s" alt="Not so big"></p>`, params.Encode())
-	tdata := &tmplData{
-		Form:  template.HTML(formHtml),
-		QRImg: template.HTML(urlLine),
+	urlLine := fmt.Sprintf(`<p><img src="%s?%s" alt="Not so big"></p>`,
+		qreImgPath, params.Encode())
+	tdata := &tmplFormData{
+		Form:   template.HTML(formHtml),
+		ImgURL: template.HTML(urlLine),
 	}
 
 	sum, purpose := s.calculate(year, month, number, prev, curr, debt, price, coef, fio)
@@ -608,11 +675,139 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 		html := w2.buf.String()
 		for _, l := range strings.Split(html, "\n") {
 			//if strings.Contains(l, "<img ") || strings.Contains(l, "<img>") {
-			if strings.Contains(l, qrPath) || strings.Contains(l, qrePath) {
+			if strings.Contains(l, qrImgPath) || strings.Contains(l, qreImgPath) {
 				Logger.Debug(l)
 			}
 		}
 	}
+}
+
+type tmplQRData struct {
+	Purpose template.HTML
+	ImgURL  template.HTML
+}
+
+func (s *webSrv) serveQRTemplate(w http.ResponseWriter, r *http.Request) {
+	fp := filepath.Join(s.staticDir, filepath.Clean(r.URL.Path), "index.html")
+	tmpl, err := template.ParseFiles(fp)
+	if err != nil {
+		Logger.Error(err)
+		http.Error(w, http.StatusText(500), 500)
+		return
+	}
+	tdata := &tmplQRData{}
+	query := r.URL.Query()
+	year := query.Get(paramNameYear)
+	month := query.Get(paramNameMonth)
+	number := query.Get(paramNameNumber)
+	hash := query.Get(paramNameHash)
+
+	params := url.Values{}
+	params.Add(paramNameYear, year)
+	params.Add(paramNameMonth, month)
+	params.Add(paramNameNumber, number)
+	params.Add(paramNameHash, hash)
+
+	var ok bool
+	if checkHash(year, month, number, hash) {
+		tdata.Purpose, _, ok = s.purpose(year, month, number)
+	} else {
+		tdata.Purpose = "неверная ссылка"
+	}
+	url := ""
+	if ok {
+		url = fmt.Sprintf(`%s?%s`, qrcImgPath, params.Encode())
+	} else {
+		i := rand.Intn(173) + 1
+		ext := "png"
+		if i == 3 || i == 14 {
+			ext = "gif"
+		} else if i == 1 || i == 7 || i == 9 || i == 10 || i == 12 {
+			ext = "jpg"
+		}
+		if i < 100 {
+			url = fmt.Sprintf("/images/qr%02d.%s", i, ext)
+		} else {
+			url = fmt.Sprintf("/images/qr%d.%s", i, ext)
+		}
+	}
+	Logger.Debugf(url)
+	tdata.ImgURL = template.HTML(fmt.Sprintf(`<p><img src="%s" alt="Not so big" width="350"></p>`, url))
+	err = tmpl.Execute(w, tdata)
+	if err != nil {
+		log.Print(err.Error())
+		http.Error(w, http.StatusText(500), 500)
+		/*
+
+		   ./public/images/qr07.jpeg
+		    ./public/images/qr01.jpg
+		   ./public/images/qr09.jpg
+		   ./public/images/qr10.jpg
+		   ./public/images/qr12.jpg
+
+		*/
+	}
+}
+func (s *webSrv) purpose(year string, month string, number string) (template.HTML, float64, bool) {
+	ev := s.loadFromFile(year, month, number)
+	if ev == nil {
+		return "файл не найден", 0, false
+	}
+	purpose := ""
+	prev, err := strconv.ParseFloat(ev.PrevEvidence, 64)
+	if err != nil {
+		prev = 0
+	}
+	curr, err := strconv.ParseFloat(ev.CurrEvidence, 64)
+	if err != nil {
+		curr = 0
+	}
+	price, _ := strconv.ParseFloat(s.price, 64)
+	coef, _ := strconv.ParseFloat(s.coef, 64)
+	debt := ev.prepaidMinusDebt()
+	totalCalc := (curr - prev) * price * (1 + 0.01*coef)
+	currDebtCalc := debt + totalCalc
+	currDebt, err := strconv.ParseFloat(ev.CurrDebt, 64)
+	if err == nil && currDebtCalc-currDebt >= 1 {
+		purpose += "<b>Внимание! Рассчитанная сумма расходится  с ведомостью!  <b>"
+	}
+	debtText := ""
+	if debt != 0 {
+		debtText = fmt.Sprintf("%.2f + ", debt)
+	}
+	replacer := strings.NewReplacer(
+		"{mnt}", month,
+		"{year}", year,
+		"{number}", number,
+		"{debt}", debtText,
+		"{curr}", fmt.Sprintf("%.2f", curr),
+		"{prev}", fmt.Sprintf("%.2f", prev),
+		"{price}", s.price,
+		"{coef}", s.coef,
+		"{sum}", fmt.Sprintf("%.2f", currDebtCalc),
+	)
+	purpose += replacer.Replace(
+		"За эл-энергию, {mnt} {year}, участок {number}, {debt}({curr} - {prev})x{price}x{coef} :: {sum}")
+
+	return template.HTML(purpose), currDebt, true
+}
+
+func checkHash(year string, month string, number string, hash string) bool {
+	if len(year) == 0 || len(month) == 0 || len(number) == 0 || len(hash) == 0 {
+		return false
+	}
+	h := sha1Hash(year, month, number)
+	return hash == h
+}
+
+func sha1Hash(year string, month string, number string) string {
+	hasher := sha1.New()
+	io.WriteString(hasher, year)
+	io.WriteString(hasher, month)
+	io.WriteString(hasher, number)
+	io.WriteString(hasher, QRSalt)
+	h := fmt.Sprintf("%x", hasher.Sum(nil))
+	return h
 }
 
 func (s *webSrv) serveTemplate(w http.ResponseWriter, r *http.Request, tdata any) {
@@ -631,23 +826,26 @@ func (s *webSrv) serveTemplate(w http.ResponseWriter, r *http.Request, tdata any
 	}
 }
 
-func (s *webSrv) loadFromFile(year string, month string, number string) (*ElectrEvidence, error) {
+func (s *webSrv) loadFromFile(year string, month string, number string) *ElectrEvidence {
 	y, err := strconv.Atoi(year)
 	if err != nil {
-		return nil, err
+		Logger.Errorf("expected 4-digits year %s %v", year, err)
+		return nil
 	}
 	m, err := strconv.Atoi(month)
 	if err != nil {
-		return nil, err
+		Logger.Errorf("expected 2-digits month %s %v", month, err)
+		return nil
 	}
-	ev := LoadElectrForMonth(s.staticDir, y, m)[number]
-	return ev, nil
+	items := LoadElectrForMonth(s.staticDir, y, m)
+	ev := toMap(items)[number]
+	return ev
 }
 
-type tmplData struct {
+type tmplFormData struct {
 	Form       template.HTML
 	FormFooter template.HTML
-	QRImg      template.HTML
+	ImgURL     template.HTML
 }
 
 func newWriterInterceptor(w io.Writer) *writerInterceptor {

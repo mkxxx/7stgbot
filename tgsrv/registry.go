@@ -16,9 +16,8 @@ func init() {
 }
 
 type SearchResult struct {
-	Total      int             `csv:"total"`
-	Records    []*SearchRecord `csv:"records"`
-	RecordsMap map[string]*SearchRecord
+	Total   int             `csv:"total"`
+	Records []*SearchRecord `csv:"records"`
 }
 
 type SearchRecord struct {
@@ -47,8 +46,23 @@ func (r SearchRecord) LastEnterTime() time.Time {
 }
 
 type Registry struct {
-	registry map[string]*RegistryRecord
-	search   *SearchResult
+	registry      map[string]*RegistryRecord
+	searchResult  *SearchResult
+	searchRecords map[string]*SearchRecord
+}
+
+func (r *Registry) getEmail(d string, n string) string {
+	{
+		rec := r.searchRecords[n]
+		if rec != nil && len(rec.Email) != 0 {
+			return rec.Email
+		}
+	}
+	rec := r.registry[n]
+	if rec != nil {
+		return rec.Email
+	}
+	return ""
 }
 
 func loadRegistry(dir string) *Registry {
@@ -63,6 +77,9 @@ func loadRegistry(dir string) *Registry {
 		}
 	}
 	searchResult, _ := search("")
-
-	return &Registry{registry: records, search: searchResult}
+	searchRecords := make(map[string]*SearchRecord)
+	for _, r := range searchResult.Records {
+		searchRecords[r.PlotNumber] = r
+	}
+	return &Registry{registry: records, searchResult: searchResult, searchRecords: searchRecords}
 }

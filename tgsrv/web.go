@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -70,8 +71,7 @@ func init() {
 	rand.Seed(time.Now().Unix())
 }
 
-func StartWebServer(port int, staticDir, dir string, QRElements map[string]string, price, coef string, abort chan struct{}, pinger *pingMonitor) *http.Server {
-
+func StartWebServer(port int, staticDir, dir string, QRElements map[string]string, price string, coef map[string]float64, abort chan struct{}, pinger *pingMonitor) *webSrv {
 	webServer := newWebServer(port, staticDir, dir, QRElements, price, coef, pinger)
 	webServer.start(port)
 	srv := webServer.httpServer
@@ -79,19 +79,19 @@ func StartWebServer(port int, staticDir, dir string, QRElements map[string]strin
 		<-abort
 		srv.Shutdown(context.Background())
 	}()
-	return srv
+	return webServer
 }
 
-func newWebServer(port int, staticDir string, dir string, QRElements map[string]string, price, coef string,
-	pinger *pingMonitor) *webSrv {
+func newWebServer(port int, staticDir string, dir string, QRElements map[string]string, price string,
+	coef map[string]float64, pinger *pingMonitor) *webSrv {
 
 	ws := new(webSrv)
 	ws.price = price
-	ws.coef = coef
 	ws.QRElements = QRElements
 	ws.staticDir = staticDir
 	ws.dataDir = dir
 	ws.pinger = pinger
+	(&ws.coefHist).fromMap(coef)
 
 	fs := http.FileServer(http.Dir(staticDir))
 	//ws.staticHandler = http.StripPrefix("/static/", fs)
@@ -105,9 +105,55 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	return ws
 }
 
+type valueDates []valueDate
+
+type valueDate struct {
+	date  string
+	value float64
+}
+
+func (vd *valueDates) fromMap(p map[string]float64) {
+	*vd = make([]valueDate, 0, len(p))
+	dates := make([]string, 0, len(p))
+	for k := range p {
+		dates = append(dates, k)
+	}
+	sort.Strings(dates)
+	for i := len(dates) - 1; i >= 0; i-- {
+		d := dates[i]
+		*vd = append(*vd, valueDate{date: d, value: p[d]})
+	}
+}
+
+func (vd *valueDates) coef(year int, month int) float64 {
+	if vd == nil {
+		return 0
+	}
+	d := fmt.Sprintf("%d%02d", year, month)
+	var dv valueDate
+	for _, dv = range *vd {
+		if d >= dv.date {
+			return dv.value
+		}
+	}
+	return dv.value
+}
+
+func (vd *valueDates) coefStr(year string, month string) float64 {
+	y, err := strconv.Atoi(year)
+	if err != nil {
+		return 0
+	}
+	m, err := strconv.Atoi(month)
+	if err != nil {
+		return 0
+	}
+	return vd.coef(y, m)
+}
+
 type webSrv struct {
 	price         string
-	coef          string
+	coefHist      valueDates
 	QRElements    map[string]string
 	staticDir     string
 	dataDir       string
@@ -313,12 +359,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		items := LoadElectrForMonth(s.staticDir, y, m)
 		items = anonymize(items)
 		for _, it := range items {
-			params := url.Values{}
-			params.Add("yyyy", year)
-			params.Add("mm", month)
-			params.Add("n", it.PlotNumber)
-			params.Add("h", sha1Hash(year, month, it.PlotNumber))
-			it.QRURL = site + qrPath + "?" + params.Encode()
+			it.QRURL = QRURL(year, month, it.PlotNumber)
 		}
 		gocsv.Marshal(items, w)
 	}
@@ -330,6 +371,20 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.staticHandler.ServeHTTP(w, r)
+}
+
+func QRURL(year string, month string, plotNumber string) string {
+	params := url.Values{}
+	params.Add("yyyy", year)
+	params.Add("mm", month)
+	params.Add("n", plotNumber)
+	params.Add("h", sha1Hash(year, month, plotNumber))
+	x := site + qrPath + "?" + params.Encode()
+	return x
+}
+
+func QRURLInt(year int, month int, plotNumber string) string {
+	return QRURL(strconv.Itoa(year), fmt.Sprintf("%02d", month), plotNumber)
 }
 
 type Bool bool
@@ -468,14 +523,16 @@ func (s *webSrv) calculate(yyyy string, mm string, number string, prevStr string
 		price = 0
 		Logger.Error("error parsing price %s %v", s.price, err)
 	}
-
+	var coef float64
 	if len(coefStr) == 0 {
-		coefStr = s.coef
-	}
-	coef, err := strconv.ParseFloat(coefStr, 64)
-	if err != nil {
-		coef = 0
-		Logger.Error("error parsing coef %s %v", s.coef, err)
+		coef = s.coefHist.coef(year, month)
+		coefStr = fmt.Sprintf("%.1f", coef)
+	} else {
+		coef, err = strconv.ParseFloat(coefStr, 64)
+		if err != nil {
+			coef = 0
+			Logger.Error("error parsing coef %s %v", coefStr, err)
+		}
 	}
 	coefMult := 1 + 0.01*coef
 	sum = fmt.Sprintf("%.2f", debt+(curr-prev)*price*coefMult)
@@ -628,7 +685,7 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 	}
 	coef := query.Get(paramNameCoef)
 	if len(coef) == 0 {
-		coef = s.coef
+		coef = fmt.Sprintf("%.1f", s.coefHist.coefStr(year, month))
 	}
 	if len(year) != 0 && len(month) != 0 && len(number) != 0 && (len(prev) == 0 || len(curr) == 0 || len(debt) == 0) {
 		ev := s.loadFromFile(year, month, number)
@@ -740,6 +797,9 @@ func (s *webSrv) serveQRTemplate(w http.ResponseWriter, r *http.Request) {
 	number := query.Get(paramNameNumber)
 	hash := query.Get(paramNameHash)
 
+	Logger.Infof("QR code: %8s %s%s ip=%s, UserAgent=%s",
+		number, year, month, remoteIP(r), r.UserAgent())
+
 	params := url.Values{}
 	params.Add(paramNameYear, year)
 	params.Add(paramNameMonth, month)
@@ -801,7 +861,7 @@ func (s *webSrv) purpose(year string, month string, number string) (template.HTM
 		curr = 0
 	}
 	price, _ := strconv.ParseFloat(s.price, 64)
-	coef, _ := strconv.ParseFloat(s.coef, 64)
+	coef := s.coefHist.coefStr(year, month)
 	debt := ev.prepaidMinusDebt()
 	totalCalc := (curr - prev) * price * (1 + 0.01*coef)
 	currDebtCalc := debt + totalCalc
@@ -821,7 +881,7 @@ func (s *webSrv) purpose(year string, month string, number string) (template.HTM
 		"{curr}", fmt.Sprintf("%.2f", curr),
 		"{prev}", fmt.Sprintf("%.2f", prev),
 		"{price}", s.price,
-		"{coef}", s.coef,
+		"{coef}", fmt.Sprintf("%.1f", s.coefHist.coefStr(year, month)),
 		"{sum}", fmt.Sprintf("%.2f", currDebtCalc),
 	)
 	purpose += replacer.Replace(
@@ -921,4 +981,17 @@ func (w *writerInterceptor) Write(p []byte) (n int, err error) {
 		w.buf.Write(p[:n])
 	}
 	return
+}
+
+func remoteIP(r *http.Request) string {
+	xff := r.Header.Get("X-Forwarded-For")
+	if len(xff) != 0 {
+		ips := strings.Split(xff, ", ")
+		return ips[0]
+	}
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return ""
+	}
+	return ip
 }

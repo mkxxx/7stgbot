@@ -2,11 +2,16 @@ package main
 
 import (
 	"7stgbot/tgsrv"
+	"bufio"
 	"flag"
+	"fmt"
+	"golang.org/x/crypto/ssh/terminal"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -19,12 +24,24 @@ var logger *zap.SugaredLogger
 var (
 	cfgDir  string
 	logfile string
+	noTGBot bool
+	user    string
+	pwd     string
 )
 
 func main() {
 	flag.StringVar(&logfile, "logfile", "7stgbot.log", "log file")
 	flag.StringVar(&cfgDir, "cfg", "./", "Path to config dir containing config.toml and data files")
+	flag.BoolVar(&noTGBot, "notgbot", false, "Start telegram bot (must be configured in config)")
+	flag.StringVar(&user, "u", "", "user   For development env only. Do not to be used in other environments")
+	flag.StringVar(&pwd, "p", "", "user   For development env only. Do not to be used in other environments")
 	flag.Parse()
+
+	if (len(user) != 0) != (len(pwd) != 0) {
+		log.Printf("user and pwd to be used both or none")
+		flag.PrintDefaults()
+		return
+	}
 
 	zap.NewDevelopmentConfig()
 
@@ -53,6 +70,17 @@ func main() {
 
 	log.SetOutput(w)
 
+	var emailClient *tgsrv.EmailClient
+	var u, p string
+	if len(user) != 0 {
+		u, p = user, pwd
+	} else {
+		u, p = stdinCredentials()
+	}
+	if len(u) != 0 && len(p) != 0 {
+		emailClient = tgsrv.NewEmailClient(u, p, u)
+	}
+
 	abort := make(chan struct{})
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt)
@@ -75,9 +103,13 @@ func main() {
 		return
 	}
 	pinger := tgsrv.StartPinger(abort, cfg.DiscordAlertChannelURL)
-	tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfgDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger)
+	ws := tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfgDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger)
 
-	tgsrv.RunBot(cfg.TgToken, abort)
+	if noTGBot {
+		<-abort
+	} else {
+		tgsrv.RunBot(cfg.TgToken, abort, ws, emailClient)
+	}
 }
 
 type Config struct {
@@ -85,7 +117,25 @@ type Config struct {
 	StaticDir              string
 	TgToken                string
 	Price                  string
-	Coef                   string
+	Coef                   map[string]float64
 	QR                     map[string]string
 	DiscordAlertChannelURL string
+}
+
+func stdinCredentials() (string, string) {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Print("Enter Username: ")
+	username, err := reader.ReadString('\n')
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Print("Enter Password: ")
+	bytePassword, err := terminal.ReadPassword(int(syscall.Stdin))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println()
+	password := string(bytePassword)
+	return strings.TrimSpace(username), strings.TrimSpace(password)
 }

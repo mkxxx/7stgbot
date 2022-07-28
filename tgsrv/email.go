@@ -5,13 +5,17 @@ import (
 	"log"
 )
 
-type emailClient struct {
+type EmailClient struct {
 	username string
 	password string
 	from     string
 }
 
-func (c *emailClient) sendEmail(email string, subject string, body string) {
+func NewEmailClient(username string, password string, from string) *EmailClient {
+	return &EmailClient{username: username, password: password, from: from}
+}
+
+func (c *EmailClient) sendEmail(email string, subject string, body string) {
 	msg := gomail.NewMessage()
 	//msg.SetHeader("From", "mizzgan+ifttt@gmail.com")
 	msg.SetHeader("From", c.from)

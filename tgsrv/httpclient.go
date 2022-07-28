@@ -31,16 +31,13 @@ func search(search string) (*SearchResult, error) {
 	q.Add("search", search)
 	req.URL.RawQuery = q.Encode()
 
-	res := &SearchResult{RecordsMap: make(map[string]*SearchRecord)}
+	res := &SearchResult{}
 	var respBody string
 	err = doRequestFunc(req, bodyFunc(&respBody), decodeFunc(res))
 	//log.Println(respBody)
 	if err != nil {
 		Logger.Errorf("%s %v", req.URL, err)
 		return nil, err
-	}
-	for _, r := range res.Records {
-		res.RecordsMap[r.PlotNumber] = r
 	}
 	return res, nil
 }

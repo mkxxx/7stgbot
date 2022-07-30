@@ -42,7 +42,8 @@ type TGBot struct {
 	smsClient   *SMSClient
 }
 
-func RunBot(token string, abort chan struct{}, ws *webSrv, emailClient *EmailClient, iftttKey string) error {
+func RunBot(token string, abort chan struct{}, ws *webSrv, emailClient *EmailClient, iftttKey string,
+	adminPhone string) error {
 	Logger.Infof("starting tg bot")
 	b := TGBot{abort: abort, ws: ws, emailClient: emailClient, smsClient: NewSMSClient(iftttKey)}
 	var err error
@@ -56,6 +57,13 @@ func RunBot(token string, abort chan struct{}, ws *webSrv, emailClient *EmailCli
 	}
 	b.bot.Debug = true
 	Logger.Infof("authorized on account %s", b.bot.Self.UserName)
+
+	startedMsg := fmt.Sprintf("snt7s_bot is started at %s",
+		time.Now().In(Location).Format("2006-01-02 15:04:05"))
+	if b.emailClient != nil {
+		b.emailClient.sendEmail(emailClient.username, startedMsg, startedMsg)
+	}
+	b.smsClient.sms(adminPhone, startedMsg)
 
 	b.run()
 	return nil

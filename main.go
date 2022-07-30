@@ -108,7 +108,7 @@ func main() {
 	if noTGBot {
 		<-abort
 	} else {
-		err := tgsrv.RunBot(cfg.TgToken, abort, ws, emailClient, cfg.IfTTTKey)
+		err := tgsrv.RunBot(cfg.TgToken, abort, ws, emailClient, cfg.IfTTTKey, cfg.AdminPhone)
 		if err != nil {
 			logger.Error(err)
 		}
@@ -125,6 +125,7 @@ type Config struct {
 	QR                     map[string]string
 	DiscordAlertChannelURL string
 	IfTTTKey               string
+	AdminPhone             string
 }
 
 func stdinCredentials() (string, string) {

@@ -74,7 +74,7 @@ func main() {
 	var u, p string
 	if len(user) != 0 {
 		u, p = user, pwd
-	} else {
+	} else if !noTGBot {
 		u, p = stdinCredentials()
 	}
 	if len(u) != 0 && len(p) != 0 {
@@ -108,7 +108,11 @@ func main() {
 	if noTGBot {
 		<-abort
 	} else {
-		tgsrv.RunBot(cfg.TgToken, abort, ws, emailClient)
+		err := tgsrv.RunBot(cfg.TgToken, abort, ws, emailClient, cfg.IfTTTKey)
+		if err != nil {
+			logger.Error(err)
+		}
+		<-abort
 	}
 }
 
@@ -120,6 +124,7 @@ type Config struct {
 	Coef                   map[string]float64
 	QR                     map[string]string
 	DiscordAlertChannelURL string
+	IfTTTKey               string
 }
 
 func stdinCredentials() (string, string) {

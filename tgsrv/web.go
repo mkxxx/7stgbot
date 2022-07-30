@@ -3,9 +3,9 @@ package tgsrv
 import (
 	"bytes"
 	"context"
-	"crypto/sha1"
 	"fmt"
 	"github.com/gocarina/gocsv"
+	"github.com/robfig/cron/v3"
 	"html/template"
 	"io"
 	"log"
@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/skip2/go-qrcode"
@@ -72,7 +73,7 @@ func init() {
 }
 
 func StartWebServer(port int, staticDir, dir string, QRElements map[string]string, price string, coef map[string]float64, abort chan struct{}, pinger *pingMonitor) *webSrv {
-	webServer := newWebServer(port, staticDir, dir, QRElements, price, coef, pinger)
+	webServer := newWebServer(port, staticDir, dir, QRElements, price, coef, pinger, abort)
 	webServer.start(port)
 	srv := webServer.httpServer
 	go func() {
@@ -82,8 +83,8 @@ func StartWebServer(port int, staticDir, dir string, QRElements map[string]strin
 	return webServer
 }
 
-func newWebServer(port int, staticDir string, dir string, QRElements map[string]string, price string,
-	coef map[string]float64, pinger *pingMonitor) *webSrv {
+func newWebServer(port int, staticDir string, dir string, QRElements map[string]string,
+	price string, coef map[string]float64, pinger *pingMonitor, abort chan struct{}) *webSrv {
 
 	ws := new(webSrv)
 	ws.price = price
@@ -97,12 +98,44 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	//ws.staticHandler = http.StripPrefix("/static/", fs)
 	ws.staticHandler = fs
 
-	ws.registry = loadRegistry(dir)
+	ws.registry.Store(loadRegistry(dir))
+	c := cron.New(cron.WithSeconds(), cron.WithLocation(Location))
+	_, err := c.AddFunc("0 45 * * * *", func() {
+		r := loadRegistry(dir)
+		ws.setRegistry(r)
+	})
+	if err != nil {
+		log.Println(err)
+	}
+	c.Start()
+	go func() {
+		<-abort
+		c.Stop()
+	}()
 
 	http.HandleFunc("/", ws.handle)
 
 	ws.httpServer = &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: nil}
 	return ws
+}
+
+func (ws *webSrv) setRegistry(r *Registry) {
+	if len(r.searchResult.Records) != 0 && len(r.registry) != 0 {
+		ws.registry.Store(r)
+		return
+	}
+	if len(r.searchResult.Records) == 0 && len(r.registry) == 0 {
+		return
+	}
+	registry := ws.registry.Load().(*Registry)
+	if len(r.searchResult.Records) == 0 {
+		r.searchResult = registry.searchResult
+		r.searchRecords = registry.searchRecords
+	}
+	if len(r.registry) == 0 {
+		r.registry = registry.registry
+	}
+	ws.registry.Store(r)
 }
 
 type valueDates []valueDate
@@ -160,7 +193,7 @@ type webSrv struct {
 	staticHandler http.Handler
 	httpServer    *http.Server
 	pinger        *pingMonitor
-	registry      *Registry
+	registry      atomic.Value
 }
 
 func (s *webSrv) start(port int) {
@@ -361,6 +394,11 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		for _, it := range items {
 			it.QRURL = QRURL(year, month, it.PlotNumber)
 		}
+		gocsv.SetCSVWriter(func(w io.Writer) *gocsv.SafeCSVWriter {
+			csvWriter := gocsv.DefaultCSVWriter(w)
+			csvWriter.Comma = ';'
+			return csvWriter
+		})
 		gocsv.Marshal(items, w)
 	}
 
@@ -898,16 +936,6 @@ func checkHash(year string, month string, number string, hash string) bool {
 	return hash == h
 }
 
-func sha1Hash(year string, month string, number string) string {
-	hasher := sha1.New()
-	io.WriteString(hasher, year)
-	io.WriteString(hasher, month)
-	io.WriteString(hasher, number)
-	io.WriteString(hasher, QRSalt)
-	h := fmt.Sprintf("%x", hasher.Sum(nil))
-	return h
-}
-
 func (s *webSrv) serveTemplate(w http.ResponseWriter, r *http.Request, tdata any,
 	tmplPreprocessor func(s string) string) {
 
@@ -958,6 +986,29 @@ func (s *webSrv) loadFromFile(year string, month string, number string) *ElectrE
 	items := LoadElectrForMonth(s.staticDir, y, m)
 	ev := toMap(items)[number]
 	return ev
+}
+
+func (s *webSrv) FindByEmailPrefix(email string) map[string]bool {
+	email = cleanEmail(email)
+	plotNumbers := make(map[string]bool)
+	registry := s.registry.Load().(*Registry)
+	for _, r := range registry.searchResult.Records {
+		if len(r.PlotNumber) == 0 {
+			continue
+		}
+		if strings.HasPrefix(cleanEmail(r.Email), email) {
+			plotNumbers[r.PlotNumber] = true
+		}
+	}
+	for _, r := range registry.registry {
+		if len(r.PlotNumber) == 0 {
+			continue
+		}
+		if strings.HasPrefix(cleanEmail(r.Email), email) {
+			plotNumbers[r.PlotNumber] = true
+		}
+	}
+	return plotNumbers
 }
 
 type tmplFormData struct {

@@ -8,6 +8,8 @@ require (
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1 // indirect
 	github.com/gocarina/gocsv v0.0.0-20220712153207-8b2118da4570 // indirect
 	github.com/google/uuid v1.2.0 // indirect
+	github.com/mattn/go-sqlite3 v1.14.14 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/sirupsen/logrus v1.8.0 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	go.uber.org/atomic v1.7.0 // indirect

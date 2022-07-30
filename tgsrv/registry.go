@@ -65,6 +65,23 @@ func (r *Registry) getEmail(d string, n string) string {
 	return ""
 }
 
+func (r *Registry) SearchExec(cmd func(r *SearchRecord)) int {
+	if r.searchResult == nil {
+		return 0
+	}
+	for _, r := range r.searchResult.Records {
+		cmd(r)
+	}
+	return len(r.searchResult.Records)
+}
+
+func (r *Registry) RegistryExec(cmd func(r *RegistryRecord)) int {
+	for _, r := range r.registry {
+		cmd(r)
+	}
+	return len(r.registry)
+}
+
 func loadRegistry(dir string) *Registry {
 	records := LoadRegistryRecords(dir)
 	if records != nil {

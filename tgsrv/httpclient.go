@@ -21,13 +21,15 @@ func init() {
 }
 
 func search(search string) (*SearchResult, error) {
-	req, err := http.NewRequest("GET", `https://lk.preds.ru/reestr/getUsers`, nil)
+	url := `https://lk.preds.ru/reestr/getUsers`
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
+		Logger.Errorf("%s %v", req.URL, err)
 		return nil, err
 	}
 	q := req.URL.Query()
 	q.Add("page", "1")
-	q.Add("limit", "100")
+	q.Add("limit", "10000")
 	q.Add("search", search)
 	req.URL.RawQuery = q.Encode()
 
@@ -39,6 +41,7 @@ func search(search string) (*SearchResult, error) {
 		Logger.Errorf("%s %v", req.URL, err)
 		return nil, err
 	}
+	Logger.Debugf("Loaded %d registry records from %s", len(res.Records), url)
 	return res, nil
 }
 

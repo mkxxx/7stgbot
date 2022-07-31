@@ -34,20 +34,45 @@ var numericKeyboard = tgbotapi.NewReplyKeyboard(
 )
 
 type TGBot struct {
-	bot         *tgbotapi.BotAPI
-	abort       chan struct{}
-	ws          *webSrv
-	emailClient *EmailClient
-	users       *Users
-	smsClient   *SMSClient
+	bot            *tgbotapi.BotAPI
+	abort          chan struct{}
+	ws             *webSrv
+	emailClient    *EmailClient
+	users          *Users
+	smses          *SMSes
+	smsClient      *SMSClient
+	SMSRateLimiter []Rate
+}
+
+type Rate struct {
+	Timer time.Duration
+	Cnt   int
+}
+
+type ByRate []Rate
+
+func (r ByRate) Len() int      { return len(r) }
+func (r ByRate) Swap(i, j int) { r[i], r[j] = r[j], r[i] }
+func (r ByRate) Less(i, j int) bool {
+	return r[i].rateNano() < r[j].rateNano()
+}
+
+func (r *Rate) rateNano() time.Duration {
+	return time.Duration(int(r.Timer.Nanoseconds()) / r.Cnt)
 }
 
 func RunBot(token string, abort chan struct{}, ws *webSrv, emailClient *EmailClient, iftttKey string,
-	adminPhone string) error {
+	adminPhone string, SMSRateLimiter []Rate) error {
+
 	Logger.Infof("starting tg bot")
-	b := TGBot{abort: abort, ws: ws, emailClient: emailClient, smsClient: NewSMSClient(iftttKey)}
+	b := TGBot{abort: abort, ws: ws, emailClient: emailClient, smsClient: NewSMSClient(iftttKey),
+		SMSRateLimiter: SMSRateLimiter}
 	var err error
 	b.users, err = NewUsers()
+	if err != nil {
+		return err
+	}
+	b.smses, err = NewSMSes()
 	if err != nil {
 		return err
 	}
@@ -58,12 +83,14 @@ func RunBot(token string, abort chan struct{}, ws *webSrv, emailClient *EmailCli
 	b.bot.Debug = true
 	Logger.Infof("authorized on account %s", b.bot.Self.UserName)
 
+	go b.smsSender()
+
 	startedMsg := fmt.Sprintf("snt7s_bot is started at %s",
 		time.Now().In(Location).Format("2006-01-02 15:04:05"))
 	if b.emailClient != nil {
 		b.emailClient.sendEmail(emailClient.username, startedMsg, startedMsg)
 	}
-	b.smsClient.sms(adminPhone, startedMsg)
+	b.sms(adminPhone, startedMsg)
 
 	b.run()
 	return nil
@@ -281,15 +308,8 @@ func (b *TGBot) smsAllWithoutEmail(u tgbotapi.Update, text string) {
 }
 
 func (b *TGBot) sendSMSIfNoEmail(email string, phone string, text string) {
-	if strings.HasPrefix(email, "mk4reg") {
-		b.smsClient.sms(phone, text)
-		return
-	}
-	if true {
-		return
-	}
 	if len(email) != 0 || len(phone) == 0 || len(text) == 0 {
 		return
 	}
-	b.smsClient.sms(phone, text)
+	b.sms(phone, text)
 }

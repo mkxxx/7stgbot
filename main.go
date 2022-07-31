@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -102,13 +103,23 @@ func main() {
 		flag.PrintDefaults()
 		return
 	}
+	for k, v := range cfg.SMSRateLimiterCfg {
+		d, err := time.ParseDuration(k)
+		if err != nil {
+			logger.Errorf("error parsing config RateLimiterCfg, bad duration %s, %v", k, err)
+			return
+		}
+		cfg.SMSRateLimiter = append(cfg.SMSRateLimiter, tgsrv.Rate{Timer: d, Cnt: v})
+	}
+	sort.Sort(tgsrv.ByRate(cfg.SMSRateLimiter))
+
 	pinger := tgsrv.StartPinger(abort, cfg.DiscordAlertChannelURL)
 	ws := tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfgDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger)
 
 	if noTGBot {
 		<-abort
 	} else {
-		err := tgsrv.RunBot(cfg.TgToken, abort, ws, emailClient, cfg.IfTTTKey, cfg.AdminPhone)
+		err := tgsrv.RunBot(cfg.TgToken, abort, ws, emailClient, cfg.IfTTTKey, cfg.AdminPhone, cfg.SMSRateLimiter)
 		if err != nil {
 			logger.Error(err)
 		}
@@ -126,6 +137,8 @@ type Config struct {
 	DiscordAlertChannelURL string
 	IfTTTKey               string
 	AdminPhone             string
+	SMSRateLimiterCfg      map[string]int
+	SMSRateLimiter         []tgsrv.Rate
 }
 
 func stdinCredentials() (string, string) {

@@ -3,7 +3,6 @@ package tgsrv
 import (
 	"database/sql"
 	_ "github.com/mattn/go-sqlite3"
-	"sync"
 	"time"
 )
 
@@ -19,7 +18,6 @@ const createUsers string = `
 const file string = "users.db"
 
 type Users struct {
-	mu sync.Mutex
 	db *sql.DB
 }
 

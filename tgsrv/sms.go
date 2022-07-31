@@ -71,8 +71,8 @@ Loop:
 			}
 			sms := smses[0]
 			smses = smses[1:]
-			Logger.Infof("SMS: %s %q", sms.Phone, sms.Msg)
-			// b.smsClient.sendSMS(sms.Phone, sms.Msg)  TODO
+			//Logger.Infof("SMS: %s %q", sms.Phone, sms.Msg)
+			b.smsClient.sendSMS(sms.Phone, sms.Msg)
 			sms.SentAt = time.Now().UnixMilli()
 			err := b.smses.Update(sms)
 			if err != nil {

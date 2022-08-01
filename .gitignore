@@ -14,4 +14,4 @@
 *.cfg*
 config.toml
 *.png
-
+*.db

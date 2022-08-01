@@ -66,8 +66,8 @@ func (r *Registry) getEmail(d string, n string) string {
 }
 
 func (r *Registry) SearchExec(cmd func(r *SearchRecord) bool) int {
-	for _, r := range r.searchResult.Records {
-		if !cmd(r) {
+	for _, rec := range r.searchResult.Records {
+		if !cmd(rec) {
 			break
 		}
 	}
@@ -75,8 +75,8 @@ func (r *Registry) SearchExec(cmd func(r *SearchRecord) bool) int {
 }
 
 func (r *Registry) RegistryExec(cmd func(r *RegistryRecord) bool) int {
-	for _, r := range r.registry {
-		if !cmd(r) {
+	for _, rec := range r.registry {
+		if !cmd(rec) {
 			break
 		}
 	}

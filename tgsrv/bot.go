@@ -337,7 +337,8 @@ func (b *TGBot) search(u tgbotapi.Update, text string) {
 		}
 		return true
 	})
-	if n == 0 {
+	_ = n
+	if len(rr) == 0 {
 		b.ws.registry.Load().(*Registry).RegistryExec(func(r *RegistryRecord) bool {
 			if strings.Contains(r.Email, text) ||
 				strings.Contains(r.FIO, text) ||

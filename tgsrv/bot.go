@@ -356,7 +356,7 @@ func (b *TGBot) search(u tgbotapi.Update, text string) {
 	if more > 0 {
 		rr = rr[:10]
 	}
-	mtxt := strings.Join(rr, ",")
+	mtxt := strings.Join(rr, "\n")
 	if more > 0 {
 		mtxt += fmt.Sprintf("\n"+"  and %d more ...", more)
 	}

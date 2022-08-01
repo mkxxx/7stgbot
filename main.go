@@ -119,7 +119,8 @@ func main() {
 	if noTGBot {
 		<-abort
 	} else {
-		err := tgsrv.RunBot(cfg.TgToken, abort, ws, emailClient, cfg.IfTTTKey, cfg.AdminPhone, cfg.SMSRateLimiter)
+		err := tgsrv.RunBot(cfg.TgToken, abort, ws, emailClient, cfg.IfTTTKey, cfg.AdminPhone, cfg.AdminEmails,
+			cfg.SMSRateLimiter)
 		if err != nil {
 			logger.Error(err)
 		}
@@ -136,6 +137,7 @@ type Config struct {
 	QR                     map[string]string
 	DiscordAlertChannelURL string
 	IfTTTKey               string
+	AdminEmails            []string
 	AdminPhone             string
 	SMSRateLimiterCfg      map[string]int
 	SMSRateLimiter         []tgsrv.Rate

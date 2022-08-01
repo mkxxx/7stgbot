@@ -65,16 +65,20 @@ func (r *Registry) getEmail(d string, n string) string {
 	return ""
 }
 
-func (r *Registry) SearchExec(cmd func(r *SearchRecord)) int {
+func (r *Registry) SearchExec(cmd func(r *SearchRecord) bool) int {
 	for _, r := range r.searchResult.Records {
-		cmd(r)
+		if !cmd(r) {
+			break
+		}
 	}
 	return len(r.searchResult.Records)
 }
 
-func (r *Registry) RegistryExec(cmd func(r *RegistryRecord)) int {
+func (r *Registry) RegistryExec(cmd func(r *RegistryRecord) bool) int {
 	for _, r := range r.registry {
-		cmd(r)
+		if !cmd(r) {
+			break
+		}
 	}
 	return len(r.registry)
 }

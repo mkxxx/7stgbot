@@ -66,9 +66,6 @@ func (r *Registry) getEmail(d string, n string) string {
 }
 
 func (r *Registry) SearchExec(cmd func(r *SearchRecord)) int {
-	if r.searchResult == nil {
-		return 0
-	}
 	for _, r := range r.searchResult.Records {
 		cmd(r)
 	}
@@ -94,6 +91,9 @@ func loadRegistry(dir string) *Registry {
 		}
 	}
 	searchResult, _ := search("")
+	if searchResult == nil {
+		searchResult = &SearchResult{}
+	}
 	searchRecords := make(map[string]*SearchRecord)
 	for _, r := range searchResult.Records {
 		searchRecords[r.PlotNumber] = r

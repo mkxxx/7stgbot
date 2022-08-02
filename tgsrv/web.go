@@ -434,7 +434,7 @@ func QRURLInt(year int, month int, plotNumber string) string {
 }
 
 func BotURL(email string) string {
-	return `https://t.me/snt7s_bot?start=`+encodeEmailAndMD5(email)
+	return `https://t.me/snt7s_bot?start=` + encodeEmailAndMD5(email)
 }
 
 type Bool bool
@@ -568,7 +568,7 @@ func (s *webSrv) calculate(yyyy string, mm string, number string, prevStr string
 	var price float64
 	if len(priceStr) == 0 {
 		price = s.priceHist.coef(year, month)
-		priceStr = fmt.Sprintf("%.1f", price)
+		priceStr = fmt.Sprintf("%.2f", price)
 	} else {
 		price, err = strconv.ParseFloat(priceStr, 64)
 		if err != nil {
@@ -579,7 +579,7 @@ func (s *webSrv) calculate(yyyy string, mm string, number string, prevStr string
 	var coef float64
 	if len(coefStr) == 0 {
 		coef = s.coefHist.coef(year, month)
-		coefStr = fmt.Sprintf("%.1f", coef)
+		coefStr = fmt.Sprintf("%.2f", coef)
 	} else {
 		coef, err = strconv.ParseFloat(coefStr, 64)
 		if err != nil {
@@ -734,11 +734,11 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 	fio := query.Get(paramNameFio)
 	price := query.Get(paramNamePrice)
 	if len(price) == 0 {
-		price = fmt.Sprintf("%.1f", s.priceHist.coefStr(year, month))
+		price = fmt.Sprintf("%.2f", s.priceHist.coefStr(year, month))
 	}
 	coef := query.Get(paramNameCoef)
 	if len(coef) == 0 {
-		coef = fmt.Sprintf("%.1f", s.coefHist.coefStr(year, month))
+		coef = fmt.Sprintf("%.2f", s.coefHist.coefStr(year, month))
 	}
 	if len(year) != 0 && len(month) != 0 && len(number) != 0 && (len(prev) == 0 || len(curr) == 0 || len(debt) == 0) {
 		ev := s.loadFromFile(year, month, number)
@@ -933,8 +933,8 @@ func (s *webSrv) purpose(year string, month string, number string) (template.HTM
 		"{debt}", debtText,
 		"{curr}", fmt.Sprintf("%.2f", curr),
 		"{prev}", fmt.Sprintf("%.2f", prev),
-		"{price}", fmt.Sprintf("%.1f", s.priceHist.coefStr(year, month)),
-		"{coef}", fmt.Sprintf("%.1f", s.coefHist.coefStr(year, month)),
+		"{price}", fmt.Sprintf("%.2f", s.priceHist.coefStr(year, month)),
+		"{coef}", fmt.Sprintf("%.2f", s.coefHist.coefStr(year, month)),
 		"{sum}", fmt.Sprintf("%.2f", currDebtCalc),
 	)
 	purpose += replacer.Replace(

@@ -207,7 +207,7 @@ func (b *TGBot) handleElectr(update tgbotapi.Update) {
 		b.sendMessage(msg)
 		return
 	}
-	email := b.ws.registry.Load().(*Registry).getEmail(d, n)
+	email := b.ws.registry.Load().(*Registry).getEmailByPlotNumber(n)
 	if len(email) == 0 {
 		mtxt := "email не найден. Сообщите email для внесения в реестр садоводов."
 		msg := tgbotapi.NewMessage(update.Message.Chat.ID, mtxt)

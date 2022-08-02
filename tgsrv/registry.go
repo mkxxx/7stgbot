@@ -51,7 +51,7 @@ type Registry struct {
 	searchRecords map[string]*SearchRecord
 }
 
-func (r *Registry) getEmail(d string, n string) string {
+func (r *Registry) getEmailByPlotNumber(n string) string {
 	{
 		rec := r.searchRecords[n]
 		if rec != nil && len(rec.Email) != 0 {

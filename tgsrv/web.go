@@ -392,7 +392,15 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		items := LoadElectrForMonth(s.staticDir, y, m)
 		items = anonymize(items)
 		for _, it := range items {
+			if len(it.PlotNumber) == 0 {
+				continue
+			}
 			it.QRURL = QRURL(year, month, it.PlotNumber)
+			registry := s.registry.Load().(*Registry)
+			email := registry.getEmailByPlotNumber(it.PlotNumber)
+			if len(email) != 0 {
+				it.BotURL = BotURL(email)
+			}
 		}
 		gocsv.SetCSVWriter(func(w io.Writer) *gocsv.SafeCSVWriter {
 			csvWriter := gocsv.DefaultCSVWriter(w)
@@ -423,6 +431,10 @@ func QRURL(year string, month string, plotNumber string) string {
 
 func QRURLInt(year int, month int, plotNumber string) string {
 	return QRURL(strconv.Itoa(year), fmt.Sprintf("%02d", month), plotNumber)
+}
+
+func BotURL(email string) string {
+	return `https://t.me/snt7s_bot?start=`+encodeEmailAndMD5(email)
 }
 
 type Bool bool

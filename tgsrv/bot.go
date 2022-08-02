@@ -137,6 +137,8 @@ Loop:
 				b.handleStart(update)
 			case tgBotCommandQR:
 				b.handleQR(update)
+			case tgBotCommandSMS:
+				b.handleSMS(update)
 			default:
 				text := update.Message.Text
 				switch {
@@ -164,16 +166,6 @@ Loop:
 						text = text[len(cmd)+1+len(botName)+1:]
 					}
 					b.search(update, text)
-				case text == tgBotCommandSMS ||
-					strings.HasPrefix(text, tgBotCommandSMS+"@"):
-
-					cmd := tgBotCommandSMS
-					if strings.HasPrefix(text, cmd+" ") {
-						text = text[len(cmd)+1:]
-					} else {
-						text = text[len(cmd)+1+len(botName)+1:]
-					}
-					b.handleSMS(update, text)
 				case text == tgBotCommandSMSAll ||
 					strings.HasPrefix(text, tgBotCommandSMSAll+"@"):
 
@@ -426,9 +418,11 @@ func (b *TGBot) handleQR(u tgbotapi.Update) {
 	}
 }
 
-func (b *TGBot) handleSMS(u tgbotapi.Update, text string) {
-	text = strings.TrimSpace(text)
+func (b *TGBot) handleSMS(u tgbotapi.Update) {
+	text := u.Message.Text
 	i := strings.Index(text, " ")
+	text = strings.TrimSpace(text[i+1:])
+	i = strings.Index(text, " ")
 	if i < 0 {
 		return
 	}

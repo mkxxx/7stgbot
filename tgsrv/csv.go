@@ -57,8 +57,8 @@ type ElectrEvidence struct {
 	Total           string `csv:"total"`
 	PrevDebt        string `csv:"prev_debt"`
 	CurrDebt        string `csv:"curr_debt"`
-	BotURL          string `csv:"qr_url"`
 	QRURL           string `csv:"qr_url"`
+	BotURL          string `csv:"bot_url"`
 	NotUsed         string `csv:"-"`
 }
 

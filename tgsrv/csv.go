@@ -18,11 +18,14 @@ func LoadElectrForMonth(dir string, year, month int) []*ElectrEvidence {
 	}
 	defer f.Close()
 
+	Logger.Infof("loading file %s", fp)
+
 	var items []*ElectrEvidence
 	if err := gocsv.UnmarshalFile(f, &items); err != nil {
 		Logger.Errorf("error unmarshaling csv %s %v", fp, err)
 		return nil
 	}
+	Logger.Infof("loaded%d from %s", len(items), fp)
 	return items
 }
 

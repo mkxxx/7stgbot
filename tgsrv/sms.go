@@ -6,9 +6,14 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
+
+const phonePattern = `^\+?[0-9]+$`
+
+var phoneRE = regexp.MustCompile(phonePattern)
 
 type SMSClient struct {
 	IfTTTKey string
@@ -99,10 +104,10 @@ Loop:
 }
 
 func (c *SMSClient) sendSMS(phone string, sms string) bool {
-	if strings.HasPrefix(phone, "8") {
-		phone = "+7" + phone[1:]
+	if strings.HasPrefix(phone, "+7") {
+		phone = "8" + phone[2:]
 	}
-	if strings.HasPrefix(phone, "+749") {
+	if strings.HasPrefix(phone, "849") {
 		return false
 	}
 	values := map[string]interface{}{

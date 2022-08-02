@@ -14,13 +14,10 @@ const (
 	tgBotCommandSmsAllWithoutEmail = "/7s_sms_all_without_email"
 	tgBotCommandAllSendElectr      = "/7s_all_send_electr"
 	tgBotCommandSearch             = "/7s_search"
-	tgBotCommandQR                 = "/qr"
+	tgBotCommandQR                 = "qr"
 	tgBotCommandSMS                = "/sms"
 	tgBotCommandSMSAll             = "/sms_all"
 )
-
-//const argsPattern          = ` *tell +(` + discordIdSubPattern + `) +(.*)`
-//var tellRE          = regexp.MustCompile(tellPattern)
 
 var Logger *zap.SugaredLogger
 
@@ -138,7 +135,7 @@ Loop:
 				b.sendMessage(msg)
 			case "start":
 				b.handleStart(update)
-			case "qr":
+			case tgBotCommandQR:
 				b.handleQR(update)
 			default:
 				text := update.Message.Text
@@ -430,7 +427,24 @@ func (b *TGBot) handleQR(u tgbotapi.Update) {
 }
 
 func (b *TGBot) handleSMS(u tgbotapi.Update, text string) {
-
+	text = strings.TrimSpace(text)
+	i := strings.Index(text, " ")
+	if i < 0 {
+		return
+	}
+	phone := text[:i]
+	text = strings.TrimSpace(text[i+1:])
+	if len(text) == 0 {
+		return
+	}
+	phone = strings.ReplaceAll(phone, " ", "")
+	phone = strings.ReplaceAll(phone, "-", "")
+	phone = strings.ReplaceAll(phone, "(", "")
+	phone = strings.ReplaceAll(phone, ")", "")
+	if !phoneRE.MatchString(phone) {
+		return
+	}
+	b.sms(phone, text)
 }
 
 func (b *TGBot) handleSMSAll(u tgbotapi.Update, text string) {

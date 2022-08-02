@@ -263,7 +263,7 @@ func (b *TGBot) handleStart(u tgbotapi.Update) {
 	if err != nil {
 		Logger.Errorf("error inserting user %s %d %v", user.Email, user.ChatID, err)
 	}
-	msg := tgbotapi.NewMessage(u.Message.Chat.ID, "Вы успешно подписаны")
+	msg := tgbotapi.NewMessage(u.Message.Chat.ID, "Вы успешно подписаны!\n/qr - QR-код для оплаты электричества за предыдущий месяц")
 	b.sendMessage(msg)
 }
 

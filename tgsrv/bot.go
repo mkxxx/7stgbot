@@ -14,6 +14,9 @@ const (
 	tgBotCommandSmsAllWithoutEmail = "/7s_sms_all_without_email"
 	tgBotCommandAllSendElectr      = "/7s_all_send_electr"
 	tgBotCommandSearch             = "/7s_search"
+	tgBotCommandQR                 = "/qr"
+	tgBotCommandSMS                = "/sms"
+	tgBotCommandSMSAll             = "/sms_all"
 )
 
 //const argsPattern          = ` *tell +(` + discordIdSubPattern + `) +(.*)`
@@ -135,8 +138,8 @@ Loop:
 				b.sendMessage(msg)
 			case "start":
 				b.handleStart(update)
-			case "7s_all_send_electr":
-				b.handleSendElectrToAllTGSub(update)
+			case "qr":
+				b.handleQR(update)
 			default:
 				text := update.Message.Text
 				switch {
@@ -164,6 +167,30 @@ Loop:
 						text = text[len(cmd)+1+len(botName)+1:]
 					}
 					b.search(update, text)
+				case text == tgBotCommandSMS ||
+					strings.HasPrefix(text, tgBotCommandSMS+"@"):
+
+					cmd := tgBotCommandSMS
+					if strings.HasPrefix(text, cmd+" ") {
+						text = text[len(cmd)+1:]
+					} else {
+						text = text[len(cmd)+1+len(botName)+1:]
+					}
+					b.handleSMS(update, text)
+				case text == tgBotCommandSMSAll ||
+					strings.HasPrefix(text, tgBotCommandSMSAll+"@"):
+
+					cmd := tgBotCommandSMSAll
+					if strings.HasPrefix(text, cmd+" ") {
+						text = text[len(cmd)+1:]
+					} else {
+						text = text[len(cmd)+1+len(botName)+1:]
+					}
+					b.handleSMSAll(update, text)
+				case text == tgBotCommandAllSendElectr ||
+					strings.HasPrefix(text, tgBotCommandAllSendElectr+"@"):
+
+					b.handleSendElectrToAllTGSub(update)
 				}
 			}
 		case <-b.abort:
@@ -290,7 +317,7 @@ func (b *TGBot) handleSendElectrToAllTGSub(u tgbotapi.Update) {
 			url := QRURL(fmt.Sprintf("%d", y), fmt.Sprintf("%02d", int(m)), pn)
 			msg := tgbotapi.NewMessage(user.ChatID,
 				fmt.Sprintf("Ссылка на QR-кол для оплаты эл-ва за %s %d\n%s", mtxt, y, url))
-			Logger.Debugf("SEND: email: %s cgatID: %d %q", user.Email, user.ChatID, url)
+			Logger.Debugf("SEND: email: %s chatID: %d %q", user.Email, user.ChatID, url)
 			b.sendMessage(msg)
 		}
 	}
@@ -378,4 +405,34 @@ func (b *TGBot) authorizedActor(chatID int64, cmd string) bool {
 		}
 	}
 	return false
+}
+
+func (b *TGBot) handleQR(u tgbotapi.Update) {
+	users, err := b.users.List()
+	if err != nil {
+		Logger.Errorf("users.List(): %v", err)
+	}
+	chatID := u.Message.Chat.ID
+	y, m, _ := time.Now().In(Location).AddDate(0, -1, 0).Date()
+	for _, user := range users {
+		if user.ChatID == chatID {
+			plotNumbers := b.ws.FindByEmailPrefix(user.Email)
+			var urls []string
+			for pn := range plotNumbers {
+				urls = append(urls, QRURL(fmt.Sprintf("%d", y), fmt.Sprintf("%02d", int(m)), pn))
+			}
+			msg := tgbotapi.NewMessage(chatID, strings.Join(urls, "\n"))
+			Logger.Debugf("QR: %s chatID: %d %s", user.Email, chatID, strings.Join(urls, " "))
+			b.sendMessage(msg)
+			return
+		}
+	}
+}
+
+func (b *TGBot) handleSMS(u tgbotapi.Update, text string) {
+
+}
+
+func (b *TGBot) handleSMSAll(u tgbotapi.Update, text string) {
+
 }

@@ -132,7 +132,7 @@ type Config struct {
 	Port                   int
 	StaticDir              string
 	TgToken                string
-	Price                  string
+	Price                  map[string]float64
 	Coef                   map[string]float64
 	QR                     map[string]string
 	DiscordAlertChannelURL string

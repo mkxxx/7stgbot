@@ -72,7 +72,7 @@ func init() {
 	rand.Seed(time.Now().Unix())
 }
 
-func StartWebServer(port int, staticDir, dir string, QRElements map[string]string, price string, coef map[string]float64, abort chan struct{}, pinger *pingMonitor) *webSrv {
+func StartWebServer(port int, staticDir, dir string, QRElements map[string]string, price map[string]float64, coef map[string]float64, abort chan struct{}, pinger *pingMonitor) *webSrv {
 	webServer := newWebServer(port, staticDir, dir, QRElements, price, coef, pinger, abort)
 	webServer.start(port)
 	srv := webServer.httpServer
@@ -84,10 +84,10 @@ func StartWebServer(port int, staticDir, dir string, QRElements map[string]strin
 }
 
 func newWebServer(port int, staticDir string, dir string, QRElements map[string]string,
-	price string, coef map[string]float64, pinger *pingMonitor, abort chan struct{}) *webSrv {
+	price map[string]float64, coef map[string]float64, pinger *pingMonitor, abort chan struct{}) *webSrv {
 
 	ws := new(webSrv)
-	ws.price = price
+	(&ws.priceHist).fromMap(price)
 	ws.QRElements = QRElements
 	ws.staticDir = staticDir
 	ws.dataDir = dir
@@ -185,7 +185,7 @@ func (vd *valueDates) coefStr(year string, month string) float64 {
 }
 
 type webSrv struct {
-	price         string
+	priceHist     valueDates
 	coefHist      valueDates
 	QRElements    map[string]string
 	staticDir     string
@@ -553,13 +553,16 @@ func (s *webSrv) calculate(yyyy string, mm string, number string, prevStr string
 			return "", ""
 		}
 	}
+	var price float64
 	if len(priceStr) == 0 {
-		priceStr = s.price
-	}
-	price, err := strconv.ParseFloat(priceStr, 64)
-	if err != nil {
-		price = 0
-		Logger.Error("error parsing price %s %v", s.price, err)
+		price = s.priceHist.coef(year, month)
+		priceStr = fmt.Sprintf("%.1f", price)
+	} else {
+		price, err = strconv.ParseFloat(priceStr, 64)
+		if err != nil {
+			price = 0
+			Logger.Error("error parsing price %s %v", s.priceHist, err)
+		}
 	}
 	var coef float64
 	if len(coefStr) == 0 {
@@ -588,7 +591,7 @@ func (s *webSrv) calculate(yyyy string, mm string, number string, prevStr string
 		"{debt}", debtText,
 		"{curr}", fmt.Sprintf("%.2f", curr),
 		"{prev}", fmt.Sprintf("%.2f", prev),
-		"{price}", s.price,
+		"{price}", priceStr,
 		"{coef}", fmt.Sprintf("%.4f", coefMult),
 		"{sum}", sum)
 
@@ -719,7 +722,7 @@ func (s *webSrv) servePayElectrTemplate(w http.ResponseWriter, r *http.Request) 
 	fio := query.Get(paramNameFio)
 	price := query.Get(paramNamePrice)
 	if len(price) == 0 {
-		price = s.price
+		price = fmt.Sprintf("%.1f", s.priceHist.coefStr(year, month))
 	}
 	coef := query.Get(paramNameCoef)
 	if len(coef) == 0 {
@@ -898,7 +901,7 @@ func (s *webSrv) purpose(year string, month string, number string) (template.HTM
 	if err != nil {
 		curr = 0
 	}
-	price, _ := strconv.ParseFloat(s.price, 64)
+	price := s.priceHist.coefStr(year, month)
 	coef := s.coefHist.coefStr(year, month)
 	debt := ev.prepaidMinusDebt()
 	totalCalc := (curr - prev) * price * (1 + 0.01*coef)
@@ -918,7 +921,7 @@ func (s *webSrv) purpose(year string, month string, number string) (template.HTM
 		"{debt}", debtText,
 		"{curr}", fmt.Sprintf("%.2f", curr),
 		"{prev}", fmt.Sprintf("%.2f", prev),
-		"{price}", s.price,
+		"{price}", fmt.Sprintf("%.1f", s.priceHist.coefStr(year, month)),
 		"{coef}", fmt.Sprintf("%.1f", s.coefHist.coefStr(year, month)),
 		"{sum}", fmt.Sprintf("%.2f", currDebtCalc),
 	)

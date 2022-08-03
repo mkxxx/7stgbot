@@ -47,8 +47,8 @@ type TGBot struct {
 }
 
 type Rate struct {
-	Timer time.Duration
-	Cnt   int
+	Ticker time.Duration
+	Cnt    int
 }
 
 type ByRate []Rate
@@ -60,7 +60,7 @@ func (r ByRate) Less(i, j int) bool {
 }
 
 func (r *Rate) rateNano() time.Duration {
-	return time.Duration(int(r.Timer.Nanoseconds()) / r.Cnt)
+	return time.Duration(int(r.Ticker.Nanoseconds()) / r.Cnt)
 }
 
 func RunBot(token string, abort chan struct{}, ws *webSrv, emailClient *EmailClient, iftttKey string,
@@ -85,7 +85,7 @@ func RunBot(token string, abort chan struct{}, ws *webSrv, emailClient *EmailCli
 	b.bot.Debug = true
 	Logger.Infof("authorized on account %s", b.bot.Self.UserName)
 
-	go b.smsSender()
+	go b.smsSenderLoop()
 
 	startedMsg := fmt.Sprintf("snt7s_bot is started at %s",
 		time.Now().In(Location).Format("2006-01-02 15:04:05"))
@@ -308,9 +308,6 @@ func (b *TGBot) smsAllWithoutEmail(u tgbotapi.Update, text string) {
 		if len(phone) == 0 {
 			continue
 		}
-		if strings.Contains("89166065307,89856137682,89096860527", phone) { // TODO remove
-			continue
-		}
 		b.sms(phone, text)
 	}
 }
@@ -415,4 +412,31 @@ func (b *TGBot) handleSMS(u tgbotapi.Update, text string) {
 		return
 	}
 	b.sms(phone, text)
+}
+
+type SMSesDAO interface {
+	ListNew() ([]SMS, error)
+	Update(sms SMS) error
+}
+
+type SMSSender interface {
+	sendSMS(phone string, sms string) bool
+}
+
+func (b *TGBot) smsesDAO() SMSesDAO {
+	return b.smses
+}
+
+func (b *TGBot) smsSender() SMSSender {
+	return b.smsClient
+}
+
+func (b *TGBot) abortChan() chan struct{} {
+	return b.abort
+}
+
+type SMSSendingLoop interface {
+	smsesDAO() SMSesDAO
+	smsSender() SMSSender
+	abortChan() chan struct{}
 }

@@ -32,20 +32,25 @@ func (b *TGBot) sms(phone string, sms string) {
 	}
 }
 
-func (b *TGBot) smsSender() {
+func (b *TGBot) smsSenderLoop() {
+	smsSenderLoopRates(b, b.SMSRateLimiter, make(chan struct{}))
+}
+
+func smsSenderLoopRates(b SMSSendingLoop, rates []Rate, done chan struct{}) {
 	tickers := make([]*time.Ticker, 0, 5)
 	limits := make([]int, 5)
 	ratesC := make([]<-chan time.Time, 5)
-	for i, r := range b.SMSRateLimiter {
-		t := time.NewTicker(r.rateNano())
+	for i, r := range rates {
+		t := time.NewTicker(r.Ticker)
 		tickers = append(tickers, t)
 		ratesC[i] = t.C
-		limits[i] = b.SMSRateLimiter[i].Cnt
+		limits[i] = r.Cnt
 	}
 	defer func() {
 		for _, t := range tickers {
 			t.Stop()
 		}
+		close(done)
 	}()
 
 	var smses []SMS
@@ -54,7 +59,7 @@ Loop:
 		select {
 		case <-ratesC[0]:
 			// check limits
-			for i := range b.SMSRateLimiter {
+			for i := range rates {
 				if i == 0 {
 					continue
 				}
@@ -65,7 +70,7 @@ Loop:
 			// select from db next n sms
 			if len(smses) == 0 {
 				var err error
-				smses, err = b.smses.ListNew()
+				smses, err = b.smsesDAO().ListNew()
 				if err != nil {
 					Logger.Errorf("%v", err)
 					continue
@@ -77,9 +82,9 @@ Loop:
 			sms := smses[0]
 			smses = smses[1:]
 			//Logger.Infof("SMS: %s %q", sms.Phone, sms.Msg)
-			b.smsClient.sendSMS(sms.Phone, sms.Msg)
+			b.smsSender().sendSMS(sms.Phone, sms.Msg)
 			sms.SentAt = time.Now().UnixMilli()
-			err := b.smses.Update(sms)
+			err := b.smsesDAO().Update(sms)
 			if err != nil {
 				Logger.Errorf("%v", err)
 			}
@@ -87,17 +92,17 @@ Loop:
 				if n <= 0 || i == 0 {
 					continue
 				}
-				limits[i] -= b.SMSRateLimiter[0].Cnt
+				limits[i] -= rates[0].Cnt
 			}
 		case <-ratesC[1]:
-			limits[1] = b.SMSRateLimiter[1].Cnt
+			limits[1] = rates[1].Cnt
 		case <-ratesC[2]:
-			limits[2] = b.SMSRateLimiter[2].Cnt
+			limits[2] = rates[2].Cnt
 		case <-ratesC[3]:
-			limits[3] = b.SMSRateLimiter[3].Cnt
+			limits[3] = rates[3].Cnt
 		case <-ratesC[4]:
-			limits[4] = b.SMSRateLimiter[4].Cnt
-		case <-b.abort:
+			limits[4] = rates[4].Cnt
+		case <-b.abortChan():
 			return
 		}
 	}

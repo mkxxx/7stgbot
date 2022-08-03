@@ -109,7 +109,7 @@ func main() {
 			logger.Errorf("error parsing config RateLimiterCfg, bad duration %s, %v", k, err)
 			return
 		}
-		cfg.SMSRateLimiter = append(cfg.SMSRateLimiter, tgsrv.Rate{Timer: d, Cnt: v})
+		cfg.SMSRateLimiter = append(cfg.SMSRateLimiter, tgsrv.Rate{Ticker: d, Cnt: v})
 	}
 	sort.Sort(tgsrv.ByRate(cfg.SMSRateLimiter))
 

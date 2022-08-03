@@ -286,24 +286,33 @@ func (b *TGBot) smsAllWithoutEmail(u tgbotapi.Update, text string) {
 	if !b.authorizedActor(u.Message.Chat.ID, tgBotCommandSmsAllWithoutEmail) {
 		return
 	}
+	if len(text) == 0 {
+		return
+	}
+	phones := make(map[string]bool)
 	n := b.ws.registry.Load().(*Registry).SearchExec(func(r *SearchRecord) bool {
-		b.sendSMSIfNoEmail(r.Email, r.Phone, text)
+		if len(r.Email) == 0 {
+			phones[r.Phone] = true
+		}
 		return true
 	})
-	if n > 0 {
-		return
+	if n == 0 {
+		b.ws.registry.Load().(*Registry).RegistryExec(func(r *RegistryRecord) bool {
+			if len(r.Email) == 0 {
+				phones[r.Phone] = true
+			}
+			return true
+		})
 	}
-	b.ws.registry.Load().(*Registry).RegistryExec(func(r *RegistryRecord) bool {
-		b.sendSMSIfNoEmail(r.Email, r.Phone, text)
-		return true
-	})
-}
-
-func (b *TGBot) sendSMSIfNoEmail(email string, phone string, text string) {
-	if len(email) != 0 || len(phone) == 0 || len(text) == 0 {
-		return
+	for phone := range phones {
+		if len(phone) == 0 {
+			continue
+		}
+		if strings.Contains("89166065307,89856137682,89096860527", phone) { // TODO remove
+			continue
+		}
+		b.sms(phone, text)
 	}
-	b.sms(phone, text)
 }
 
 func (b *TGBot) search(u tgbotapi.Update, text string) {

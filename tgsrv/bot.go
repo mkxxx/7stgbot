@@ -124,7 +124,7 @@ Loop:
 			text := ""
 			i := strings.Index(update.Message.Text, " ")
 			if i > 0 {
-				text = strings.TrimSpace(text[i+1:])
+				text = strings.TrimSpace(update.Message.Text[i+1:])
 			}
 			switch command {
 			case "7s_electr":

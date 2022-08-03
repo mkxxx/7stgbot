@@ -11,12 +11,11 @@ import (
 
 const (
 	botName                        = "snt7s_bot"
-	tgBotCommandSmsAllWithoutEmail = "/7s_sms_all_without_email"
-	tgBotCommandAllSendElectr      = "/7s_all_send_electr"
-	tgBotCommandSearch             = "/7s_search"
+	tgBotCommandSmsAllWithoutEmail = "7s_sms_all_without_email"
+	tgBotCommandAllSendElectr      = "7s_all_send_electr"
+	tgBotCommandSearch             = "7s_search"
 	tgBotCommandQR                 = "qr"
-	tgBotCommandSMS                = "/sms"
-	tgBotCommandSMSAll             = "/sms_all"
+	tgBotCommandSMS                = "sms"
 )
 
 var Logger *zap.SugaredLogger
@@ -122,6 +121,11 @@ Loop:
 			}
 
 			command := update.Message.Command()
+			text := ""
+			i := strings.Index(update.Message.Text, " ")
+			if i > 0 {
+				text = strings.TrimSpace(text[i+1:])
+			}
 			switch command {
 			case "7s_electr":
 				b.handleElectr(update)
@@ -138,49 +142,15 @@ Loop:
 			case tgBotCommandQR:
 				b.handleQR(update)
 			case tgBotCommandSMS:
-				b.handleSMS(update)
+				b.handleSMS(update, text)
+			case tgBotCommandAllSendElectr:
+				b.handleSendElectrToAllTGSub(update)
+			case tgBotCommandSmsAllWithoutEmail:
+				b.smsAllWithoutEmail(update, text)
+			case tgBotCommandSearch:
+				b.search(update, text)
 			default:
-				text := update.Message.Text
-				switch {
-				case text == tgBotCommandAllSendElectr ||
-					strings.HasPrefix(text, tgBotCommandAllSendElectr+"@"):
-
-					b.handleSendElectrToAllTGSub(update)
-				case strings.HasPrefix(text, tgBotCommandSmsAllWithoutEmail+" ") ||
-					strings.HasPrefix(text, tgBotCommandSmsAllWithoutEmail+"@"+botName+" "):
-
-					cmd := tgBotCommandSmsAllWithoutEmail
-					if strings.HasPrefix(text, cmd+" ") {
-						text = text[len(cmd)+1:]
-					} else {
-						text = text[len(cmd)+1+len(botName)+1:]
-					}
-					b.smsAllWithoutEmail(update, text)
-				case strings.HasPrefix(text, tgBotCommandSearch+" ") ||
-					strings.HasPrefix(text, tgBotCommandSearch+"@"+botName+" "):
-
-					cmd := tgBotCommandSearch
-					if strings.HasPrefix(text, cmd+" ") {
-						text = text[len(cmd)+1:]
-					} else {
-						text = text[len(cmd)+1+len(botName)+1:]
-					}
-					b.search(update, text)
-				case text == tgBotCommandSMSAll ||
-					strings.HasPrefix(text, tgBotCommandSMSAll+"@"):
-
-					cmd := tgBotCommandSMSAll
-					if strings.HasPrefix(text, cmd+" ") {
-						text = text[len(cmd)+1:]
-					} else {
-						text = text[len(cmd)+1+len(botName)+1:]
-					}
-					b.handleSMSAll(update, text)
-				case text == tgBotCommandAllSendElectr ||
-					strings.HasPrefix(text, tgBotCommandAllSendElectr+"@"):
-
-					b.handleSendElectrToAllTGSub(update)
-				}
+				Logger.Debugf("BOT: unknown command %s  %q", command, update.Message.Text)
 			}
 		case <-b.abort:
 			break Loop
@@ -418,11 +388,8 @@ func (b *TGBot) handleQR(u tgbotapi.Update) {
 	}
 }
 
-func (b *TGBot) handleSMS(u tgbotapi.Update) {
-	text := u.Message.Text
+func (b *TGBot) handleSMS(u tgbotapi.Update, text string) {
 	i := strings.Index(text, " ")
-	text = strings.TrimSpace(text[i+1:])
-	i = strings.Index(text, " ")
 	if i < 0 {
 		return
 	}
@@ -439,8 +406,4 @@ func (b *TGBot) handleSMS(u tgbotapi.Update) {
 		return
 	}
 	b.sms(phone, text)
-}
-
-func (b *TGBot) handleSMSAll(u tgbotapi.Update, text string) {
-
 }

@@ -3,9 +3,8 @@ package tgsrv
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"github.com/gocarina/gocsv"
-	"github.com/robfig/cron/v3"
 	"html/template"
 	"io"
 	"log"
@@ -21,6 +20,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/gocarina/gocsv"
+	"github.com/robfig/cron/v3"
 
 	"github.com/skip2/go-qrcode"
 )
@@ -49,13 +51,14 @@ const (
 	internetPath          = "/docs/internet/"
 	internetElectrCSVPath = "/docs/electr.csv/"
 	internetDocsPath      = "/docs/"
+	blePath               = "/ble/"
 
-	site = "https://semislavka.win"
+	site = "https://7slavka.ru"
 
 	QRSalt = "ee1e4a719ddac2689"
 
 	// required
-	QRHeader          = "ST00011"
+	QRHeader          = "ST00012"
 	QRNameName        = "Name"        // <= 160
 	QRNamePersonalAcc = "PersonalAcc" // <= 20
 	QRNameBankName    = "BankName"    // <= 45
@@ -67,6 +70,13 @@ const (
 	QRNameLastName = "LastName" // <= 18
 	QRNamePayeeINN = "PayeeINN" // <= 12
 )
+
+type BLETracking struct {
+	MAC      string `json:"mac"`
+	RSSI     int    `json:"rssi"`
+	Name     string `json:"name"`
+	Location int    `json:"location"`
+}
 
 func init() {
 	rand.Seed(time.Now().Unix())
@@ -409,11 +419,26 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		})
 		gocsv.Marshal(items, w)
 	}
-
 	if r.URL.Path == internetDocsPath {
 		s.serveTemplate(w, r, Bool(false), func(s string) string {
 			return strings.Replace(s, "<script ", "{{end}}\n <script ", 1)
 		})
+		return
+	}
+	if r.URL.Path == blePath && r.Method == "POST" {
+		defer r.Body.Close()
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+		var bleTracking BLETracking
+		if err := json.NewDecoder(r.Body).Decode(&bleTracking); err != nil {
+			// Handle errors (e.g., malformed JSON, body too large, unknown fields)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		Logger.Infof("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d\n",
+			bleTracking.MAC, bleTracking.RSSI, bleTracking.Name, bleTracking.Location)
+
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 	s.staticHandler.ServeHTTP(w, r)

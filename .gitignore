@@ -9,6 +9,7 @@
 
 *.exe
 .idea
+.vscode
 *.prof
 *.log
 *.cfg*

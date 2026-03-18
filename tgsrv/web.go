@@ -52,6 +52,7 @@ const (
 	internetElectrCSVPath = "/docs/electr.csv/"
 	internetDocsPath      = "/docs/"
 	blePath               = "/ble/"
+	gateCallPath          = "/gate/call/"
 
 	site = "https://7slavka.ru"
 
@@ -76,6 +77,10 @@ type BLETracking struct {
 	RSSI     int    `json:"rssi"`
 	Name     string `json:"name"`
 	Location int    `json:"location"`
+}
+
+type PhoneCall struct {
+	Phone string `json:"phone"`
 }
 
 func init() {
@@ -435,9 +440,23 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		Logger.Infof("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d\n",
+		Logger.Infof("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d",
 			bleTracking.MAC, bleTracking.RSSI, bleTracking.Name, bleTracking.Location)
 
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.URL.Path == gateCallPath && r.Method == "POST" {
+		defer r.Body.Close()
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+		var phoneCall PhoneCall
+		if err := json.NewDecoder(r.Body).Decode(&phoneCall); err != nil {
+			// Handle errors (e.g., malformed JSON, body too large, unknown fields)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		Logger.Infof("Call received: %s", phoneCall.Phone)
 		w.WriteHeader(http.StatusOK)
 		return
 	}

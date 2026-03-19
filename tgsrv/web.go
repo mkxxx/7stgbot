@@ -87,8 +87,10 @@ func init() {
 	rand.Seed(time.Now().Unix())
 }
 
-func StartWebServer(port int, staticDir, dir string, QRElements map[string]string, price map[string]float64, coef map[string]float64, abort chan struct{}, pinger *pingMonitor) *webSrv {
-	webServer := newWebServer(port, staticDir, dir, QRElements, price, coef, pinger, abort)
+func StartWebServer(port int, staticDir, dir string, QRElements map[string]string, price map[string]float64,
+	coef map[string]float64, abort chan struct{}, pinger *pingMonitor, g *Gate) *webSrv {
+
+	webServer := newWebServer(port, staticDir, dir, QRElements, price, coef, pinger, abort, g)
 	webServer.start(port)
 	srv := webServer.httpServer
 	go func() {
@@ -99,7 +101,8 @@ func StartWebServer(port int, staticDir, dir string, QRElements map[string]strin
 }
 
 func newWebServer(port int, staticDir string, dir string, QRElements map[string]string,
-	price map[string]float64, coef map[string]float64, pinger *pingMonitor, abort chan struct{}) *webSrv {
+	price map[string]float64, coef map[string]float64, pinger *pingMonitor, abort chan struct{},
+	g *Gate) *webSrv {
 
 	ws := new(webSrv)
 	(&ws.priceHist).fromMap(price)
@@ -108,6 +111,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	ws.dataDir = dir
 	ws.pinger = pinger
 	(&ws.coefHist).fromMap(coef)
+	ws.gate = g
 
 	fs := http.FileServer(http.Dir(staticDir))
 	//ws.staticHandler = http.StripPrefix("/static/", fs)
@@ -127,6 +131,8 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 		<-abort
 		c.Stop()
 	}()
+
+	go g.handlingCalls(abort)
 
 	http.HandleFunc("/", ws.handle)
 
@@ -209,6 +215,7 @@ type webSrv struct {
 	httpServer    *http.Server
 	pinger        *pingMonitor
 	registry      atomic.Value
+	gate          *Gate
 }
 
 func (s *webSrv) start(port int) {
@@ -457,6 +464,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		Logger.Infof("Call received: %s", phoneCall.Phone)
+		s.gate.phoneCalls <- phoneCall.Phone
 		w.WriteHeader(http.StatusOK)
 		return
 	}

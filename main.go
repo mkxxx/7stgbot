@@ -56,7 +56,7 @@ func main() {
 	})
 	w = zapcore.NewMultiWriteSyncer(w, os.Stderr)
 	encoderCfg := zap.NewDevelopmentEncoderConfig()
-	timeEncoder := zapcore.TimeEncoderOfLayout("2006 - 01 - 02_15:04:05.000")
+	timeEncoder := zapcore.TimeEncoderOfLayout("2006-01-02_15:04:05.000")
 	encoderCfg.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 		timeEncoder(t.In(time.Local), enc)
 	}
@@ -114,7 +114,18 @@ func main() {
 	sort.Sort(tgsrv.ByRate(cfg.SMSRateLimiter))
 
 	pinger := tgsrv.StartPinger(abort, cfg.DiscordAlertChannelURL)
-	ws := tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfgDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger)
+
+	var g tgsrv.Gate
+	g.GateUrl = cfg.GateUrl
+	g.TelegramUrl = cfg.TelegramUrl
+	g.TelegramChatId = cfg.TelegramChatId
+	g.User = cfg.GateUser
+	g.Password = cfg.GatePwd
+	g.Phones = readLines(filepath.Join(cfgDir, "gate-phones.txt"))
+	g.RestrictedPhones = readLines(filepath.Join(cfgDir, "gate-phones-restricted.txt"))
+	g.Init()
+
+	ws := tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfgDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger, &g)
 
 	if noTGBot {
 		<-abort
@@ -141,6 +152,11 @@ type Config struct {
 	AdminPhone             string
 	SMSRateLimiterCfg      map[string]int
 	SMSRateLimiter         []tgsrv.Rate
+	GateUrl                string
+	TelegramUrl            string
+	TelegramChatId         string
+	GateUser               string
+	GatePwd                string
 }
 
 func stdinCredentials() (string, string) {
@@ -159,4 +175,23 @@ func stdinCredentials() (string, string) {
 	fmt.Println()
 	password := string(bytePassword)
 	return strings.TrimSpace(username), strings.TrimSpace(password)
+}
+
+func readLines(filePath string) map[string]bool {
+	res := make(map[string]bool)
+	file, err := os.Open(filePath)
+	if err != nil {
+		logger.Errorf("error opening %s : %v", filePath, err)
+		return res
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		res[scanner.Text()] = true
+	}
+	if err := scanner.Err(); err != nil {
+		logger.Errorf("error reading %s : %v", filePath, err)
+	}
+	return res
 }

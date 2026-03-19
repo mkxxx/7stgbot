@@ -46,7 +46,7 @@ Loop:
 			gateTime = time.Now()
 			err := g.sendOpenCommandToGate(phone)
 			if err != nil {
-				g.sendToTelegram(fmt.Sprintf("%s ок, %v", err))
+				g.sendToTelegram(fmt.Sprintf("%s ок, %v", phone, err))
 			} else {
 				g.sendToTelegram(fmt.Sprintf("%s ок", phone))
 			}
@@ -93,6 +93,8 @@ func (g *Gate) sendOpenCommandToGate(phone string) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		Logger.Errorf("error calling gate: %v", err)
+	} else {
+		Logger.Infof("%s http %d", resp.StatusCode)
 	}
 	defer resp.Body.Close()
 	return err

@@ -5,23 +5,28 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
 
 type Gate struct {
-	Phones           map[string]bool
-	RestrictedPhones map[string]bool
-	GateUrl          string
-	TelegramUrl      string
-	TelegramChatId   string
-	User             string
-	Password         string
-	phoneCalls       chan string
+	Phones              map[string]bool
+	RestrictedPhones    map[string]bool
+	BluetoothMacNames   map[string]string
+	IgnoreBluetoothMacs map[string]bool
+	GateUrl             string
+	TelegramUrl         string
+	TelegramChatId      string
+	User                string
+	Password            string
+	phoneCalls          chan string
+	bleTrackings        chan *BLETracking
 }
 
 func (g *Gate) Init() {
 	g.phoneCalls = make(chan string)
+	g.bleTrackings = make(chan *BLETracking)
 }
 
 func (g *Gate) handlingCalls(abort chan struct{}) {
@@ -98,4 +103,50 @@ func (g *Gate) sendOpenCommandToGate(phone string) error {
 	}
 	defer resp.Body.Close()
 	return err
+}
+
+func (g *Gate) handlingBLETracking(abort chan struct{}) {
+	var waitIsOver <-chan time.Time
+	const waitDuration = 4 * time.Second
+	ticker := time.NewTicker(waitDuration)
+	var tt []*BLETracking
+Loop:
+	for {
+		select {
+		case t := <-g.bleTrackings:
+			if g.IgnoreBluetoothMacs[t.MAC] {
+				continue
+			}
+			if waitIsOver == nil {
+				ticker.Reset(waitDuration)
+				waitIsOver = ticker.C
+			}
+			tt = append(tt, t)
+
+		case <-waitIsOver:
+			var msg strings.Builder
+			for _, t := range tt {
+				mac := g.BluetoothMacNames[t.MAC]
+				if len(mac) == 0 {
+					mac = t.MAC
+				}
+				msg.WriteString(mac)
+				if len(t.Name) != 0 {
+					msg.WriteString(" ")
+					msg.WriteString(t.Name)
+				}
+				if t.RSSI != 0 {
+					msg.WriteString(" RSSI:")
+					msg.WriteString(strconv.Itoa(t.RSSI))
+				}
+				msg.WriteString("\n")
+			}
+			g.sendToTelegram(msg.String())
+			waitIsOver = nil
+			tt = tt[:0]
+
+		case <-abort:
+			break Loop
+		}
+	}
 }

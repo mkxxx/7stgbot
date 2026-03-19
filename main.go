@@ -121,8 +121,14 @@ func main() {
 	g.TelegramChatId = cfg.TelegramChatId
 	g.User = cfg.GateUser
 	g.Password = cfg.GatePwd
-	g.Phones = readLines(filepath.Join(cfgDir, "gate-phones.txt"))
-	g.RestrictedPhones = readLines(filepath.Join(cfgDir, "gate-phones-restricted.txt"))
+	g.Phones = make(map[string]bool)
+	readLines(filepath.Join(cfgDir, "gate-phones.txt"), func(s string) { g.Phones[s] = true })
+	g.RestrictedPhones = make(map[string]bool)
+	readLines(filepath.Join(cfgDir, "gate-phones-restricted.txt"), func(s string) { g.RestrictedPhones[s] = true })
+	g.IgnoreBluetoothMacs = make(map[string]bool)
+	readLines(filepath.Join(cfgDir, "macs-ignored.txt"), func(s string) { g.IgnoreBluetoothMacs[s[:min(17, len(s))]] = true })
+	g.BluetoothMacNames = make(map[string]string)
+	readLines(filepath.Join(cfgDir, "macs.txt"), func(s string) { g.BluetoothMacNames[s[:min(17, len(s))]] = s })
 	g.Init()
 
 	ws := tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfgDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger, &g)
@@ -177,21 +183,19 @@ func stdinCredentials() (string, string) {
 	return strings.TrimSpace(username), strings.TrimSpace(password)
 }
 
-func readLines(filePath string) map[string]bool {
-	res := make(map[string]bool)
+func readLines(filePath string, f func(string)) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		logger.Errorf("error opening %s : %v", filePath, err)
-		return res
+		return
 	}
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		res[scanner.Text()] = true
+		f(scanner.Text())
 	}
 	if err := scanner.Err(); err != nil {
 		logger.Errorf("error reading %s : %v", filePath, err)
 	}
-	return res
 }

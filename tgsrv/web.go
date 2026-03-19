@@ -133,6 +133,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	}()
 
 	go g.handlingCalls(abort)
+	go g.handlingBLETracking(abort)
 
 	http.HandleFunc("/", ws.handle)
 
@@ -450,6 +451,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		Logger.Infof("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d",
 			bleTracking.MAC, bleTracking.RSSI, bleTracking.Name, bleTracking.Location)
 
+		s.gate.bleTrackings <- &bleTracking
 		w.WriteHeader(http.StatusOK)
 		return
 	}

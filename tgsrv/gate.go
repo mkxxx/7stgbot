@@ -12,7 +12,6 @@ import (
 type Gate struct {
 	Phones           map[string]bool
 	RestrictedPhones map[string]bool
-	PhoneCalls       chan string
 	GateUrl          string
 	TelegramUrl      string
 	TelegramChatId   string
@@ -30,7 +29,7 @@ func (g *Gate) handlingCalls(abort chan struct{}) {
 Loop:
 	for {
 		select {
-		case phone := <-g.PhoneCalls:
+		case phone := <-g.phoneCalls:
 			phone = strings.TrimPrefix(phone, "+")
 			if !g.Phones[phone] {
 				g.sendToTelegram(fmt.Sprintf("%s uknown", phone))

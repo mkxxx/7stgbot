@@ -59,7 +59,7 @@ Loop:
 func (g *Gate) sendToTelegram(msg string) {
 	formData := url.Values{
 		"chat_id": {g.TelegramChatId},
-		"text":    {msg},
+		"text":    {msg + time.Now().Format(" (2006-01-02 15:04:05)")},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -92,9 +92,9 @@ func (g *Gate) sendOpenCommandToGate(phone string) error {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		Logger.Errorf("error calling gate: %v", err)
+		Logger.Errorf("%s error calling gate: %v", phone, err)
 	} else {
-		Logger.Infof("%s http %d", resp.StatusCode)
+		Logger.Infof("%s http %d", phone, resp.StatusCode)
 	}
 	defer resp.Body.Close()
 	return err

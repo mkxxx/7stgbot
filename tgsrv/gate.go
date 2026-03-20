@@ -79,8 +79,9 @@ func (g *Gate) sendToTelegram(msg string) {
 	resp, err := client.Do(req)
 	if err != nil {
 		Logger.Errorf("error calling telegram: %v", err)
+	} else {
+		defer resp.Body.Close()
 	}
-	defer resp.Body.Close()
 }
 
 func (g *Gate) sendOpenCommandToGate(phone string) error {
@@ -100,8 +101,8 @@ func (g *Gate) sendOpenCommandToGate(phone string) error {
 		Logger.Errorf("%s error calling gate: %v", phone, err)
 	} else {
 		Logger.Infof("%s http %d", phone, resp.StatusCode)
+		defer resp.Body.Close()
 	}
-	defer resp.Body.Close()
 	return err
 }
 

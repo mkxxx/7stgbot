@@ -119,9 +119,11 @@ func (g *Gate) sendOpenCommandToGate(phone string) error {
 }
 
 func (g *Gate) handlingBLETracking(abort chan struct{}) {
-	var waitIsOver <-chan time.Time
-	const waitDuration = 4 * time.Second
-	ticker := time.NewTicker(waitDuration)
+	var firstWaitIsOver <-chan time.Time
+	var nextWaitIsOver <-chan time.Time
+	const firstDuration = 3 * time.Second
+	const nextDuration = 60 * time.Second
+	ticker := time.NewTicker(firstDuration)
 	var tt []*BLETracking
 Loop:
 	for {
@@ -130,36 +132,50 @@ Loop:
 			if g.IgnoreBluetoothMacs[t.MAC] {
 				continue
 			}
-			if waitIsOver == nil {
-				ticker.Reset(waitDuration)
-				waitIsOver = ticker.C
-			}
 			tt = append(tt, t)
-
-		case <-waitIsOver:
-			var msg strings.Builder
-			for _, t := range tt {
-				mac := g.BluetoothMacNames[t.MAC]
-				if len(mac) == 0 {
-					mac = t.MAC
-				}
-				msg.WriteString(mac)
-				if len(t.Name) != 0 {
-					msg.WriteString(" ")
-					msg.WriteString(t.Name)
-				}
-				if t.RSSI != 0 {
-					msg.WriteString(" RSSI:")
-					msg.WriteString(strconv.Itoa(t.RSSI))
-				}
-				msg.WriteString("\n")
+			if firstWaitIsOver == nil && nextWaitIsOver == nil {
+				ticker.Reset(firstDuration)
+				firstWaitIsOver = ticker.C
 			}
-			g.sendToTelegram(msg.String())
-			waitIsOver = nil
+
+		case <-firstWaitIsOver:
+			ticker.Reset(nextDuration)
+			firstWaitIsOver = nil
+			nextWaitIsOver = ticker.C
+			g.sendToTelegramMsg(tt)
+			tt = tt[:0]
+
+		case <-nextWaitIsOver:
+			if len(tt) == 0 {
+				nextWaitIsOver = nil
+				continue
+			}
+			g.sendToTelegramMsg(tt)
 			tt = tt[:0]
 
 		case <-abort:
 			break Loop
 		}
 	}
+}
+
+func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
+	var msg strings.Builder
+	for _, t := range tt {
+		mac := g.BluetoothMacNames[t.MAC]
+		if len(mac) == 0 {
+			mac = t.MAC
+		}
+		msg.WriteString(mac)
+		if len(t.Name) != 0 {
+			msg.WriteString(" ")
+			msg.WriteString(t.Name)
+		}
+		if t.RSSI != 0 {
+			msg.WriteString(" RSSI:")
+			msg.WriteString(strconv.Itoa(t.RSSI))
+		}
+		msg.WriteString("\n")
+	}
+	g.sendToTelegram(msg.String())
 }

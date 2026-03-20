@@ -119,6 +119,7 @@ func main() {
 	g.GateUrl = cfg.GateUrl
 	g.TelegramUrl = cfg.TelegramUrl
 	g.TelegramChatId = cfg.TelegramChatId
+	g.TelegramTimeoutSec = cfg.TelegramTimeoutSec
 	g.User = cfg.GateUser
 	g.Password = cfg.GatePwd
 	g.Phones = make(map[string]bool)
@@ -161,6 +162,7 @@ type Config struct {
 	GateUrl                string
 	TelegramUrl            string
 	TelegramChatId         string
+	TelegramTimeoutSec     int
 	GateUser               string
 	GatePwd                string
 }

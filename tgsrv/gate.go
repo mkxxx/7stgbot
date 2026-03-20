@@ -18,6 +18,7 @@ type Gate struct {
 	GateUrl             string
 	TelegramUrl         string
 	TelegramChatId      string
+	TelegramTimeoutSec  int
 	User                string
 	Password            string
 	phoneCalls          chan string
@@ -66,7 +67,7 @@ func (g *Gate) sendToTelegram(msg string) {
 		"chat_id": {g.TelegramChatId},
 		"text":    {msg + time.Now().Format(" (2006-01-02 15:04:05)")},
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.TelegramTimeoutSec)*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", g.TelegramUrl, strings.NewReader(formData.Encode()))

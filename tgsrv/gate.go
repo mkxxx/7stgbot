@@ -19,6 +19,7 @@ type Gate struct {
 	TelegramUrl         string
 	TelegramChatId      string
 	TelegramTimeoutSec  int
+	ProxyUrl            string
 	User                string
 	Password            string
 	phoneCalls          chan string
@@ -63,6 +64,17 @@ Loop:
 }
 
 func (g *Gate) sendToTelegram(msg string) {
+	var client *http.Client
+	if len(g.ProxyUrl) != 0 {
+		proxyURL, err := url.Parse(g.ProxyUrl)
+		if err != nil {
+			Logger.Errorf("error calling telegram: %v", err)
+			return
+		}
+		client = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	} else {
+		client = &http.Client{}
+	}
 	formData := url.Values{
 		"chat_id": {g.TelegramChatId},
 		"text":    {msg + time.Now().Format(" (2006-01-02 15:04:05)")},
@@ -72,11 +84,10 @@ func (g *Gate) sendToTelegram(msg string) {
 
 	req, err := http.NewRequestWithContext(ctx, "POST", g.TelegramUrl, strings.NewReader(formData.Encode()))
 	if err != nil {
-		panic(err)
+		Logger.Errorf("error calling telegram: %v", err)
+		return
 	}
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-
-	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
 		Logger.Errorf("error calling telegram: %v", err)

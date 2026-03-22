@@ -38,11 +38,12 @@ Loop:
 		select {
 		case phone := <-g.phoneCalls:
 			phone = strings.TrimPrefix(phone, "+")
-			if !g.Phones[phone] {
+			v, ok := g.Phones[phone]
+			if !ok {
 				g.sendToTelegram(fmt.Sprintf("%s uknown", phone))
 				continue
 			}
-			if g.RestrictedPhones[phone] {
+			if !v || g.RestrictedPhones[phone] {
 				g.sendToTelegram(fmt.Sprintf("%s restricted", phone))
 				continue
 			}

@@ -3,9 +3,10 @@ package main
 import (
 	"7stgbot/tgsrv"
 	"bufio"
+	"encoding/csv"
 	"flag"
 	"fmt"
-	"golang.org/x/crypto/ssh/terminal"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/crypto/ssh/terminal"
 
 	"github.com/BurntSushi/toml"
 	"go.uber.org/zap"
@@ -124,7 +127,7 @@ func main() {
 	g.User = cfg.GateUser
 	g.Password = cfg.GatePwd
 	g.Phones = make(map[string]bool)
-	readLines(filepath.Join(cfgDir, "gate-phones.txt"), func(s string) { g.Phones[s] = true })
+	readCsv(filepath.Join(cfgDir, "User_list_4G600211776.csv"), palgateUserFunc(g.Phones))
 	g.RestrictedPhones = make(map[string]bool)
 	readLines(filepath.Join(cfgDir, "gate-phones-restricted.txt"), func(s string) { g.RestrictedPhones[s] = true })
 	g.IgnoreBluetoothMacs = make(map[string]bool)
@@ -201,5 +204,40 @@ func readLines(filePath string, f func(string)) {
 	}
 	if err := scanner.Err(); err != nil {
 		logger.Errorf("error reading %s : %v", filePath, err)
+	}
+}
+
+func readCsv(filePath string, f func([]string, map[string]int)) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		logger.Errorf("error opening %s : %v", filePath, err)
+		return
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	header, err := reader.Read()
+	if err != nil {
+		logger.Errorf("error readig header: %v", err)
+		return
+	}
+	cols := make(map[string]int)
+	for i, name := range header {
+		cols[name] = i
+	}
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		f(record, cols)
+	}
+}
+
+func palgateUserFunc(m map[string]bool) func([]string, map[string]int) {
+	//Phone number,First name,Last name,Admin,Linked device,Output 1,Time group,Remote control sn,Dial to open,Dial number (read only),Nearby only,Latch 1,Notes
+	//79991234567,,,FALSE,FALSE,TRUE,,,TRUE,,FALSE,FALSE,
+	return func(row []string, cols map[string]int) {
+		m[row[cols["Phone number"]]] = row[cols["Dial to open"]] == "TRUE"
 	}
 }

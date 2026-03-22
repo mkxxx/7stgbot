@@ -22,12 +22,12 @@ type Gate struct {
 	ProxyUrl            string
 	User                string
 	Password            string
-	phoneCalls          chan string
+	phoneCalls          chan PhoneCall
 	bleTrackings        chan *BLETracking
 }
 
 func (g *Gate) Init() {
-	g.phoneCalls = make(chan string)
+	g.phoneCalls = make(chan PhoneCall)
 	g.bleTrackings = make(chan *BLETracking)
 }
 
@@ -36,8 +36,8 @@ func (g *Gate) handlingCalls(abort chan struct{}) {
 Loop:
 	for {
 		select {
-		case phone := <-g.phoneCalls:
-			phone = strings.TrimPrefix(phone, "+")
+		case call := <-g.phoneCalls:
+			phone := strings.TrimPrefix(call.Phone, "+")
 			v, ok := g.Phones[phone]
 			if !ok {
 				g.sendToTelegram(fmt.Sprintf("%s uknown", phone))
@@ -52,6 +52,11 @@ Loop:
 				continue
 			}
 			gateTime = time.Now()
+			elapsed := time.Since(call.time())
+			if elapsed > 20*time.Second {
+				g.sendToTelegram(fmt.Sprintf("%s ок, but call is overdue %d s", phone, elapsed/time.Second))
+				continue
+			}
 			err := g.sendOpenCommandToGate(phone)
 			if err != nil {
 				g.sendToTelegram(fmt.Sprintf("%s ок, %v", phone, err))

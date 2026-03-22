@@ -80,7 +80,13 @@ type BLETracking struct {
 }
 
 type PhoneCall struct {
-	Phone string `json:"phone"`
+	Phone    string  `json:"phone"`
+	UnixTime float64 `json:"time"`
+}
+
+func (c *PhoneCall) time() time.Time {
+	seconds := int64(c.UnixTime)
+	return time.Unix(seconds, int64((c.UnixTime-float64(seconds))*float64(time.Nanosecond)))
 }
 
 func init() {
@@ -472,7 +478,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		Logger.Infof("Call received: %s   %s", phoneCall.Phone, string(bodyBytes))
-		s.gate.phoneCalls <- phoneCall.Phone
+		s.gate.phoneCalls <- phoneCall
 		w.WriteHeader(http.StatusOK)
 		return
 	}

@@ -459,13 +459,19 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+			http.Error(w, "cannot read request body", http.StatusInternalServerError)
+			return
+		}
 		var phoneCall PhoneCall
-		if err := json.NewDecoder(r.Body).Decode(&phoneCall); err != nil {
+		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&phoneCall); err != nil {
 			// Handle errors (e.g., malformed JSON, body too large, unknown fields)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		Logger.Infof("Call received: %s", phoneCall.Phone)
+		Logger.Infof("Call received: %s   %s", phoneCall.Phone, string(bodyBytes))
 		s.gate.phoneCalls <- phoneCall.Phone
 		w.WriteHeader(http.StatusOK)
 		return

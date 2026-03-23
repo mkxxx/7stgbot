@@ -1,7 +1,9 @@
 package tgsrv
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -11,19 +13,106 @@ import (
 )
 
 type Gate struct {
-	Phones              map[string]bool
-	RestrictedPhones    map[string]bool
-	BluetoothMacNames   map[string]string
-	IgnoreBluetoothMacs map[string]bool
-	GateUrl             string
-	TelegramUrl         string
-	TelegramChatId      string
-	TelegramTimeoutSec  int
-	ProxyUrl            string
-	User                string
-	Password            string
-	phoneCalls          chan PhoneCall
-	bleTrackings        chan *BLETracking
+	Phones               map[string]bool
+	RestrictedPhones     map[string]bool
+	BluetoothMacNames    map[string]string
+	IgnoreBluetoothMacs  map[string]bool
+	GateUrl              string
+	TelegramUrl          string
+	TelegramChatId       string
+	TelegramTimeoutSec   int
+	ProxyUrl             string
+	User                 string
+	Password             string
+	phoneCalls           chan PhoneCall
+	bleTrackings         chan *BLETracking
+	PalesPortalUser      string
+	PalesPortalPwd       string
+	palesPortalUserToken string
+	palesLogsStartDate   int64
+}
+
+type PalesLoginResp struct {
+	Msg  string
+	User struct {
+		Token string
+	}
+}
+
+type PalesLog struct {
+	Msg string
+	Log struct {
+		Count int
+		List  []*PalesLogUser
+	}
+}
+
+type PalesLogUser struct {
+	UserId    string
+	Sn        string
+	Approved  bool
+	Type      int
+	Tm        int64
+	Reason    int
+	Firstname string
+	Lastname  string
+}
+
+type PalesUsers struct {
+	Msg   string
+	Users struct {
+		Count int
+		List  []*PalesUser
+	}
+}
+
+type PalesUser struct {
+	Id                  string `json:"_id"`
+	Firstname           string
+	Lastname            string
+	Admin               bool
+	Output1             bool
+	StartDate           string
+	EndDate             string
+	DialToOpen          bool
+	LocalOnly           bool
+	Output1Latch        bool
+	Output2Latch        bool
+	Output1LatchMaxTime int64
+	Output2LatchMaxTime int64
+	SecondaryDevice     bool
+	Notifications       bool
+	GuestInvitation     bool
+	GeoFence1           struct {
+		Enabled             bool
+		Lat                 float64
+		Long                float64
+		Radius              int
+		Rssi                int
+		Key                 string
+		ConfirmNotification bool
+		RetrySeconds        int `json:"retry"`
+	}
+}
+
+func (u *PalesLogUser) timestamp() string {
+	return time.Unix(u.Tm, 0).In(Location).Format("2006-01-02 15:04:05")
+}
+
+func (u *PalesLogUser) typeName() string {
+	switch u.Type {
+	case 1:
+		return "call"
+	case 100:
+		return "inet"
+	case 108:
+		return "nearby"
+	case 2:
+		return "remote"
+	case 8:
+		return "bt"
+	}
+	return fmt.Sprintf("unknown %d", u.Type)
 }
 
 func (g *Gate) Init() {
@@ -83,7 +172,7 @@ func (g *Gate) sendToTelegram(msg string) {
 	}
 	formData := url.Values{
 		"chat_id": {g.TelegramChatId},
-		"text":    {msg + time.Now().Format(" (2006-01-02 15:04:05)")},
+		"text":    {msg + time.Now().In(Location).Format("2006-01-02 15:04:05")},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.TelegramTimeoutSec)*time.Second)
 	defer cancel()
@@ -183,5 +272,124 @@ func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
 		}
 		msg.WriteString("\n")
 	}
+	g.sendToTelegram(msg.String())
+}
+
+func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}) {
+	g.login()
+	g.palesLogsStartDate = time.Now().Unix()
+	g.loadPalesLogs()
+	minuteTicker := time.NewTicker(time.Minute)
+	tenSecTicker := time.NewTicker(10 * time.Second)
+	thirtyMinuteTicker := time.NewTicker(30 * time.Minute)
+Loop:
+	for {
+		select {
+		case <-minuteTicker.C:
+			g.login()
+		case <-tenSecTicker.C:
+			g.loadPalesLogs()
+		case <-thirtyMinuteTicker.C:
+		case <-abort:
+			break Loop
+		}
+	}
+}
+
+func (g *Gate) login() {
+	if len(g.palesPortalUserToken) != 0 {
+		return
+	}
+	type loginForm struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		B        string `json:"b"`
+	}
+	form := loginForm{Username: g.PalesPortalUser, Password: g.PalesPortalPwd, B: ""}
+	jsonData, err := json.Marshal(form)
+	if err != nil {
+		Logger.Errorf("pal-es login: %v", err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://portal.pal-es.com/api1/user/login1", bytes.NewBuffer(jsonData))
+	if err != nil {
+		Logger.Errorf("pal-es login: %v", err)
+		return
+	}
+	req.Header.Add("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		Logger.Errorf("pal-es login http: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	Logger.Infof("pal-es login http %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+	var result PalesLoginResp
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		Logger.Errorf("error unmarshalling pal-es login http response: %v", err)
+		return
+	}
+	Logger.Infof("pal-es login %s", result.Msg)
+	g.palesPortalUserToken = result.User.Token
+}
+
+func (g *Gate) loadPalesLogs() {
+	if len(g.palesPortalUserToken) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		fmt.Sprintf("https://portal.pal-es.com/api1/device/4G600211776/log?skip=0&limit=20&filter=&startDate=%d&endDate=&approved=&reasons=&rly=&type=",
+			g.palesLogsStartDate), nil)
+
+	if err != nil {
+		Logger.Errorf("%v", err)
+		return
+	}
+	req.Header.Add("x-access-token", g.palesPortalUserToken)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		Logger.Errorf("pal-es log http: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	Logger.Infof("pal-es log http %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+	var result PalesLog
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		Logger.Errorf("error unmarshalling pal-es log http response: %v", err)
+		return
+	}
+	Logger.Infof("pal-es log %s", result.Msg)
+	if len(result.Log.List) == 0 {
+		return
+	}
+	var msg strings.Builder
+	for _, l := range result.Log.List {
+		g.palesLogsStartDate = max(g.palesLogsStartDate, l.Tm)
+		var approved string
+		if !l.Approved {
+			approved = fmt.Sprintf("!OK %d", l.Reason)
+		}
+		msg.WriteString(fmt.Sprintf("%s %s %s %s %s%s %s \n", l.timestamp(), l.typeName(), l.UserId, l.Sn,
+			l.Firstname, l.Lastname, approved))
+	}
+	g.palesLogsStartDate++
 	g.sendToTelegram(msg.String())
 }

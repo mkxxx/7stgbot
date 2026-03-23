@@ -126,6 +126,8 @@ func main() {
 	g.ProxyUrl = cfg.ProxyUrl
 	g.User = cfg.GateUser
 	g.Password = cfg.GatePwd
+	g.PalesPortalUser = cfg.PalesPortalUser
+	g.PalesPortalPwd = cfg.PalesPortalPwd
 	g.Phones = make(map[string]bool)
 	readCsv(filepath.Join(cfgDir, "User_list_4G600211776.csv"), palgateUserFunc(g.Phones))
 	g.RestrictedPhones = make(map[string]bool)
@@ -170,6 +172,8 @@ type Config struct {
 	ProxyUrl               string
 	GateUser               string
 	GatePwd                string
+	PalesPortalUser        string
+	PalesPortalPwd         string
 }
 
 func stdinCredentials() (string, string) {

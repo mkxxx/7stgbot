@@ -138,6 +138,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 		c.Stop()
 	}()
 
+	go g.palesLoginAndLoadLoop(abort)
 	go g.handlingCalls(abort)
 	go g.handlingBLETracking(abort)
 

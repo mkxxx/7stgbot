@@ -366,17 +366,18 @@ func (g *Gate) loadPalesLogs() {
 		return
 	}
 	defer resp.Body.Close()
-	Logger.Infof("pal-es log http %d", resp.StatusCode)
 	if resp.StatusCode != http.StatusOK {
+		Logger.Infof("pal-es log http %d", resp.StatusCode)
 		return
 	}
+	Logger.Debugf("pal-es log http %d", resp.StatusCode)
 	var result PalesLog
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	if err != nil {
 		Logger.Errorf("error unmarshalling pal-es log http response: %v", err)
 		return
 	}
-	Logger.Infof("pal-es log %s", result.Msg)
+	Logger.Debugf("pal-es log %s, %d", result.Msg, len(result.Log.List))
 	if len(result.Log.List) == 0 {
 		return
 	}
@@ -390,6 +391,7 @@ func (g *Gate) loadPalesLogs() {
 		msg.WriteString(fmt.Sprintf("%s %s %s %s %s%s %s \n", l.timestamp(), l.typeName(), l.UserId, l.Sn,
 			l.Firstname, l.Lastname, approved))
 	}
+	Logger.Infof("received %d pal-es log records", len(result.Log.List))
 	g.palesLogsStartDate++
 	g.sendToTelegram(msg.String())
 }

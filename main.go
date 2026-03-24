@@ -142,6 +142,7 @@ func main() {
 			g.PalesPortalUserToken = s
 		}
 	})
+	g.CfgDir = cfgDir
 	g.Init()
 
 	ws := tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfgDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger, &g)

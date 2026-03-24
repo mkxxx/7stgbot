@@ -3,11 +3,13 @@ package tgsrv
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +33,7 @@ type Gate struct {
 	PalesPortalPwd       string
 	PalesTokenFilename   string
 	PalesPortalUserToken string
+	CfgDir               string
 	palesLogsStartDate   int64
 }
 
@@ -279,6 +282,7 @@ func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
 
 func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}) {
 	g.login()
+	g.loadPalesUsers()
 	g.palesLogsStartDate = time.Now().Unix()
 	g.loadPalesLogs()
 	minuteTicker := time.NewTicker(time.Minute)
@@ -292,6 +296,7 @@ Loop:
 		case <-tenSecTicker.C:
 			g.loadPalesLogs()
 		case <-thirtyMinuteTicker.C:
+			g.loadPalesUsers()
 		case <-abort:
 			break Loop
 		}
@@ -405,4 +410,71 @@ func (g *Gate) loadPalesLogs() {
 	Logger.Infof("received %d pal-es log records", len(result.Log.List))
 	g.palesLogsStartDate++
 	g.sendToTelegram(msg.String())
+}
+
+func (g *Gate) loadPalesUsers() {
+	if len(g.PalesPortalUserToken) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		"https://portal.pal-es.com/api1/device/4G600211776/users?skip=0&limit=10000&filter=", nil)
+
+	if err != nil {
+		Logger.Errorf("%v", err)
+		return
+	}
+	req.Header.Add("x-access-token", g.PalesPortalUserToken)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		Logger.Errorf("pal-es users http: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		Logger.Infof("pal-es users http %d", resp.StatusCode)
+		return
+	}
+	Logger.Debugf("pal-es users http %d", resp.StatusCode)
+	var result PalesUsers
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		Logger.Errorf("error unmarshalling pal-es users http response: %v", err)
+		return
+	}
+	Logger.Debugf("pal-es users %s, %d", result.Msg, len(result.Users.List))
+	for _, u := range result.Users.List {
+		g.Phones[u.Id] = u.DialToOpen
+	}
+	var records [][]string
+	records = append(records, []string{"Phone number", "First name", "Last name",
+		"Admin", "Linked device", "Output 1", "Time group", "Remote control sn",
+		"Dial to open", "Dial number (read only)", "Nearby only", "Latch 1", "Notes"})
+	for _, u := range result.Users.List {
+		records = append(records, []string{u.Id, u.Firstname, u.Lastname,
+			If(u.Admin, "TRUE", "FALSE"), If(u.SecondaryDevice, "TRUE", "FALSE"), If(u.Output1, "TRUE", "FALSE"), "", "",
+			If(u.DialToOpen, "TRUE", "FALSE"), "FALSE", "FALSE", If(u.Output1Latch, "TRUE", "FALSE"), ""})
+	}
+	fileName := filepath.Join(g.CfgDir, "pales_users.csv")
+	f, err := os.Create(fileName)
+	if err != nil {
+		Logger.Errorf("error creating file %s  %v", fileName, err)
+	}
+	defer f.Close()
+	w := csv.NewWriter(f)
+	err = w.WriteAll(records)
+	if err != nil {
+		Logger.Errorf("error writing csv to file %s  %v", fileName, err)
+	}
+}
+
+func If[T any](cond bool, a, b T) T {
+	if cond {
+		return a
+	}
+	return b
 }

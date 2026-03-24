@@ -53,6 +53,7 @@ const (
 	internetDocsPath      = "/docs/"
 	blePath               = "/ble/"
 	gateCallPath          = "/gate/call/"
+	gateOpenedPath        = "/gate/opened/"
 
 	site = "https://7slavka.ru"
 
@@ -481,6 +482,10 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		Logger.Infof("Call received: %s   %s", phoneCall.Phone, string(bodyBytes))
 		s.gate.phoneCalls <- phoneCall
 		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.URL.Path == gateOpenedPath && r.Method == "GET" {
+		Logger.Infof("gate opened")
 		return
 	}
 	s.staticHandler.ServeHTTP(w, r)

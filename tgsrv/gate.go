@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +29,8 @@ type Gate struct {
 	bleTrackings         chan *BLETracking
 	PalesPortalUser      string
 	PalesPortalPwd       string
-	palesPortalUserToken string
+	PalesTokenFilename   string
+	PalesPortalUserToken string
 	palesLogsStartDate   int64
 }
 
@@ -102,15 +104,15 @@ func (u *PalesLogUser) timestamp() string {
 func (u *PalesLogUser) typeName() string {
 	switch u.Type {
 	case 1:
-		return "call"
+		return "dial"
 	case 100:
 		return "inet"
 	case 108:
-		return "nearby"
+		return "bt-auto"
 	case 2:
 		return "remote"
 	case 8:
-		return "bt"
+		return "bluetooth"
 	}
 	return fmt.Sprintf("unknown %d", u.Type)
 }
@@ -297,7 +299,7 @@ Loop:
 }
 
 func (g *Gate) login() {
-	if len(g.palesPortalUserToken) != 0 {
+	if len(g.PalesPortalUserToken) != 0 {
 		return
 	}
 	type loginForm struct {
@@ -339,11 +341,16 @@ func (g *Gate) login() {
 		return
 	}
 	Logger.Infof("pal-es login %s", result.Msg)
-	g.palesPortalUserToken = result.User.Token
+	g.PalesPortalUserToken = result.User.Token
+
+	err = os.WriteFile(g.PalesTokenFilename, []byte(result.User.Token), 0644)
+	if err != nil {
+		Logger.Errorf("error writing file %s %v", g.PalesTokenFilename, err)
+	}
 }
 
 func (g *Gate) loadPalesLogs() {
-	if len(g.palesPortalUserToken) == 0 {
+	if len(g.PalesPortalUserToken) == 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -357,7 +364,7 @@ func (g *Gate) loadPalesLogs() {
 		Logger.Errorf("%v", err)
 		return
 	}
-	req.Header.Add("x-access-token", g.palesPortalUserToken)
+	req.Header.Add("x-access-token", g.PalesPortalUserToken)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -388,7 +395,11 @@ func (g *Gate) loadPalesLogs() {
 		if !l.Approved {
 			approved = fmt.Sprintf("!OK %d", l.Reason)
 		}
-		msg.WriteString(fmt.Sprintf("%s %s %s %s %s%s %s \n", l.timestamp(), l.typeName(), l.UserId, l.Sn,
+		sn := ""
+		if !strings.HasSuffix(l.UserId, l.Sn) {
+			sn = l.Sn
+		}
+		msg.WriteString(fmt.Sprintf("%s %s %s %s %s%s %s \n", l.timestamp(), l.typeName(), l.UserId, sn,
 			l.Firstname, l.Lastname, approved))
 	}
 	Logger.Infof("received %d pal-es log records", len(result.Log.List))

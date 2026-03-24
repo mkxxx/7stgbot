@@ -131,11 +131,17 @@ func main() {
 	g.Phones = make(map[string]bool)
 	readCsv(filepath.Join(cfgDir, "User_list_4G600211776.csv"), palgateUserFunc(g.Phones))
 	g.RestrictedPhones = make(map[string]bool)
-	readLines(filepath.Join(cfgDir, "gate-phones-restricted.txt"), func(s string) { g.RestrictedPhones[s] = true })
+	readLines(filepath.Join(cfgDir, "gate-phones-restricted.txt"), func(s string, _ int) { g.RestrictedPhones[s] = true })
 	g.IgnoreBluetoothMacs = make(map[string]bool)
-	readLines(filepath.Join(cfgDir, "macs-ignored.txt"), func(s string) { g.IgnoreBluetoothMacs[s[:min(17, len(s))]] = true })
+	readLines(filepath.Join(cfgDir, "macs-ignored.txt"), func(s string, _ int) { g.IgnoreBluetoothMacs[s[:min(17, len(s))]] = true })
 	g.BluetoothMacNames = make(map[string]string)
-	readLines(filepath.Join(cfgDir, "macs.txt"), func(s string) { g.BluetoothMacNames[s[:min(17, len(s))]] = s })
+	readLines(filepath.Join(cfgDir, "macs.txt"), func(s string, _ int) { g.BluetoothMacNames[s[:min(17, len(s))]] = s })
+	g.PalesTokenFilename = filepath.Join(cfgDir, "t.txt")
+	readLines(g.PalesTokenFilename, func(s string, i int) {
+		if i == 0 {
+			g.PalesPortalUserToken = s
+		}
+	})
 	g.Init()
 
 	ws := tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfgDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger, &g)
@@ -194,7 +200,7 @@ func stdinCredentials() (string, string) {
 	return strings.TrimSpace(username), strings.TrimSpace(password)
 }
 
-func readLines(filePath string, f func(string)) {
+func readLines(filePath string, f func(string, int)) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		logger.Errorf("error opening %s : %v", filePath, err)
@@ -203,8 +209,10 @@ func readLines(filePath string, f func(string)) {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
+	i := 0
 	for scanner.Scan() {
-		f(scanner.Text())
+		f(scanner.Text(), i)
+		i++
 	}
 	if err := scanner.Err(); err != nil {
 		logger.Errorf("error reading %s : %v", filePath, err)

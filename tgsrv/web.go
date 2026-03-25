@@ -485,7 +485,6 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == gateOpenedPath && r.Method == "GET" {
-		Logger.Infof("gate opened")
 		s.gate.gateOpened()
 		return
 	}

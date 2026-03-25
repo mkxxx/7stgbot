@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,6 +37,8 @@ type Gate struct {
 	CfgDir               string
 	palesLogsStartDate   int64
 	BleWatchLocation     int
+	mu                   sync.Mutex
+	lastOpened           time.Time
 }
 
 type PalesLoginResp struct {
@@ -499,5 +502,11 @@ func If[T any](cond bool, a, b T) T {
 }
 
 func (g *Gate) gateOpened() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if time.Since(g.lastOpened) < time.Minute {
+		return
+	}
+	Logger.Infof("gate opened")
 	g.sendToTelegram("gate opened")
 }

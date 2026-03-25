@@ -29,6 +29,7 @@ var (
 	cfgDir  string
 	logfile string
 	noTGBot bool
+	debug   bool
 	user    string
 	pwd     string
 )
@@ -37,6 +38,7 @@ func main() {
 	flag.StringVar(&logfile, "logfile", "7stgbot.log", "log file")
 	flag.StringVar(&cfgDir, "cfg", "./", "Path to config dir containing config.toml and data files")
 	flag.BoolVar(&noTGBot, "notgbot", false, "Start telegram bot (must be configured in config)")
+	flag.BoolVar(&debug, "debug", false, "set debug level of logger")
 	flag.StringVar(&user, "u", "", "user   For development env only. Do not to be used in other environments")
 	flag.StringVar(&pwd, "p", "", "user   For development env only. Do not to be used in other environments")
 	flag.Parse()
@@ -63,10 +65,14 @@ func main() {
 	encoderCfg.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 		timeEncoder(t.In(time.Local), enc)
 	}
+	atomicLevel := zap.NewAtomicLevelAt(zap.InfoLevel)
+	if debug {
+		atomicLevel.SetLevel(zap.DebugLevel)
+	}
 	core := zapcore.NewCore(
 		zapcore.NewConsoleEncoder(encoderCfg),
 		w,
-		zap.DebugLevel,
+		atomicLevel,
 	)
 	logger = zap.New(core).Sugar()
 	tgsrv.Logger = logger

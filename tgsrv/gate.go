@@ -281,8 +281,14 @@ func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
 }
 
 func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}) {
-	g.login()
-	g.loadPalesUsers()
+	g.login(false)
+	{
+		st := g.loadPalesUsers()
+		if st == http.StatusUnauthorized {
+			g.login(true)
+			g.loadPalesUsers()
+		}
+	}
 	g.palesLogsStartDate = time.Now().Unix()
 	g.loadPalesLogs()
 	minuteTicker := time.NewTicker(time.Minute)
@@ -292,9 +298,13 @@ Loop:
 	for {
 		select {
 		case <-minuteTicker.C:
-			g.login()
+			g.login(false)
 		case <-tenSecTicker.C:
-			g.loadPalesLogs()
+			st := g.loadPalesLogs()
+			if st == http.StatusUnauthorized {
+				g.login(true)
+				g.loadPalesLogs()
+			}
 		case <-thirtyMinuteTicker.C:
 			g.loadPalesUsers()
 		case <-abort:
@@ -303,7 +313,10 @@ Loop:
 	}
 }
 
-func (g *Gate) login() {
+func (g *Gate) login(force bool) {
+	if force {
+		g.PalesPortalUserToken = ""
+	}
 	if len(g.PalesPortalUserToken) != 0 {
 		return
 	}
@@ -354,9 +367,9 @@ func (g *Gate) login() {
 	}
 }
 
-func (g *Gate) loadPalesLogs() {
+func (g *Gate) loadPalesLogs() int {
 	if len(g.PalesPortalUserToken) == 0 {
-		return
+		return 0
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -367,7 +380,7 @@ func (g *Gate) loadPalesLogs() {
 
 	if err != nil {
 		Logger.Errorf("%v", err)
-		return
+		return -1
 	}
 	req.Header.Add("x-access-token", g.PalesPortalUserToken)
 
@@ -375,23 +388,23 @@ func (g *Gate) loadPalesLogs() {
 	resp, err := client.Do(req)
 	if err != nil {
 		Logger.Errorf("pal-es log http: %v", err)
-		return
+		return -1
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		Logger.Infof("pal-es log http %d", resp.StatusCode)
-		return
+		return resp.StatusCode
 	}
 	Logger.Debugf("pal-es log http %d", resp.StatusCode)
 	var result PalesLog
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	if err != nil {
 		Logger.Errorf("error unmarshalling pal-es log http response: %v", err)
-		return
+		return -1
 	}
 	Logger.Debugf("pal-es log %s, %d", result.Msg, len(result.Log.List))
 	if len(result.Log.List) == 0 {
-		return
+		return 0
 	}
 	var msg strings.Builder
 	for _, l := range result.Log.List {
@@ -410,11 +423,12 @@ func (g *Gate) loadPalesLogs() {
 	Logger.Infof("received %d pal-es log records", len(result.Log.List))
 	g.palesLogsStartDate++
 	g.sendToTelegram(msg.String())
+	return resp.StatusCode
 }
 
-func (g *Gate) loadPalesUsers() {
+func (g *Gate) loadPalesUsers() int {
 	if len(g.PalesPortalUserToken) == 0 {
-		return
+		return 0
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -424,7 +438,7 @@ func (g *Gate) loadPalesUsers() {
 
 	if err != nil {
 		Logger.Errorf("%v", err)
-		return
+		return -1
 	}
 	req.Header.Add("x-access-token", g.PalesPortalUserToken)
 
@@ -432,19 +446,19 @@ func (g *Gate) loadPalesUsers() {
 	resp, err := client.Do(req)
 	if err != nil {
 		Logger.Errorf("pal-es users http: %v", err)
-		return
+		return -1
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		Logger.Infof("pal-es users http %d", resp.StatusCode)
-		return
+		return resp.StatusCode
 	}
 	Logger.Debugf("pal-es users http %d", resp.StatusCode)
 	var result PalesUsers
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	if err != nil {
 		Logger.Errorf("error unmarshalling pal-es users http response: %v", err)
-		return
+		return -1
 	}
 	Logger.Debugf("pal-es users %s, %d", result.Msg, len(result.Users.List))
 	for _, u := range result.Users.List {
@@ -470,6 +484,7 @@ func (g *Gate) loadPalesUsers() {
 	if err != nil {
 		Logger.Errorf("error writing csv to file %s  %v", fileName, err)
 	}
+	return resp.StatusCode
 }
 
 func If[T any](cond bool, a, b T) T {
@@ -477,4 +492,8 @@ func If[T any](cond bool, a, b T) T {
 		return a
 	}
 	return b
+}
+
+func (g *Gate) gateOpened() {
+	g.sendToTelegram("gate opened")
 }

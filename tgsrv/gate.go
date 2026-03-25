@@ -507,6 +507,7 @@ func (g *Gate) gateOpened() {
 	if time.Since(g.lastOpened) < time.Minute {
 		return
 	}
+	g.lastOpened = time.Now()
 	Logger.Infof("gate opened")
 	g.sendToTelegram("gate opened")
 }

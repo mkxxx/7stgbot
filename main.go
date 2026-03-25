@@ -148,6 +148,7 @@ func main() {
 			g.PalesPortalUserToken = s
 		}
 	})
+	g.BleWatchLocation = cfg.BleWatchLocation
 	g.CfgDir = cfgDir
 	g.Init()
 
@@ -187,6 +188,7 @@ type Config struct {
 	GatePwd                string
 	PalesPortalUser        string
 	PalesPortalPwd         string
+	BleWatchLocation       int
 }
 
 func stdinCredentials() (string, string) {

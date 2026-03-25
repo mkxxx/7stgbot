@@ -74,10 +74,10 @@ const (
 )
 
 type BLETracking struct {
-	MAC      string `json:"mac"`
-	RSSI     int    `json:"rssi"`
-	Name     string `json:"name"`
-	Location int    `json:"location"`
+	MAC      string
+	RSSI     int
+	Name     string
+	Location int
 }
 
 type PhoneCall struct {

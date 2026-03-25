@@ -35,6 +35,7 @@ type Gate struct {
 	PalesPortalUserToken string
 	CfgDir               string
 	palesLogsStartDate   int64
+	BleWatchLocation     int
 }
 
 type PalesLoginResp struct {
@@ -177,7 +178,7 @@ func (g *Gate) sendToTelegram(msg string) {
 	}
 	formData := url.Values{
 		"chat_id": {g.TelegramChatId},
-		"text":    {msg + time.Now().In(Location).Format("2006-01-02 15:04:05")},
+		"text":    {msg + time.Now().In(Location).Format(" 2006-01-02 15:04:05")},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.TelegramTimeoutSec)*time.Second)
 	defer cancel()
@@ -262,6 +263,9 @@ Loop:
 func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
 	var msg strings.Builder
 	for _, t := range tt {
+		if t.Location != g.BleWatchLocation {
+			continue
+		}
 		mac := g.BluetoothMacNames[t.MAC]
 		if len(mac) == 0 {
 			mac = t.MAC

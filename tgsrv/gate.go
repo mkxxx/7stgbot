@@ -168,6 +168,7 @@ Loop:
 }
 
 func (g *Gate) sendToTelegram(msg string) {
+	Logger.Infof("telegram: %s", msg)
 	var client *http.Client
 	if len(g.ProxyUrl) != 0 {
 		proxyURL, err := url.Parse(g.ProxyUrl)
@@ -233,6 +234,9 @@ Loop:
 	for {
 		select {
 		case t := <-g.bleTrackings:
+			if t.Location != g.BleWatchLocation {
+				continue
+			}
 			if g.IgnoreBluetoothMacs[t.MAC] {
 				continue
 			}
@@ -266,9 +270,6 @@ Loop:
 func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
 	var msg strings.Builder
 	for _, t := range tt {
-		if t.Location != g.BleWatchLocation {
-			continue
-		}
 		mac := g.BluetoothMacNames[t.MAC]
 		if len(mac) == 0 {
 			mac = t.MAC

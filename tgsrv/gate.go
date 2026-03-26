@@ -297,20 +297,20 @@ func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}) {
 		}
 	}
 	g.palesLogsStartDate = time.Now().Unix()
-	g.loadPalesLogs()
-	minuteTicker := time.NewTicker(time.Minute)
-	tenSecTicker := time.NewTicker(10 * time.Second)
+	g.loadPalesLogs(20 * time.Second)
+	minuteLoginTicker := time.NewTicker(time.Minute)
+	minuteLogsTicker := time.NewTicker(time.Minute)
 	thirtyMinuteTicker := time.NewTicker(30 * time.Minute)
 Loop:
 	for {
 		select {
-		case <-minuteTicker.C:
+		case <-minuteLoginTicker.C:
 			g.login(false)
-		case <-tenSecTicker.C:
-			st := g.loadPalesLogs()
+		case <-minuteLogsTicker.C:
+			st := g.loadPalesLogs(20 * time.Second)
 			if st == http.StatusUnauthorized {
 				g.login(true)
-				g.loadPalesLogs()
+				g.loadPalesLogs(20 * time.Second)
 			}
 		case <-thirtyMinuteTicker.C:
 			g.loadPalesUsers()
@@ -374,11 +374,11 @@ func (g *Gate) login(force bool) {
 	}
 }
 
-func (g *Gate) loadPalesLogs() int {
+func (g *Gate) loadPalesLogs(timeout time.Duration) int {
 	if len(g.PalesPortalUserToken) == 0 {
 		return 0
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET",

@@ -23,6 +23,8 @@ import (
 
 	"github.com/gocarina/gocsv"
 	"github.com/robfig/cron/v3"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/skip2/go-qrcode"
 )
@@ -54,6 +56,7 @@ const (
 	blePath               = "/ble/"
 	gateCallPath          = "/gate/call/"
 	gateOpenedPath        = "/gate/opened/"
+	logLevelPath          = "/app/log/"
 
 	site = "https://7slavka.ru"
 
@@ -450,15 +453,25 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+			http.Error(w, "cannot read request body", http.StatusInternalServerError)
+			return
+		}
 		var bleTracking BLETracking
-		if err := json.NewDecoder(r.Body).Decode(&bleTracking); err != nil {
-			// Handle errors (e.g., malformed JSON, body too large, unknown fields)
+		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&bleTracking); err != nil {
+			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		Logger.Infof("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d",
-			bleTracking.MAC, bleTracking.RSSI, bleTracking.Name, bleTracking.Location)
-
+		if Logger.Level() == zap.DebugLevel {
+			Logger.Debugf("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d   %s",
+				bleTracking.MAC, bleTracking.RSSI, bleTracking.Name, bleTracking.Location, string(bodyBytes))
+		} else {
+			Logger.Infof("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d",
+				bleTracking.MAC, bleTracking.RSSI, bleTracking.Name, bleTracking.Location)
+		}
 		s.gate.bleTrackings <- &bleTracking
 		w.WriteHeader(http.StatusOK)
 		return
@@ -475,7 +488,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		var phoneCall PhoneCall
 		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&phoneCall); err != nil {
-			// Handle errors (e.g., malformed JSON, body too large, unknown fields)
+			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -484,8 +497,32 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	if r.URL.Path == gateOpenedPath && r.Method == "GET" {
+	if r.URL.Path == gateOpenedPath {
 		s.gate.gateOpened()
+		return
+	}
+	if r.URL.Path == logLevelPath {
+		defer r.Body.Close()
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+			http.Error(w, "cannot read request body", http.StatusInternalServerError)
+			return
+		}
+		l, err := strconv.Atoi(string(bodyBytes))
+		if err != nil {
+			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if l < -1 || l > 3 {
+			Logger.Errorf("%s bad value %s", r.URL.Path, string(bodyBytes))
+			http.Error(w, "bad value", http.StatusBadRequest)
+			return
+		}
+		AtomicLevel.SetLevel(zapcore.Level(l))
 		return
 	}
 	s.staticHandler.ServeHTTP(w, r)

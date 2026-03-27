@@ -65,14 +65,14 @@ func main() {
 	encoderCfg.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 		timeEncoder(t.In(time.Local), enc)
 	}
-	atomicLevel := zap.NewAtomicLevelAt(zap.InfoLevel)
+	tgsrv.AtomicLevel = zap.NewAtomicLevelAt(zap.InfoLevel)
 	if debug {
-		atomicLevel.SetLevel(zap.DebugLevel)
+		tgsrv.AtomicLevel.SetLevel(zap.DebugLevel)
 	}
 	core := zapcore.NewCore(
 		zapcore.NewConsoleEncoder(encoderCfg),
 		w,
-		atomicLevel,
+		tgsrv.AtomicLevel,
 	)
 	logger = zap.New(core).Sugar()
 	tgsrv.Logger = logger

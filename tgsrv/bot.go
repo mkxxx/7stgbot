@@ -19,6 +19,7 @@ const (
 )
 
 var Logger *zap.SugaredLogger
+var AtomicLevel zap.AtomicLevel
 
 var numericKeyboard = tgbotapi.NewReplyKeyboard(
 	tgbotapi.NewKeyboardButtonRow(

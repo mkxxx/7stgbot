@@ -465,7 +465,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if Logger.Level() == zap.DebugLevel {
+		if Logger.Level().Enabled(zap.DebugLevel) {
 			Logger.Debugf("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d   %s",
 				bleTracking.MAC, bleTracking.RSSI, bleTracking.Name, bleTracking.Location, string(bodyBytes))
 		} else {

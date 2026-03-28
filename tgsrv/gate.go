@@ -39,6 +39,8 @@ type Gate struct {
 	BleWatchLocation     int
 	mu                   sync.Mutex
 	lastOpened           time.Time
+	GateOpenNumber       string
+	GateInfoNumber       string
 }
 
 type PalesLoginResp struct {
@@ -136,35 +138,62 @@ Loop:
 		select {
 		case call := <-g.phoneCalls:
 			phone := strings.TrimPrefix(call.Phone, "+")
-			v, ok := g.Phones[phone]
-			if !ok {
-				g.sendToTelegram(fmt.Sprintf("%s uknown", phone))
+			allowed, ok := g.Phones[phone]
+			if ok && allowed {
+				allowed = !g.RestrictedPhones[phone]
+			}
+			if call.CalledNumber == g.GateOpenNumber {
+				if !ok {
+					g.sendToTelegram(fmt.Sprintf("%s uknown", phone))
+					continue
+				}
+				if !allowed {
+					g.sendToTelegram(fmt.Sprintf("%s restricted", phone))
+					continue
+				}
+				if time.Since(gateTime) < 10*time.Second {
+					g.sendToTelegram(fmt.Sprintf("%s ок, opening already in action", phone))
+					continue
+				}
+				gateTime = time.Now()
+				elapsed := time.Since(call.time())
+				if elapsed > 20*time.Second {
+					g.sendToTelegram(fmt.Sprintf("%s ок, but call is overdue %d s", phone, elapsed/time.Second))
+					continue
+				}
+				err := g.sendOpenCommandToGate(phone)
+				if err != nil {
+					g.sendToTelegram(fmt.Sprintf("%s ок, %v", phone, err))
+				} else {
+					g.sendToTelegram(fmt.Sprintf("%s ок", phone))
+				}
 				continue
 			}
-			if !v || g.RestrictedPhones[phone] {
-				g.sendToTelegram(fmt.Sprintf("%s restricted", phone))
+			if call.CalledNumber == g.GateInfoNumber {
+				if !ok {
+					g.sendToTelegram(fmt.Sprintf("%s не зарегистрирован", maskPhone(phone)))
+					continue
+				}
+				if !allowed {
+					g.sendToTelegram(fmt.Sprintf("%s проезд запрещен", maskPhone(phone)))
+					continue
+				}
+				g.sendToTelegram(fmt.Sprintf("%s OK", maskPhone(phone)))
 				continue
-			}
-			if time.Since(gateTime) < 10*time.Second {
-				g.sendToTelegram(fmt.Sprintf("%s ок, opening already in action", phone))
-				continue
-			}
-			gateTime = time.Now()
-			elapsed := time.Since(call.time())
-			if elapsed > 20*time.Second {
-				g.sendToTelegram(fmt.Sprintf("%s ок, but call is overdue %d s", phone, elapsed/time.Second))
-				continue
-			}
-			err := g.sendOpenCommandToGate(phone)
-			if err != nil {
-				g.sendToTelegram(fmt.Sprintf("%s ок, %v", phone, err))
-			} else {
-				g.sendToTelegram(fmt.Sprintf("%s ок", phone))
 			}
 		case <-abort:
 			break Loop
 		}
 	}
+}
+
+func maskPhone(s string) string {
+	rs := []rune(s) // Используем rune для корректной работы с кириллицей
+	length := len(rs)
+	if length <= 4 {
+		return s
+	}
+	return strings.Repeat("*", length-4) + string(rs[length-4:])
 }
 
 func (g *Gate) sendToTelegram(msg string) {
@@ -182,7 +211,7 @@ func (g *Gate) sendToTelegram(msg string) {
 	}
 	formData := url.Values{
 		"chat_id": {g.TelegramChatId},
-		"text":    {msg + time.Now().In(Location).Format(" 2006-01-02 15:04:05")},
+		"text":    {msg + time.Now().In(Location).Format(" (2006-01-02 15:04:05)")},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.TelegramTimeoutSec)*time.Second)
 	defer cancel()

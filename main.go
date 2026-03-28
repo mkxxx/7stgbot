@@ -149,6 +149,8 @@ func main() {
 		}
 	})
 	g.BleWatchLocation = cfg.BleWatchLocation
+	g.GateOpenNumber = cfg.GateOpenNumber
+	g.GateInfoNumber = cfg.GateInfoNumber
 	g.CfgDir = cfgDir
 	g.Init()
 
@@ -189,6 +191,8 @@ type Config struct {
 	PalesPortalUser        string
 	PalesPortalPwd         string
 	BleWatchLocation       int
+	GateOpenNumber         string
+	GateInfoNumber         string
 }
 
 func stdinCredentials() (string, string) {

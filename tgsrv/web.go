@@ -84,8 +84,9 @@ type BLETracking struct {
 }
 
 type PhoneCall struct {
-	Phone    string  `json:"phone"`
-	UnixTime float64 `json:"time"`
+	Phone        string
+	UnixTime     float64 `json:"time"`
+	CalledNumber string  `json:"called_number"`
 }
 
 func (c *PhoneCall) time() time.Time {

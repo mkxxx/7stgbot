@@ -29,6 +29,7 @@ type Gate struct {
 	User                 string
 	Password             string
 	phoneCalls           chan PhoneCall
+	phoneSmses           chan PhoneSms
 	bleTrackings         chan *BLETracking
 	PalesPortalUser      string
 	PalesPortalPwd       string

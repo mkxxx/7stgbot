@@ -56,6 +56,7 @@ const (
 	blePath               = "/ble/"
 	gateCallPath          = "/gate/call/"
 	gateOpenedPath        = "/gate/opened/"
+	gateSmsPath           = "/gate/sms/"
 	logLevelPath          = "/app/log/"
 
 	site = "https://7slavka.ru"
@@ -92,6 +93,12 @@ type PhoneCall struct {
 func (c *PhoneCall) time() time.Time {
 	seconds := int64(c.UnixTime)
 	return time.Unix(seconds, int64((c.UnixTime-float64(seconds))*float64(time.Nanosecond)))
+}
+
+type PhoneSms struct {
+	Phone                 string `json:"sender_phone_number"`
+	Sms                   string
+	TimestampSentUnixTime string `json:"timestamp_sent"`
 }
 
 func init() {
@@ -496,6 +503,27 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		Logger.Infof("Call received: %s   %s", phoneCall.Phone, string(bodyBytes))
 		s.gate.phoneCalls <- phoneCall
 		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.URL.Path == gateSmsPath && r.Method == "POST" {
+		defer r.Body.Close()
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+			http.Error(w, "cannot read request body", http.StatusInternalServerError)
+			return
+		}
+		var phoneSms PhoneSms
+		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&phoneSms); err != nil {
+			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		Logger.Infof("Sms received: %s   %s", phoneSms.Phone, string(bodyBytes))
+		//s.gate.phoneSmses <- phoneSms
+		//w.WriteHeader(http.StatusOK)
 		return
 	}
 	if r.URL.Path == gateOpenedPath {

@@ -96,9 +96,17 @@ func (c *PhoneCall) time() time.Time {
 }
 
 type PhoneSms struct {
-	Phone                 string `json:"sender_phone_number"`
-	Sms                   string
-	TimestampSentUnixTime string `json:"timestamp_sent"`
+	Phone        string `json:"sender_phone_number"`
+	Sms          string
+	SentUnixTime string `json:"timestamp_sent"`
+}
+
+func (s *PhoneSms) timestampSent() string {
+	unix, err := strconv.Atoi(s.SentUnixTime)
+	if err != nil {
+		return ""
+	}
+	return time.Unix(int64(unix), 0).In(Location).Format("2006-01-02 15:04:05")
 }
 
 func init() {
@@ -152,6 +160,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 
 	go g.palesLoginAndLoadLoop(abort)
 	go g.handlingCalls(abort)
+	go g.handlingSmses(abort)
 	go g.handlingBLETracking(abort)
 
 	http.HandleFunc("/", ws.handle)
@@ -522,8 +531,8 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		Logger.Infof("Sms received: %s   %s", phoneSms.Phone, string(bodyBytes))
-		//s.gate.phoneSmses <- phoneSms
-		//w.WriteHeader(http.StatusOK)
+		s.gate.phoneSmses <- phoneSms
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 	if r.URL.Path == gateOpenedPath {

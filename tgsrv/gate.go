@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -129,6 +130,7 @@ func (u *PalesLogUser) typeName() string {
 
 func (g *Gate) Init() {
 	g.phoneCalls = make(chan PhoneCall)
+	g.phoneSmses = make(chan PhoneSms)
 	g.bleTrackings = make(chan *BLETracking)
 }
 
@@ -186,6 +188,49 @@ Loop:
 			break Loop
 		}
 	}
+}
+
+func (g *Gate) handlingSmses(abort chan struct{}) {
+Loop:
+	for {
+		select {
+		case sms := <-g.phoneSmses:
+			phone := strings.TrimPrefix(sms.Phone, "+")
+			allowed, ok := g.Phones[phone]
+			if ok && allowed {
+				allowed = !g.RestrictedPhones[phone]
+			}
+			if !ok {
+				g.sendToTelegram(fmt.Sprintf("%s uknown sender of SNS: %s", phone, sms.Sms))
+				continue
+			}
+			if !allowed {
+				g.sendToTelegram(fmt.Sprintf("%s restricted sender of SNS: %s", phone, sms.Sms))
+				continue
+			}
+			g.sendToTelegram(fmt.Sprintf("%s %s sent SMS: %s", sms.timestampSent(), sms.Phone, sms.Sms))
+			//smsText := cleanString(sms.Sms, ",")
+
+		case <-abort:
+			break Loop
+		}
+	}
+}
+
+func cleanString(str string, delimiters string) string {
+	// Экранируем символы разделителей для регулярки
+	d := regexp.QuoteMeta(delimiters)
+
+	// 1. Удаляем пробелы вокруг разделителей: " , " -> ","
+	reAround := regexp.MustCompile(fmt.Sprintf(`\s*([%s])\s*`, d))
+	str = reAround.ReplaceAllString(str, "$1")
+
+	// 2. Заменяем несколько пробелов между словами на один
+	reMultiSpace := regexp.MustCompile(`\s+`)
+	str = reMultiSpace.ReplaceAllString(str, " ")
+
+	// 3. Убираем начальные и конечные пробелы
+	return strings.TrimSpace(str)
 }
 
 func maskPhone(s string) string {

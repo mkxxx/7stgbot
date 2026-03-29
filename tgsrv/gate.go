@@ -37,7 +37,7 @@ type Gate struct {
 	PalesTokenFilename   string
 	PalesPortalUserToken string
 	CfgDir               string
-	palesLogsStartDate   int64
+	palesLastLog         *PalesLogUser
 	BleWatchLocation     int
 	mu                   sync.Mutex
 	lastOpened           time.Time
@@ -132,6 +132,7 @@ func (g *Gate) Init() {
 	g.phoneCalls = make(chan PhoneCall)
 	g.phoneSmses = make(chan PhoneSms)
 	g.bleTrackings = make(chan *BLETracking)
+	g.palesLastLog = &PalesLogUser{}
 }
 
 func (g *Gate) handlingCalls(abort chan struct{}) {
@@ -372,7 +373,7 @@ func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}) {
 			g.loadPalesUsers()
 		}
 	}
-	g.palesLogsStartDate = time.Now().Unix()
+	g.palesLastLog.Tm = time.Now().Unix()
 	g.loadPalesLogs(20 * time.Second)
 	minuteLoginTicker := time.NewTicker(time.Minute)
 	minuteLogsTicker := time.NewTicker(time.Minute)
@@ -459,7 +460,7 @@ func (g *Gate) loadPalesLogs(timeout time.Duration) int {
 
 	req, err := http.NewRequestWithContext(ctx, "GET",
 		fmt.Sprintf("https://portal.pal-es.com/api1/device/4G600211776/log?skip=0&limit=20&filter=&startDate=%d&endDate=&approved=&reasons=&rly=&type=",
-			g.palesLogsStartDate), nil)
+			g.palesLastLog.Tm), nil)
 
 	if err != nil {
 		Logger.Errorf("%v", err)
@@ -490,8 +491,14 @@ func (g *Gate) loadPalesLogs(timeout time.Duration) int {
 		return 0
 	}
 	var msg strings.Builder
+	maxLog := result.Log.List[0]
 	for _, l := range result.Log.List {
-		g.palesLogsStartDate = max(g.palesLogsStartDate, l.Tm)
+		if l.Tm > maxLog.Tm {
+			maxLog = l
+		}
+		if g.palesLastLog.UserId == l.UserId && g.palesLastLog.Tm == l.Tm && g.palesLastLog.Type == l.Type {
+			continue
+		}
 		var approved string
 		if !l.Approved {
 			approved = fmt.Sprintf("!OK %d", l.Reason)
@@ -503,8 +510,8 @@ func (g *Gate) loadPalesLogs(timeout time.Duration) int {
 		msg.WriteString(fmt.Sprintf("%s %s %s %s %s%s %s \n", l.timestamp(), l.typeName(), l.UserId, sn,
 			l.Firstname, l.Lastname, approved))
 	}
+	g.palesLastLog = maxLog
 	Logger.Infof("received %d pal-es log records", len(result.Log.List))
-	g.palesLogsStartDate++
 	g.sendToTelegram(msg.String())
 	return resp.StatusCode
 }

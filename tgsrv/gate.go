@@ -619,6 +619,7 @@ func (g *Gate) gateOpened() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if time.Since(g.lastOpened) < 67*time.Second {
+		Logger.Debugf("gate opened")
 		return
 	}
 	g.lastOpened = time.Now()

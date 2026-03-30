@@ -134,7 +134,7 @@ func main() {
 	g.Password = cfg.GatePwd
 	g.PalesPortalUser = cfg.PalesPortalUser
 	g.PalesPortalPwd = cfg.PalesPortalPwd
-	g.Phones = make(map[string]bool)
+	g.Phones = make(map[string]*tgsrv.PalesUser)
 	readCsv(filepath.Join(cfgDir, "User_list_4G600211776.csv"), palgateUserFunc(g.Phones))
 	g.RestrictedPhones = make(map[string]bool)
 	readLines(filepath.Join(cfgDir, "gate-phones-restricted.txt"), func(s string, _ int) { g.RestrictedPhones[s] = true })
@@ -259,10 +259,11 @@ func readCsv(filePath string, f func([]string, map[string]int)) {
 	}
 }
 
-func palgateUserFunc(m map[string]bool) func([]string, map[string]int) {
+func palgateUserFunc(m map[string]*tgsrv.PalesUser) func([]string, map[string]int) {
 	//Phone number,First name,Last name,Admin,Linked device,Output 1,Time group,Remote control sn,Dial to open,Dial number (read only),Nearby only,Latch 1,Notes
 	//79991234567,,,FALSE,FALSE,TRUE,,,TRUE,,FALSE,FALSE,
 	return func(row []string, cols map[string]int) {
-		m[row[cols["Phone number"]]] = row[cols["Dial to open"]] == "TRUE"
+		u := tgsrv.PalesUserFromCsv(row, cols)
+		m[row[cols["Phone number"]]] = u
 	}
 }

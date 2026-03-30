@@ -18,7 +18,7 @@ import (
 )
 
 type Gate struct {
-	Phones               map[string]bool
+	Phones               map[string]*PalesUser
 	RestrictedPhones     map[string]bool
 	BluetoothMacNames    map[string]string
 	IgnoreBluetoothMacs  map[string]bool
@@ -108,6 +108,28 @@ type PalesUser struct {
 	}
 }
 
+func PalesUserFromCsv(row []string, cols map[string]int) *PalesUser {
+	//Phone number,First name,Last name,Admin,Linked device,Output 1,Time group,Remote control sn,Dial to open,Dial number (read only),Nearby only,Latch 1,Notes
+	//79991234567 ,          ,         ,FALSE,FALSE        ,TRUE    ,          ,                 ,TRUE        ,                       ,FALSE      ,FALSE  ,
+
+	u := new(PalesUser)
+	u.Id = row[cols["Phone number"]]
+	u.Firstname = row[cols["First name"]]
+	u.Lastname = row[cols["Last name"]]
+	u.DialToOpen = row[cols["Dial to open"]] == "TRUE"
+	u.Admin = row[cols["Admin"]] == "TRUE"
+	u.SecondaryDevice = row[cols["Linked device"]] == "TRUE"
+	u.Output1 = row[cols["Output 1"]] == "TRUE"
+	u.Output1Latch = row[cols["Latch 1"]] == "TRUE"
+	u.LocalOnly = row[cols["Nearby only"]] == "TRUE"
+	//u = row[cols["Time group"]]
+	return u
+}
+
+func (u *PalesUser) name() string {
+	return fmt.Sprintf("%s %s%s", u.Id, u.Firstname, u.Lastname)
+}
+
 func (u *PalesLogUser) timestamp() string {
 	return time.Unix(u.Tm, 0).In(Location).Format("2006-01-02 15:04:05")
 }
@@ -142,9 +164,12 @@ Loop:
 		select {
 		case call := <-g.phoneCalls:
 			phone := strings.TrimPrefix(call.Phone, "+")
-			allowed, ok := g.Phones[phone]
-			if ok && allowed {
-				allowed = !g.RestrictedPhones[phone]
+			name := phone
+			u, ok := g.Phones[phone]
+			allowed := false
+			if ok {
+				allowed = u.DialToOpen && !g.RestrictedPhones[phone]
+				name = u.name()
 			}
 			if call.CalledNumber == g.GateOpenNumber {
 				if !ok {
@@ -152,24 +177,24 @@ Loop:
 					continue
 				}
 				if !allowed {
-					g.sendToTelegram(fmt.Sprintf("%s restricted", phone))
+					g.sendToTelegram(fmt.Sprintf("%s dial2 restricted", name))
 					continue
 				}
 				if time.Since(gateTime) < 10*time.Second {
-					g.sendToTelegram(fmt.Sprintf("%s ок, opening already in action", phone))
+					g.sendToTelegram(fmt.Sprintf("%s dial2 ok, opening already in action", name))
 					continue
 				}
 				gateTime = time.Now()
 				elapsed := time.Since(call.time())
 				if elapsed > 20*time.Second {
-					g.sendToTelegram(fmt.Sprintf("%s ок, but call is overdue %d s", phone, elapsed/time.Second))
+					g.sendToTelegram(fmt.Sprintf("%s dial2 ok, but call is overdue %d s", name, elapsed/time.Second))
 					continue
 				}
 				err := g.sendOpenCommandToGate(phone)
 				if err != nil {
-					g.sendToTelegram(fmt.Sprintf("%s ок, %v", phone, err))
+					g.sendToTelegram(fmt.Sprintf("%s dial2 ok, %v", name, err))
 				} else {
-					g.sendToTelegram(fmt.Sprintf("%s ок", phone))
+					g.sendToTelegram(fmt.Sprintf("%s dial2 ok", name))
 				}
 				continue
 			}
@@ -197,19 +222,25 @@ Loop:
 		select {
 		case sms := <-g.phoneSmses:
 			phone := strings.TrimPrefix(sms.Phone, "+")
-			allowed, ok := g.Phones[phone]
-			if ok && allowed {
-				allowed = !g.RestrictedPhones[phone]
+			if phone == "MegaFon" {
+				continue
+			}
+			name := phone
+			u, ok := g.Phones[phone]
+			allowed := false
+			if ok {
+				allowed = u.DialToOpen && !g.RestrictedPhones[phone]
+				name = u.name()
 			}
 			if !ok {
-				g.sendToTelegram(fmt.Sprintf("%s uknown sender of SNS: %s", phone, sms.Sms))
+				g.sendToTelegram(fmt.Sprintf("%s uknown sender of SMS: %s", phone, sms.Sms))
 				continue
 			}
 			if !allowed {
-				g.sendToTelegram(fmt.Sprintf("%s restricted sender of SNS: %s", phone, sms.Sms))
+				g.sendToTelegram(fmt.Sprintf("%s restricted sender of SMS: %s", name, sms.Sms))
 				continue
 			}
-			g.sendToTelegram(fmt.Sprintf("%s %s sent SMS: %s", sms.timestampSent(), sms.Phone, sms.Sms))
+			g.sendToTelegram(fmt.Sprintf("%s %s sent SMS: %s", sms.timestampSent(), name, sms.Sms))
 			//smsText := cleanString(sms.Sms, ",")
 
 		case <-abort:
@@ -552,7 +583,7 @@ func (g *Gate) loadPalesUsers() int {
 	}
 	Logger.Debugf("pal-es users %s, %d", result.Msg, len(result.Users.List))
 	for _, u := range result.Users.List {
-		g.Phones[u.Id] = u.DialToOpen
+		g.Phones[u.Id] = u
 	}
 	var records [][]string
 	records = append(records, []string{"Phone number", "First name", "Last name",
@@ -587,7 +618,7 @@ func If[T any](cond bool, a, b T) T {
 func (g *Gate) gateOpened() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if time.Since(g.lastOpened) < time.Minute {
+	if time.Since(g.lastOpened) < 67*time.Second {
 		return
 	}
 	g.lastOpened = time.Now()

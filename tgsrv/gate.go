@@ -390,6 +390,10 @@ func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
 			msg.WriteString(" RSSI:")
 			msg.WriteString(strconv.Itoa(t.RSSI))
 		}
+		if t.Time != 0 {
+			msg.WriteString(" time:")
+			msg.WriteString(t.timestampSent())
+		}
 		msg.WriteString("\n")
 	}
 	g.sendToTelegram(msg.String())
@@ -615,14 +619,19 @@ func If[T any](cond bool, a, b T) T {
 	return b
 }
 
-func (g *Gate) gateOpened() {
+func (g *Gate) gateOpened(openTime OpenTime) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if time.Since(g.lastOpened) < 67*time.Second {
-		Logger.Debugf("gate opened")
+	if time.Since(g.lastOpened) < 71*time.Second {
+		Logger.Debugf("gate opened %s", openTime.timestampSent())
 		return
 	}
 	g.lastOpened = time.Now()
-	Logger.Infof("gate opened")
-	g.sendToTelegram("gate opened")
+	Logger.Infof("gate opened %s", openTime.timestampSent())
+	g.sendToTelegram(fmt.Sprintf("gate opened %s", openTime.timestampSent()))
+}
+
+func (g *Gate) keypadCode(c KeypadCode) {
+	Logger.Infof("keypad code %s  %s", c.Code, c.timestampSent())
+	g.sendToTelegram(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
 }

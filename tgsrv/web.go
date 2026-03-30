@@ -57,6 +57,7 @@ const (
 	gateCallPath          = "/gate/call/"
 	gateOpenedPath        = "/gate/opened/"
 	gateSmsPath           = "/gate/sms/"
+	gateKeypadPath        = "/gate/keypad/"
 	logLevelPath          = "/app/log/"
 
 	site = "https://7slavka.ru"
@@ -82,6 +83,11 @@ type BLETracking struct {
 	RSSI     int
 	Name     string
 	Location int
+	Time     int64
+}
+
+func (t *BLETracking) timestampSent() string {
+	return time.Unix(t.Time, 0).In(Location).Format("2006-01-02 15:04:05")
 }
 
 type PhoneCall struct {
@@ -107,6 +113,23 @@ func (s *PhoneSms) timestampSent() string {
 		return ""
 	}
 	return time.Unix(int64(unix), 0).In(Location).Format("2006-01-02 15:04:05")
+}
+
+type OpenTime struct {
+	Time int64
+}
+
+func (t *OpenTime) timestampSent() string {
+	return time.Unix(t.Time, 0).In(Location).Format("2006-01-02 15:04:05")
+}
+
+type KeypadCode struct {
+	Code string
+	Time int64
+}
+
+func (t *KeypadCode) timestampSent() string {
+	return time.Unix(t.Time, 0).In(Location).Format("2006-01-02 15:04:05")
 }
 
 func init() {
@@ -536,7 +559,23 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == gateOpenedPath {
-		s.gate.gateOpened()
+		defer r.Body.Close()
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+			http.Error(w, "cannot read request body", http.StatusInternalServerError)
+			return
+		}
+		var openTime OpenTime
+		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&openTime); err != nil {
+			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		s.gate.gateOpened(openTime)
 		return
 	}
 	if r.URL.Path == logLevelPath {
@@ -561,6 +600,26 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		AtomicLevel.SetLevel(zapcore.Level(l))
+		return
+	}
+	if r.URL.Path == gateKeypadPath {
+		defer r.Body.Close()
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+			http.Error(w, "cannot read request body", http.StatusInternalServerError)
+			return
+		}
+		var keypadCode KeypadCode
+		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&keypadCode); err != nil {
+			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		s.gate.keypadCode(keypadCode)
 		return
 	}
 	s.staticHandler.ServeHTTP(w, r)

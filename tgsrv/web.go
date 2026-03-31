@@ -563,16 +563,19 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 
 		bodyBytes, err := io.ReadAll(r.Body)
-		if err != nil {
+		var openTime OpenTime
+		if err == io.EOF {
+          //noop  backward compatibility
+		} else if err != nil {
 			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
 			http.Error(w, "cannot read request body", http.StatusInternalServerError)
 			return
-		}
-		var openTime OpenTime
-		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&openTime); err != nil {
-			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		} else {
+			if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&openTime); err != nil {
+				Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 		w.WriteHeader(http.StatusOK)
 		s.gate.gateOpened(openTime)

@@ -20,8 +20,6 @@ import (
 type Gate struct {
 	Phones               map[string]*PalesUser
 	RestrictedPhones     map[string]bool
-	BluetoothMacNames    map[string]string
-	IgnoreBluetoothMacs  map[string]bool
 	GateUrl              string
 	TelegramUrl          string
 	TelegramChatId       string
@@ -38,11 +36,18 @@ type Gate struct {
 	PalesPortalUserToken string
 	CfgDir               string
 	palesLastLog         *PalesLogUser
-	BleWatchLocation     int
 	mu                   sync.Mutex
 	lastOpened           time.Time
 	GateOpenNumber       string
 	GateInfoNumber       string
+	BTMacs               BTMacs
+}
+
+type BTMacs struct {
+	BLEWatchLocation  int
+	BTMacIgnore       map[string]string
+	BTMacAutoOpenGate map[string]bool
+	BTMacNames        map[string]string
 }
 
 type PalesLoginResp struct {
@@ -341,10 +346,10 @@ Loop:
 	for {
 		select {
 		case t := <-g.bleTrackings:
-			if t.Location != g.BleWatchLocation {
+			if t.Location != g.BTMacs.BLEWatchLocation {
 				continue
 			}
-			if g.IgnoreBluetoothMacs[t.MAC] {
+			if _, ok := g.BTMacs.BTMacIgnore[t.MAC]; ok {
 				continue
 			}
 			tt = append(tt, t)
@@ -377,7 +382,7 @@ Loop:
 func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
 	var msg strings.Builder
 	for _, t := range tt {
-		mac := g.BluetoothMacNames[t.MAC]
+		mac := g.BTMacs.BTMacNames[t.MAC]
 		if len(mac) == 0 {
 			mac = t.MAC
 		}

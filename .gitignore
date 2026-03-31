@@ -16,3 +16,4 @@
 config.toml
 *.png
 *.db
+bt-macs.toml

@@ -135,22 +135,22 @@ func main() {
 	g.PalesPortalUser = cfg.PalesPortalUser
 	g.PalesPortalPwd = cfg.PalesPortalPwd
 	g.Phones = make(map[string]*tgsrv.PalesUser)
-	readCsv(filepath.Join(cfgDir, "User_list_4G600211776.csv"), palgateUserFunc(g.Phones))
+	readCsv(filepath.Join(cfgDir, "pales_users.csv"), palgateUserFunc(g.Phones))
 	g.RestrictedPhones = make(map[string]bool)
 	readLines(filepath.Join(cfgDir, "gate-phones-restricted.txt"), func(s string, _ int) { g.RestrictedPhones[s] = true })
-	g.IgnoreBluetoothMacs = make(map[string]bool)
-	readLines(filepath.Join(cfgDir, "macs-ignored.txt"), func(s string, _ int) { g.IgnoreBluetoothMacs[s[:min(17, len(s))]] = true })
-	g.BluetoothMacNames = make(map[string]string)
-	readLines(filepath.Join(cfgDir, "macs.txt"), func(s string, _ int) { g.BluetoothMacNames[s[:min(17, len(s))]] = s })
 	g.PalesTokenFilename = filepath.Join(cfgDir, "t.txt")
 	readLines(g.PalesTokenFilename, func(s string, i int) {
 		if i == 0 {
 			g.PalesPortalUserToken = s
 		}
 	})
-	g.BleWatchLocation = cfg.BleWatchLocation
 	g.GateOpenNumber = cfg.GateOpenNumber
 	g.GateInfoNumber = cfg.GateInfoNumber
+
+	fname := filepath.Join(cfgDir, "bt-macs.toml")
+	if _, err := toml.DecodeFile(fname, &g.BTMacs); err != nil {
+		logger.Errorf("error parsing  %q: %v", cfgPath, err)
+	}
 	g.CfgDir = cfgDir
 	g.Init()
 

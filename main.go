@@ -148,8 +148,9 @@ func main() {
 	g.GateInfoNumber = cfg.GateInfoNumber
 
 	fname := filepath.Join(cfgDir, "bt-macs.toml")
+	// ERROR	error parsing  "config.toml": toml: line 4 (last key "BTMacIgnore"): expected '.' or '=', but got ':' instead
 	if _, err := toml.DecodeFile(fname, &g.BTMacs); err != nil {
-		logger.Errorf("error parsing  %q: %v", cfgPath, err)
+		logger.Errorf("error parsing  %q: %v", fname, err)
 	}
 	g.CfgDir = cfgDir
 	g.Init()

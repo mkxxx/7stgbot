@@ -615,6 +615,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		Logger.Debugf("keypad %s", string(bodyBytes))
 		w.WriteHeader(http.StatusOK)
 		s.gate.keypadCode(keypadCode)
 		return
@@ -680,7 +681,7 @@ func (a byIP) Less(i, j int) bool {
 
 func pingIp(w io.Writer, ip string) {
 	out, _ := exec.Command("ping", ip, "-c", "3", "-w", "5").CombinedOutput()
-	fmt.Fprintf(w, string(out))
+	fmt.Fprintf(w, "%s", string(out))
 	/*	pinger, err := ping.NewPinger(ip)
 		if err != nil {
 			Logger.Errorf("could not create pinger 91.234.180.53")

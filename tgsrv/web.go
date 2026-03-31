@@ -564,17 +564,11 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 
 		bodyBytes, err := io.ReadAll(r.Body)
 		var openTime OpenTime
-		if err == io.EOF {
-          //noop  backward compatibility
-		} else if err != nil {
+		if err != nil {
 			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
-			http.Error(w, "cannot read request body", http.StatusInternalServerError)
-			return
 		} else {
 			if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&openTime); err != nil {
-				Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
+				Logger.Errorf("%s cannot parse request body %v  %s", r.URL.Path, err, string(bodyBytes))
 			}
 		}
 		w.WriteHeader(http.StatusOK)

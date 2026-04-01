@@ -47,7 +47,7 @@ type Gate struct {
 type BTMacs struct {
 	BLEWatchLocation  int
 	BTMacIgnore       map[string]string
-	BTMacAutoOpenGate map[string]bool
+	BTMacAutoOpenGate map[string]string
 	BTMacNames        map[string]string
 }
 

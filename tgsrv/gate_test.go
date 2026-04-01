@@ -16,7 +16,7 @@ BLEWatchLocation = 101
 "00:11:22:33:44:55" = "Test Device"
 
 [BTMacAutoOpenGate]
-"AA:BB:CC:DD:EE:FF" = true
+"AA:BB:CC:DD:EE:FF" = "79990010203"
 
 [BTMacNames]
 "11:22:33:44:55:66" = "Gate 1"
@@ -33,8 +33,10 @@ BLEWatchLocation = 101
 	if result.BTMacIgnore["00:11:22:33:44:55"] != "Test Device" {
 		t.Error("BTMacIgnore: неверное значение")
 	}
-	if !result.BTMacAutoOpenGate["AA:BB:CC:DD:EE:FF"] {
-		t.Error("BTMacAutoOpenGate: ожидалось true")
+	got := result.BTMacAutoOpenGate["AA:BB:CC:DD:EE:FF"]
+	want := "79990010203"
+	if want != got {
+		t.Errorf("got %v, want %v", got, want)
 	}
 }
 

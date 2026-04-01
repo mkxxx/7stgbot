@@ -41,6 +41,7 @@ type Gate struct {
 	GateOpenNumber       string
 	GateInfoNumber       string
 	BTMacs               BTMacs
+	palEsTimeGroups      *PalEsTimeGroups
 }
 
 type BTMacs struct {
@@ -101,6 +102,8 @@ type PalesUser struct {
 	SecondaryDevice     bool
 	Notifications       bool
 	GuestInvitation     bool
+	TimeGroupName       string
+	TimeGroupId         string `json:"groupId"`
 	GeoFence1           struct {
 		Enabled             bool
 		Lat                 float64
@@ -127,7 +130,11 @@ func PalesUserFromCsv(row []string, cols map[string]int) *PalesUser {
 	u.Output1 = row[cols["Output 1"]] == "TRUE"
 	u.Output1Latch = row[cols["Latch 1"]] == "TRUE"
 	u.LocalOnly = row[cols["Nearby only"]] == "TRUE"
-	//u = row[cols["Time group"]]
+	u.TimeGroupName = row[cols["Time group"]]
+	i, ok := cols["TimeGroupId"]
+	if ok {
+		u.TimeGroupId = row[i]
+	}
 	return u
 }
 
@@ -162,6 +169,96 @@ func (g *Gate) Init() {
 	g.palesLastLog = &PalesLogUser{}
 }
 
+type PalEsTimeGroups struct {
+	Msg    string
+	Groups struct {
+		List []*PalEsTimeGroup
+	}
+	groupMap map[string]*PalEsTimeGroup
+}
+
+func (tg *PalEsTimeGroups) init() {
+	tg.groupMap = tg.toTimeGroupMap()
+}
+
+func (tg *PalEsTimeGroups) toTimeGroupMap() map[string]*PalEsTimeGroup {
+	res := make(map[string]*PalEsTimeGroup)
+	for _, g := range tg.Groups.List {
+		g.init()
+		res[g.Id] = g
+	}
+	return res
+}
+
+func (tg *PalEsTimeGroups) containsNow(groupId string, groupName string) bool {
+	return tg.contains(groupId, groupName, time.Now())
+}
+
+func (tg *PalEsTimeGroups) contains(groupId string, groupName string, t time.Time) bool {
+	if len(groupId) == 0 && len(groupName) == 0 {
+		// no time group, then all time
+		return true
+	}
+	g := tg.groupMap[groupId]
+	if g != nil {
+		return g.contains(t)
+	}
+	for _, g := range tg.groupMap {
+		if g.GroupName == groupName {
+			return g.contains(t)
+		}
+	}
+	// group not found, so have to use all time
+	return true
+}
+
+type PalEsTimeGroup struct {
+	Id        string `json:"_id"`
+	GroupName string
+	StartTime int
+	EndTime   int
+	Days      string
+	StartDate int64
+	EndDate   int64
+	TimeArray []*PalEsTimeGroupDay
+	daysArray []*PalEsTimeGroupDay
+}
+
+type PalEsTimeGroupDay struct {
+	StartMinute int `json:"s"`
+	EndMinute   int `json:"e"`
+	DayOfWeek   int `json:"d"`
+}
+
+func (d *PalEsTimeGroupDay) contains(t time.Time) bool {
+	minuteOfDay := t.Hour()*60 + t.Minute()
+	return minuteOfDay >= d.StartMinute && minuteOfDay <= d.EndMinute
+}
+
+func (g *PalEsTimeGroup) init() {
+	g.daysArray = make([]*PalEsTimeGroupDay, 7)
+	for _, d := range g.TimeArray {
+		if d.DayOfWeek >= 1 && d.DayOfWeek <= 7 {
+			g.daysArray[d.DayOfWeek-1] = d
+		}
+	}
+	for i, d := range g.daysArray {
+		if d == nil {
+			g.daysArray[i] = &PalEsTimeGroupDay{EndMinute: -1}
+		}
+	}
+}
+
+func (g *PalEsTimeGroup) contains(t time.Time) bool {
+	unix := t.Unix()
+	if unix < g.StartDate || unix > g.EndDate {
+		return false
+	}
+	localTime := t.In(Location)
+	d := g.daysArray[localTime.Weekday()]
+	return d.contains(localTime)
+}
+
 func (g *Gate) handlingCalls(abort chan struct{}) {
 	var gateTime time.Time
 Loop:
@@ -173,7 +270,9 @@ Loop:
 			u, ok := g.Phones[phone]
 			allowed := false
 			if ok {
-				allowed = u.DialToOpen && !g.RestrictedPhones[phone]
+				allowed = u.DialToOpen && !g.RestrictedPhones[phone] &&
+					g.palEsTimeGroups.containsNow(u.TimeGroupId, u.TimeGroupName)
+
 				name = u.name()
 			}
 			if call.CalledNumber == g.GateOpenNumber {
@@ -407,17 +506,21 @@ func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
 func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}) {
 	g.login(false)
 	{
-		st := g.loadPalesUsers()
+		st := g.loadPalesTimeGroups()
 		if st == http.StatusUnauthorized {
 			g.login(true)
-			g.loadPalesUsers()
+			g.loadPalesTimeGroups()
 		}
 	}
+	g.loadPalesUsers()
+
 	g.palesLastLog.Tm = time.Now().Unix()
 	g.loadPalesLogs(20 * time.Second)
+
 	minuteLoginTicker := time.NewTicker(time.Minute)
 	minuteLogsTicker := time.NewTicker(time.Minute)
 	thirtyMinuteTicker := time.NewTicker(30 * time.Minute)
+	dailyTicker := time.NewTicker(24 * time.Hour)
 Loop:
 	for {
 		select {
@@ -431,6 +534,8 @@ Loop:
 			}
 		case <-thirtyMinuteTicker.C:
 			g.loadPalesUsers()
+		case <-dailyTicker.C:
+			g.loadPalesTimeGroups()
 		case <-abort:
 			break Loop
 		}
@@ -556,6 +661,50 @@ func (g *Gate) loadPalesLogs(timeout time.Duration) int {
 	return resp.StatusCode
 }
 
+func (g *Gate) loadPalesTimeGroups() int {
+	if g.palEsTimeGroups == nil {
+		var tg PalEsTimeGroups
+		tg.init()
+		g.palEsTimeGroups = &tg
+	}
+	if len(g.PalesPortalUserToken) == 0 {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://portal.pal-es.com/api1/device/4G600211776/groups", nil)
+
+	if err != nil {
+		Logger.Errorf("%v", err)
+		return -1
+	}
+	req.Header.Add("x-access-token", g.PalesPortalUserToken)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		Logger.Errorf("pal-es log http: %v", err)
+		return -1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		Logger.Infof("pal-es timegroups http %d", resp.StatusCode)
+		return resp.StatusCode
+	}
+	Logger.Debugf("pal-es timegroups http %d", resp.StatusCode)
+	var result PalEsTimeGroups
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		Logger.Errorf("error unmarshalling pal-es log http response: %v", err)
+		return -1
+	}
+	result.init()
+	g.palEsTimeGroups = &result
+	Logger.Debugf("pal-es timegroups %s, %d", result.Msg, len(result.Groups.List))
+	return resp.StatusCode
+}
+
 func (g *Gate) loadPalesUsers() int {
 	if len(g.PalesPortalUserToken) == 0 {
 		return 0
@@ -595,13 +744,19 @@ func (g *Gate) loadPalesUsers() int {
 		g.Phones[u.Id] = u
 	}
 	var records [][]string
-	records = append(records, []string{"Phone number", "First name", "Last name",
-		"Admin", "Linked device", "Output 1", "Time group", "Remote control sn",
-		"Dial to open", "Dial number (read only)", "Nearby only", "Latch 1", "Notes"})
+	records = append(records, []string{
+		"Phone number", "First name", "Last name",
+		"Admin", "Linked device", "Output 1",
+		"Time group", "Remote control sn", "Dial to open",
+		"Dial number (read only)", "Nearby only", "Latch 1",
+		"Notes", "TimeGroupId"})
 	for _, u := range result.Users.List {
-		records = append(records, []string{u.Id, u.Firstname, u.Lastname,
-			If(u.Admin, "TRUE", "FALSE"), If(u.SecondaryDevice, "TRUE", "FALSE"), If(u.Output1, "TRUE", "FALSE"), "", "",
-			If(u.DialToOpen, "TRUE", "FALSE"), "FALSE", "FALSE", If(u.Output1Latch, "TRUE", "FALSE"), ""})
+		records = append(records, []string{
+			u.Id, u.Firstname, u.Lastname,
+			If(u.Admin, "TRUE", "FALSE"), If(u.SecondaryDevice, "TRUE", "FALSE"), If(u.Output1, "TRUE", "FALSE"),
+			u.TimeGroupName, "", If(u.DialToOpen, "TRUE", "FALSE"),
+			"FALSE", "FALSE", If(u.Output1Latch, "TRUE", "FALSE"),
+			"", u.TimeGroupId})
 	}
 	fileName := filepath.Join(g.CfgDir, "pales_users.csv")
 	f, err := os.Create(fileName)

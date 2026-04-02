@@ -543,6 +543,9 @@ func (g *Gate) checkAndOpenOnBT(bt *BLETracking) {
 }
 
 func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
+	if len(tt) == 0 {
+		return
+	}
 	var msg strings.Builder
 	for _, t := range tt {
 		mac := g.BTMacs.BTMacNames[t.MAC]

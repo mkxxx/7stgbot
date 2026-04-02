@@ -27,9 +27,6 @@ BLEWatchLocation = 101
 	if err != nil {
 		t.Fatalf("Ошибка парсинга TOML: %v", err)
 	}
-	if result.BLEWatchLocation != 101 {
-		t.Errorf("Ожидалось 101, получено %d", result.BLEWatchLocation)
-	}
 	if result.BTMacIgnore["00:11:22:33:44:55"] != "Test Device" {
 		t.Error("BTMacIgnore: неверное значение")
 	}

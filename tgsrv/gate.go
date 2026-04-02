@@ -47,8 +47,8 @@ type Gate struct {
 }
 
 type BTMacs struct {
-	BLEWatchLocation  int
-	BLEAutoOpenLagMin    int64
+	BLEAutoOpenLagMin int64
+	BTMacSystem       map[string]string
 	BTMacIgnore       map[string]string
 	BTMacAutoOpenGate map[string]string
 	BTMacNames        map[string]string
@@ -454,11 +454,16 @@ func (g *Gate) handlingBLETracking(abort chan struct{}) {
 	const nextDuration = 60 * time.Second
 	ticker := time.NewTicker(firstDuration)
 	var tt []*BLETracking
+	var systemLocation int
 Loop:
 	for {
 		select {
 		case t := <-g.bleTrackings:
-			if t.Location != g.BTMacs.BLEWatchLocation {
+			if systemLocation == 0 || t.Location != systemLocation {
+				continue
+			}
+			if _, ok := g.BTMacs.BTMacSystem[t.MAC]; ok {
+				systemLocation = t.Location
 				continue
 			}
 			if _, ok := g.BTMacs.BTMacIgnore[t.MAC]; ok {

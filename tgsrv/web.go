@@ -572,7 +572,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
 		} else {
 			if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&openTime); err != nil {
-				Logger.Errorf("%s cannot parse request body %v  %s", r.URL.Path, err, string(bodyBytes))
+				Logger.Errorf("%s cannot parse request body %v  %q", r.URL.Path, err, string(bodyBytes))
 			}
 		}
 		w.WriteHeader(http.StatusOK)

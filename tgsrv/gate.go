@@ -2,6 +2,7 @@ package tgsrv
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -712,6 +714,9 @@ func (g *Gate) loadPalesLogs(timeout time.Duration) int {
 	}
 	var msg strings.Builder
 	maxLog := result.Log.List[0]
+	slices.SortFunc(result.Log.List, func(a, b *PalesLogUser) int {
+		return cmp.Compare(a.Tm, b.Tm)
+	})
 	for _, l := range result.Log.List {
 		if l.Tm > maxLog.Tm {
 			maxLog = l

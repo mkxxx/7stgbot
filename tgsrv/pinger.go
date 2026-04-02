@@ -57,7 +57,7 @@ type pingTime struct {
 	ok bool
 }
 
-func (m *pingMonitor) run(abort chan struct{}) {
+func (m *pingMonitor) run(_ chan struct{}) {
 	//Loop:
 	t := time.Now()
 	for {

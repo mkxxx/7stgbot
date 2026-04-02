@@ -13,39 +13,42 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type Gate struct {
-	Phones               map[string]*PalesUser
-	RestrictedPhones     map[string]bool
-	GateUrl              string
-	TelegramUrl          string
-	TelegramChatId       string
-	TelegramTimeoutSec   int
-	ProxyUrl             string
-	User                 string
-	Password             string
-	phoneCalls           chan PhoneCall
-	phoneSmses           chan PhoneSms
-	bleTrackings         chan *BLETracking
-	PalesPortalUser      string
-	PalesPortalPwd       string
-	PalesTokenFilename   string
-	PalesPortalUserToken string
-	CfgDir               string
-	palesLastLog         *PalesLogUser
-	mu                   sync.Mutex
-	lastOpened           time.Time
-	GateOpenNumber       string
-	GateInfoNumber       string
-	BTMacs               BTMacs
-	palEsTimeGroups      *PalEsTimeGroups
+	Phones                 map[string]*PalesUser
+	RestrictedPhones       map[string]bool
+	GateUrl                string
+	TelegramUrl            string
+	TelegramChatId         string
+	TelegramTimeoutSec     int
+	ProxyUrl               string
+	User                   string
+	Password               string
+	phoneCalls             chan PhoneCall
+	phoneSmses             chan PhoneSms
+	bleTrackings           chan *BLETracking
+	openedEvets            chan OpenTime
+	PalesPortalUser        string
+	PalesPortalPwd         string
+	PalesTokenFilename     string
+	PalesPortalUserToken   string
+	CfgDir                 string
+	palesLastLog           *PalesLogUser
+	lastOpened             time.Time
+	lastOpenCommandTime    atomic.Int64
+	lastBLEOpenCommandTime map[string]time.Time
+	GateOpenNumber         string
+	GateInfoNumber         string
+	BTMacs                 BTMacs
+	palEsTimeGroups        *PalEsTimeGroups
 }
 
 type BTMacs struct {
 	BLEWatchLocation  int
+	BLEAutoOpenLagMin    int64
 	BTMacIgnore       map[string]string
 	BTMacAutoOpenGate map[string]string
 	BTMacNames        map[string]string
@@ -165,8 +168,11 @@ func (u *PalesLogUser) typeName() string {
 func (g *Gate) Init() {
 	g.phoneCalls = make(chan PhoneCall)
 	g.phoneSmses = make(chan PhoneSms)
-	g.bleTrackings = make(chan *BLETracking)
+	g.bleTrackings = make(chan *BLETracking, 8)
+	g.openedEvets = make(chan OpenTime, 8)
+	g.lastBLEOpenCommandTime = make(map[string]time.Time)
 	g.palesLastLog = &PalesLogUser{}
+	g.lastOpenCommandTime = atomic.Int64{}
 }
 
 type PalEsTimeGroups struct {
@@ -268,37 +274,33 @@ Loop:
 			phone := strings.TrimPrefix(call.Phone, "+")
 			name := phone
 			u, ok := g.Phones[phone]
-			allowed := false
 			if ok {
-				allowed = u.DialToOpen && !g.RestrictedPhones[phone] &&
-					g.palEsTimeGroups.containsNow(u.TimeGroupId, u.TimeGroupName)
-
 				name = u.name()
 			}
 			if call.CalledNumber == g.GateOpenNumber {
 				if !ok {
-					g.sendToTelegram(fmt.Sprintf("%s uknown", phone))
+					g.sendToTelegram(fmt.Sprintf("%s %s uknown", call.timestamp(), phone))
 					continue
 				}
-				if !allowed {
-					g.sendToTelegram(fmt.Sprintf("%s dial2 restricted", name))
+				if !g.allowed(phone) {
+					g.sendToTelegram(fmt.Sprintf("%s dial2 restricted %s", call.timestamp(), name))
 					continue
 				}
 				if time.Since(gateTime) < 10*time.Second {
-					g.sendToTelegram(fmt.Sprintf("%s dial2 ok, opening already in action", name))
+					g.sendToTelegram(fmt.Sprintf("%s dial2 ok, opening already in action %s", call.timestamp(), name))
 					continue
 				}
 				gateTime = time.Now()
 				elapsed := time.Since(call.time())
 				if elapsed > 20*time.Second {
-					g.sendToTelegram(fmt.Sprintf("%s dial2 ok, but call is overdue %d s", name, elapsed/time.Second))
+					g.sendToTelegram(fmt.Sprintf("%s dial2 ok, but call is overdue %d s  %s", call.timestamp(), elapsed/time.Second, name))
 					continue
 				}
 				err := g.sendOpenCommandToGate(phone)
 				if err != nil {
-					g.sendToTelegram(fmt.Sprintf("%s dial2 ok, %v", name, err))
+					g.sendToTelegram(fmt.Sprintf("%s dial2 ok, %v  %s", call.timestamp(), name, err))
 				} else {
-					g.sendToTelegram(fmt.Sprintf("%s dial2 ok", name))
+					g.sendToTelegram(fmt.Sprintf("%s dial2 ok  %s", call.timestamp(), name))
 				}
 				continue
 			}
@@ -307,7 +309,7 @@ Loop:
 					g.sendToTelegram(fmt.Sprintf("%s не зарегистрирован", maskPhone(phone)))
 					continue
 				}
-				if !allowed {
+				if !g.allowed(phone) {
 					g.sendToTelegram(fmt.Sprintf("%s проезд запрещен", maskPhone(phone)))
 					continue
 				}
@@ -318,6 +320,15 @@ Loop:
 			break Loop
 		}
 	}
+}
+
+func (g *Gate) allowed(phone string) bool {
+	u, ok := g.Phones[phone]
+	if !ok {
+		return false
+	}
+	return u.DialToOpen && !g.RestrictedPhones[phone] &&
+		g.palEsTimeGroups.containsNow(u.TimeGroupId, u.TimeGroupName)
 }
 
 func (g *Gate) handlingSmses(abort chan struct{}) {
@@ -423,6 +434,8 @@ func (g *Gate) sendOpenCommandToGate(phone string) error {
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(g.User, g.Password)
 
+	g.lastOpenCommandTime.Store(time.Now().Unix())
+
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -451,6 +464,7 @@ Loop:
 			if _, ok := g.BTMacs.BTMacIgnore[t.MAC]; ok {
 				continue
 			}
+			g.checkAndOpenOnBT(t)
 			tt = append(tt, t)
 			if firstWaitIsOver == nil && nextWaitIsOver == nil {
 				ticker.Reset(firstDuration)
@@ -472,9 +486,48 @@ Loop:
 			g.sendToTelegramMsg(tt)
 			tt = tt[:0]
 
+		case t := <-g.openedEvets:
+			//g.openCommandTime.Store(time.Now().Unix())
+			if time.Since(g.lastOpened) < 71*time.Second {
+				Logger.Debugf("gate opened %s", t.timestampSent())
+				continue
+			}
+			g.lastOpened = time.Now()
+			Logger.Infof("gate opened %s", t.timestampSent())
+			g.sendToTelegram(fmt.Sprintf("gate opened %s", t.timestampSent()))
+
 		case <-abort:
 			break Loop
 		}
+	}
+}
+
+func (g *Gate) checkAndOpenOnBT(bt *BLETracking) {
+	if time.Since(g.lastOpened) < 71*time.Second {
+		return
+	}
+	phone, ok := g.BTMacs.BTMacAutoOpenGate[bt.MAC]
+	if !ok {
+		return
+	}
+	u, ok := g.Phones[phone]
+	if !ok {
+		return
+	}
+	// open gate and telegram message lag
+	if time.Since(g.lastBLEOpenCommandTime[bt.MAC]) < time.Duration(g.BTMacs.BLEAutoOpenLagMin)*time.Minute {
+		return
+	}
+	g.lastBLEOpenCommandTime[bt.MAC] = time.Now()
+	if !g.allowed(phone) {
+		g.sendToTelegram(fmt.Sprintf("%s BLE restricted %s", bt.timestamp(), u.name()))
+		return
+	}
+	err := g.sendOpenCommandToGate(fmt.Sprintf("%s %s", bt.MAC, phone))
+	if err != nil {
+		g.sendToTelegram(fmt.Sprintf("%s BLE:%s ok, %v  %s", bt.timestamp(), bt.MAC, u.name(), err))
+	} else {
+		g.sendToTelegram(fmt.Sprintf("%s BLE:%s ok  %s", bt.timestamp(), bt.MAC, u.name()))
 	}
 }
 
@@ -496,7 +549,7 @@ func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
 		}
 		if t.Time != 0 {
 			msg.WriteString(" time:")
-			msg.WriteString(t.timestampSent())
+			msg.WriteString(t.timestamp())
 		}
 		msg.WriteString("\n")
 	}
@@ -777,18 +830,6 @@ func If[T any](cond bool, a, b T) T {
 		return a
 	}
 	return b
-}
-
-func (g *Gate) gateOpened(openTime OpenTime) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if time.Since(g.lastOpened) < 71*time.Second {
-		Logger.Debugf("gate opened %s", openTime.timestampSent())
-		return
-	}
-	g.lastOpened = time.Now()
-	Logger.Infof("gate opened %s", openTime.timestampSent())
-	g.sendToTelegram(fmt.Sprintf("gate opened %s", openTime.timestampSent()))
 }
 
 func (g *Gate) keypadCode(c KeypadCode) {

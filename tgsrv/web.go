@@ -86,7 +86,7 @@ type BLETracking struct {
 	Time     int64
 }
 
-func (t *BLETracking) timestampSent() string {
+func (t *BLETracking) timestamp() string {
 	return time.Unix(t.Time, 0).In(Location).Format("2006-01-02 15:04:05")
 }
 
@@ -99,6 +99,10 @@ type PhoneCall struct {
 func (c *PhoneCall) time() time.Time {
 	seconds := int64(c.UnixTime)
 	return time.Unix(seconds, int64((c.UnixTime-float64(seconds))*float64(time.Nanosecond)))
+}
+
+func (c *PhoneCall) timestamp() string {
+	return c.time().In(Location).Format("2006-01-02 15:04:05")
 }
 
 type PhoneSms struct {
@@ -572,7 +576,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		w.WriteHeader(http.StatusOK)
-		s.gate.gateOpened(openTime)
+		s.gate.openedEvets <- openTime
 		return
 	}
 	if r.URL.Path == logLevelPath {
@@ -1075,9 +1079,10 @@ func (s *webSrv) serveQRTemplate(w http.ResponseWriter, r *http.Request) {
 	} else {
 		i := rand.Intn(173) + 1
 		ext := "png"
-		if i == 3 || i == 14 {
+		switch i {
+		case 3, 14:
 			ext = "gif"
-		} else if i == 1 || i == 7 || i == 9 || i == 10 || i == 12 {
+		case 1, 7, 9, 10, 12:
 			ext = "jpg"
 		}
 		if i < 100 {

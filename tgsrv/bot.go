@@ -2,11 +2,12 @@ package tgsrv
 
 import (
 	"fmt"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"go.uber.org/zap"
 	"strconv"
 	"strings"
 	"time"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
 )
 
 const (
@@ -143,7 +144,9 @@ Loop:
 			case tgBotCommandQR:
 				b.handleQR(update)
 			case tgBotCommandSMS:
-				b.handleSMS(update, text)
+				{
+					b.handleSMS(text)
+				}
 			case tgBotCommandAllSendElectr:
 				b.handleSendElectrToAllTGSub(update)
 			case tgBotCommandSmsAllWithoutEmail:
@@ -167,9 +170,10 @@ func (b *TGBot) handleElectr(update tgbotapi.Update) {
 		if len(arg) == 0 {
 			continue
 		}
-		if i == 1 {
+		switch i {
+		case 1:
 			d = arg
-		} else if i == 2 {
+		case 2:
 			n = arg
 		}
 		Logger.Debugf("%q", arg)
@@ -361,7 +365,7 @@ func (b *TGBot) authorizedActor(chatID int64, cmd string) bool {
 	actor := b.users.user(chatID)
 	if actor == nil {
 		Logger.Warnw("ACCESS DENIED: %s chatID %d", cmd, chatID)
-		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("У вас нет прав"))
+		msg := tgbotapi.NewMessage(chatID, "У вас нет прав")
 		b.sendMessage(msg)
 		return false
 	}
@@ -395,7 +399,7 @@ func (b *TGBot) handleQR(u tgbotapi.Update) {
 	}
 }
 
-func (b *TGBot) handleSMS(u tgbotapi.Update, text string) {
+func (b *TGBot) handleSMS(text string) {
 	i := strings.Index(text, " ")
 	if i < 0 {
 		return

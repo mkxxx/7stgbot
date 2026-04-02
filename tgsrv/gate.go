@@ -465,8 +465,8 @@ Loop:
 			}
 			if _, ok := g.BTMacs.BTMacSystem[t.MAC]; ok {
 				if systemLocation == 0 && t.Location != 0 {
-					Logger.Debugf("BLE: system location = %d", systemLocation)
 					systemLocation = t.Location
+					Logger.Debugf("BLE: system location = %d", systemLocation)
 				}
 				continue
 			}
@@ -474,7 +474,9 @@ Loop:
 				continue
 			}
 			g.checkAndOpenOnBT(t)
-			tt = append(tt, t)
+			if _, ok := g.BTMacs.BTMacNames[t.MAC]; ok {
+				tt = append(tt, t)
+			}
 			if firstWaitIsOver == nil && nextWaitIsOver == nil {
 				ticker.Reset(firstDuration)
 				firstWaitIsOver = ticker.C
@@ -555,6 +557,14 @@ func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
 		if t.RSSI != 0 {
 			msg.WriteString(" RSSI:")
 			msg.WriteString(strconv.Itoa(t.RSSI))
+		}
+		if len(t.UUID) != 0 {
+			msg.WriteString(" UUID:")
+			msg.WriteString(t.UUID)
+		}
+		if t.CompanyId != 0 {
+			msg.WriteString(" CompanyId:")
+			msg.WriteString(strconv.Itoa(t.CompanyId))
 		}
 		if t.Time != 0 {
 			msg.WriteString(" time:")

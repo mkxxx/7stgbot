@@ -459,11 +459,14 @@ Loop:
 	for {
 		select {
 		case t := <-g.bleTrackings:
+			// ignore if system location is unknown or not from system location
 			if systemLocation == 0 || t.Location != systemLocation {
 				continue
 			}
 			if _, ok := g.BTMacs.BTMacSystem[t.MAC]; ok {
-				systemLocation = t.Location
+				if t.Location != 0 {
+					systemLocation = t.Location
+				}
 				continue
 			}
 			if _, ok := g.BTMacs.BTMacIgnore[t.MAC]; ok {

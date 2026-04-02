@@ -465,6 +465,7 @@ Loop:
 			}
 			if _, ok := g.BTMacs.BTMacSystem[t.MAC]; ok {
 				if t.Location != 0 {
+					Logger.Debugf("BLE: system location = %d", systemLocation)
 					systemLocation = t.Location
 				}
 				continue

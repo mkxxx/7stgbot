@@ -62,14 +62,16 @@ globals:
   - id: my_value
     type: float
     initial_value: "0.0"
-  # Define a global set to store MAC addresses that are currently "throttled"
-  - id: reported_macs
-    type: std::set<std::string>
-    restore_value: no
   - id: gate_busy
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: last_call_time
+    type: std::map<std::string, unsigned long>
+    restore_value: no
+  - id: throttle_seconds
+    type: int
+    initial_value: '30'   # Не чаще 1 раза в минуту для одного MAC
 
 substitutions:
   relay_pin: "GPIO32"
@@ -152,7 +154,6 @@ binary_sensor:
               root["time"] = (int)id(sntp_time).now().timestamp;
 
 
-
 http_request:
   timeout: 5s
 
@@ -160,69 +161,85 @@ esp32_ble_tracker:
   on_ble_advertise:
     - then:
         - lambda: |-
-            // Пытаемся получить iBeacon из полученного BLE-пакета
-            auto ibeacon = x.get_ibeacon();
+            std::string mac = x.address_str();
+            unsigned long now = millis();
+            auto it = id(last_call_time).find(mac);
+            int interval = id(throttle_seconds) * 1000;
 
-            // Проверяем, содержит ли optional валидные данные
-            if (ibeacon.has_value()) {
-              std::string mac = x.address_str();
-              // Теперь обращаемся к данным iBeacon через оператор '->'
-              std::string uuid = ibeacon->get_uuid().to_string();
+            // Проверяем, нужно ли вызывать скрипт для этого MAC
+            if (it == id(last_call_time).end() || (now - it->second) >= interval) {
+              // Обновляем время вызова
+              id(last_call_time)[mac] = now;
 
-              // .count(mac) вернет 1, если адрес в списке, и 0, если его нет.
-              if (id(reported_macs).count(mac) == 0) {
-                id(reported_macs).insert(mac);
-                id(report_device_script).execute(mac, x.get_rssi(), x.get_name(), uuid);
+              int rssi = x.get_rssi();
+              std::string name = x.get_name();
+
+              // UUID из iBeacon (если есть)
+              std::string uuid = "";
+              auto ibeacon = x.get_ibeacon();
+              if (ibeacon.has_value()) {
+                char uuid_buf[37];
+                ibeacon->get_uuid().to_str(uuid_buf);
+                uuid = uuid_buf;
               }
-            } else {
-              std::string mac = x.address_str();
-              // Check if we have already reported this MAC recently
-              if (id(reported_macs).find(mac) == id(reported_macs).end()) {
-                // Not found, so add it to the set and trigger the reporting script
-                id(reported_macs).insert(mac);
-                id(report_device_script).execute(mac, x.get_rssi(), x.get_name(), "");
+
+              // Company ID из manufacturer data
+              uint16_t company_id = 0;
+              auto manuf_datas = x.get_manufacturer_datas();
+              if (!manuf_datas.empty() && manuf_datas[0].data.size() >= 2) {
+                company_id = (manuf_datas[0].data[1] << 8) | manuf_datas[0].data[0];
               }
+
+              ESP_LOGI("BLE", "Calling script: MAC=%s, RSSI=%d, Name=%s, UUID=%s, CompanyID=0x%04X",
+                       mac.c_str(), rssi, name.c_str(), uuid.c_str(), company_id);
+
+              id(report_device_script).execute(mac, rssi, name, uuid, company_id);
+
+              if (millis() % 1800000 < 1000) { // раз в полчаса
+                unsigned long now = millis();
+                for (auto it = id(last_call_time).begin(); it != id(last_call_time).end(); ) {
+                  if (now - it->second > 600000) { // старше часа
+                    it = id(last_call_time).erase(it);
+                  } else {
+                    ++it;
+                  }
+                }
+              }                 
             }
-
 
 script:
   - id: report_device_script
-    mode: parallel
+    mode: single   # или parallel, но с max_parallel: 1
     parameters:
       mac: string
       rssi: int
       name: string
-      uuid: string # Добавили параметр UUID
+      uuid: string
+      company_id: int
     then:
-      - logger.log:
-          format: "Reporting iBeacon -> MAC: %s, UUID: %s"
-          args: [ 'mac.c_str()', 'uuid.c_str()' ]    
       - http_request.post:
           url: http://88.210.53.228:8084/ble/
           request_headers:
             Content-Type: application/json
           json: |-
             root["mac"] = mac;
-            root["uuid"] = uuid; // Отправляем UUID на сервер
+            root["uuid"] = uuid;
             root["rssi"] = rssi;
             root["name"] = name;
+            root["company_id"] = company_id;
             root["location"] = (int)2;
             if (id(sntp_time).now().is_valid()) {
-              root["time"] = (int)id(sntp_time).now().timestamp;
+              root["time"] = id(sntp_time).now().timestamp;
             }
           on_response:
             - lambda: |-
                 if (response->status_code == 200) {
-                  ESP_LOGI("http_post", "Успешно отправлено");
+                  ESP_LOGI("http_post", "Успешно отправлено для %s", mac.c_str());
                 } else {
-                  ESP_LOGW("http_post", "Ошибка сервера: %d", response->status_code);
+                  ESP_LOGW("http_post", "Ошибка сервера %d для %s", response->status_code, mac.c_str());
                 }
           on_error:
             - logger.log: "Ошибка сети при отправке"
-
-      - delay: 3s # Ограничение: не чаще раза в 3 секунды для одного и того же MAC
-      - lambda: |-
-          id(reported_macs).erase(mac);
 
 
 matrix_keypad:
@@ -276,3 +293,42 @@ key_collector:
     on_timeout:
       then:
         - logger.log: "Ошибка: Нужно минимум 4 цифры перед нажатием #"
+
+#esp32_ble_tracker:
+#  on_ble_advertise:
+#    - then: 
+#        - lambda: |-
+#            ESP_LOGD("BLE", "Device: %s, RSSI: %d, Name: %s",
+#                     x.address_str().c_str(), x.get_rssi(), x.get_name().c_str());
+#
+#            // Manufacturer data (может содержать iBeacon или Eddystone)
+#            auto manuf_datas = x.get_manufacturer_datas();
+#            if (!manuf_datas.empty()) {
+#              ESP_LOGD("BLE", "Manufacturer data count: %d", manuf_datas.size());
+#              for (auto &data : manuf_datas) {
+#                // Вывод company ID (первые два байта)
+#                if (data.data.size() >= 2) {
+#                  ESP_LOGD("BLE", "  Company ID: 0x%02X%02X", data.data[1], data.data[0]);
+#                }
+#                // Вывод длины данных
+#                ESP_LOGD("BLE", "  Data length: %d", data.data.size());
+#              }
+#            } else {
+#              ESP_LOGD("BLE", "No manufacturer data");
+#            }
+#
+#            // Service data
+#            auto service_datas = x.get_service_datas();
+#            ESP_LOGD("BLE", "Service data count: %d", service_datas.size());
+#            for (auto &svc : service_datas) {
+#              std::string uuid_str = svc.uuid.to_string();
+#              ESP_LOGD("BLE", "  Service UUID: %s, data length: %d", uuid_str.c_str(), svc.data.size());
+#            }
+#
+#            // iBeacon
+#            auto ibeacon = x.get_ibeacon();
+#            if (ibeacon.has_value()) {
+#              ESP_LOGD("BLE", "iBeacon detected!");
+#            } else {
+#              ESP_LOGD("BLE", "No iBeacon data");
+#            }

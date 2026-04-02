@@ -78,12 +78,15 @@ const (
 	QRNamePayeeINN = "PayeeINN" // <= 12
 )
 
+// {"mac":"5B:00:DF:94:DD:1C","uuid":"","rssi":-71,"name":"iTAG  ","company_id":56604,"location":2,"time":1775136766}
 type BLETracking struct {
-	MAC      string
-	RSSI     int
-	Name     string
-	Location int
-	Time     int64
+	MAC       string
+	RSSI      int
+	Name      string
+	UUID      string
+	CompanyId int `json:"company_id"`
+	Location  int
+	Time      int64
 }
 
 func (t *BLETracking) timestamp() string {

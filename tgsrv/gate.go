@@ -460,11 +460,11 @@ Loop:
 		select {
 		case t := <-g.bleTrackings:
 			// ignore if system location is unknown or not from system location
-			if systemLocation == 0 || t.Location != systemLocation {
+			if systemLocation != 0 && t.Location != systemLocation {
 				continue
 			}
 			if _, ok := g.BTMacs.BTMacSystem[t.MAC]; ok {
-				if t.Location != 0 {
+				if systemLocation == 0 && t.Location != 0 {
 					Logger.Debugf("BLE: system location = %d", systemLocation)
 					systemLocation = t.Location
 				}

@@ -10,16 +10,23 @@ import (
 
 func TestBTMacsFromTOML(t *testing.T) {
 	tomlData := `
-BLEWatchLocation = 101
+BLEAutoOpenLagMin = 3
+
+[BTMacSystem]
+"CA:7E:07:37:41:48" = "pal-es spider i-wr"
+"CA:7E:07:37:41:4E" = "pal-es spider i-wr"
+"CA:7E:07:37:41:4F" = "pal-es spider i-wr"
+"5B:00:DF:94:DD:1C" = "79990010203"
 
 [BTMacIgnore]
-"00:11:22:33:44:55" = "Test Device"
+"E4:AE:E4:50:2A:D5" = "TUYA_ градусник"
 
 [BTMacAutoOpenGate]
-"AA:BB:CC:DD:EE:FF" = "79990010203"
+"5B:0B:2D:AC:B1:E7" = "79990010203"
 
 [BTMacNames]
-"11:22:33:44:55:66" = "Gate 1"
+"0C:B7:89:14:26:AB" = "серебрисый"
+"10:E9:53:FB:E9:AE" = "невидимка"
 `
 
 	var result BTMacs
@@ -27,13 +34,19 @@ BLEWatchLocation = 101
 	if err != nil {
 		t.Fatalf("Ошибка парсинга TOML: %v", err)
 	}
-	if result.BTMacIgnore["00:11:22:33:44:55"] != "Test Device" {
-		t.Error("BTMacIgnore: неверное значение")
+	{
+		got := result.BTMacIgnore["E4:AE:E4:50:2A:D5"]
+		want := "TUYA_ градусник"
+		if want != got {
+			t.Errorf("got %v, want %v", got, want)
+		}
 	}
-	got := result.BTMacAutoOpenGate["AA:BB:CC:DD:EE:FF"]
-	want := "79990010203"
-	if want != got {
-		t.Errorf("got %v, want %v", got, want)
+	{
+		got := result.BTMacAutoOpenGate["5B:0B:2D:AC:B1:E7"]
+		want := "79990010203"
+		if want != got {
+			t.Errorf("got %v, want %v", got, want)
+		}
 	}
 }
 

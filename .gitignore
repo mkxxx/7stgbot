@@ -17,3 +17,4 @@ config.toml
 *.png
 *.db
 bt-macs.toml
+esp32/secrets.yaml

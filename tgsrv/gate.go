@@ -326,10 +326,7 @@ Loop:
 
 func (g *Gate) allowed(phone string) bool {
 	u, ok := g.Phones[phone]
-	if !ok {
-		return false
-	}
-	return u.DialToOpen && !g.RestrictedPhones[phone] &&
+	return ok && (u.DialToOpen || u.LocalOnly) && !g.RestrictedPhones[phone] &&
 		g.palEsTimeGroups.containsNow(u.TimeGroupId, u.TimeGroupName)
 }
 

@@ -17,4 +17,6 @@ config.toml
 *.png
 *.db
 bt-macs.toml
+.DS_Store
 esp32/secrets.yaml
+esp32/.DS_Store

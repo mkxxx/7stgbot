@@ -3,7 +3,8 @@ esphome:
   friendly_name: esp-dev1
 
 esp32:
-  board: esp32dev
+#  board: esp32dev
+  board: nodemcu-32s
   framework:
     type: esp-idf
     advanced:
@@ -65,14 +66,16 @@ globals:
   - id: my_value
     type: float
     initial_value: "0.0"
-  # Define a global set to store MAC addresses that are currently "throttled"
-  - id: reported_macs
-    type: std::set<std::string>
-    restore_value: no
   - id: gate_busy
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: last_call_time
+    type: std::map<std::string, unsigned long>
+    restore_value: no
+  - id: throttle_seconds
+    type: int
+    initial_value: '30'   # Не чаще 1 раза в полминуты для одного MAC
 
 substitutions:
   relay_pin: "GPIO32"
@@ -152,8 +155,7 @@ binary_sensor:
             request_headers:
               Content-Type: application/json
             json: !lambda |-
-              root["timestamp"] = (int)id(sntp_time).now().timestamp;
-
+              root["time"] = (int)id(sntp_time).now().timestamp;
 
 
 http_request:
@@ -161,54 +163,84 @@ http_request:
 
 esp32_ble_tracker:
   on_ble_advertise:
-    then:
-      - lambda: |-
-          std::string mac = x.address_str();
-          // Check if we have already reported this MAC recently
-          if (id(reported_macs).find(mac) == id(reported_macs).end()) {
-            // Not found, so add it to the set and trigger the reporting script
-            id(reported_macs).insert(mac);
-            id(report_device_script).execute(mac, x.get_rssi(), x.get_name());
-          }
+    - then:
+        - lambda: |-
+            std::string mac = x.address_str();
+            unsigned long now = millis();
+            auto it = id(last_call_time).find(mac);
+            int interval = id(throttle_seconds) * 1000;
+
+            // Проверяем, нужно ли вызывать скрипт для этого MAC
+            if (it == id(last_call_time).end() || (now - it->second) >= interval) {
+              // Обновляем время вызова
+              id(last_call_time)[mac] = now;
+
+              int rssi = x.get_rssi();
+              std::string name = x.get_name();
+
+              // UUID из iBeacon (если есть)
+              std::string uuid = "";
+              auto ibeacon = x.get_ibeacon();
+              if (ibeacon.has_value()) {
+                char uuid_buf[37];
+                ibeacon->get_uuid().to_str(uuid_buf);
+                uuid = uuid_buf;
+              }
+
+              // Company ID из manufacturer data
+              uint16_t company_id = 0;
+              auto manuf_datas = x.get_manufacturer_datas();
+              if (!manuf_datas.empty() && manuf_datas[0].data.size() >= 2) {
+                company_id = (manuf_datas[0].data[1] << 8) | manuf_datas[0].data[0];
+              }
+
+              if (millis() % 1800000 < 1000) { // раз в полчаса
+                unsigned long now = millis();
+                for (auto it = id(last_call_time).begin(); it != id(last_call_time).end(); ) {
+                  if (now - it->second > 600000) { // старше часа
+                    it = id(last_call_time).erase(it);
+                  } else {
+                    ++it;
+                  }
+                }
+              }                 
+              id(report_device_script).execute(mac, rssi, name, uuid, company_id);
+
+            }
 
 script:
   - id: report_device_script
-    mode: parallel
+    mode: single   # или parallel, но с max_parallel: 1
     parameters:
       mac: string
       rssi: int
       name: string
+      uuid: string
+      company_id: int
     then:
       - logger.log:
-          format: "Reporting BLE Device -> MAC: %s"
-          args: [ 'mac.c_str()' ]    
+          format: "Reporting BLE Device -> %s RSSI: %d '%s' %s company_id: %d"
+          args: [ 'mac.c_str()', rssi, 'name.c_str()', 'uuid.c_str()', company_id ]    
       - http_request.post:
           url: http://88.210.53.228:8084/ble/
           request_headers:
             Content-Type: application/json
           json: |-
             root["mac"] = mac;
+            root["uuid"] = uuid;
             root["rssi"] = rssi;
             root["name"] = name;
+            root["company_id"] = company_id;
             root["location"] = (int)1;
-            root["time"] = (int)id(sntp_time).now().timestamp;
+            if (id(sntp_time).now().is_valid()) {
+              root["time"] = id(sntp_time).now().timestamp;
+            }
           on_response:
-            then:
-              - logger.log:
-                  level: INFO
-                  format: 'HTTP POST Response status: %d'
-                  args: [response->status_code]
-              - lambda: |-
-                  if (response->status_code == 200) {
-                    ESP_LOGI("http_post", "HTTP POST successful");
-                  } else {
-                    ESP_LOGW("http_post", "HTTP POST failed with code: %d", response->status_code);
-                  }
+            - lambda: |-
+                if (response->status_code == 200) {
+                  ESP_LOGI("http_post", "Успешно отправлено для %s", mac.c_str());
+                } else {
+                  ESP_LOGW("http_post", "Ошибка сервера %d для %s", response->status_code, mac.c_str());
+                }
           on_error:
-            then:
-              - logger.log: "HTTP Request failed (Check network/URL)"
-
-      - delay: 300s
-      - lambda: |-
-          id(reported_macs).erase(mac);
-
+            - logger.log: "Ошибка сети при отправке"

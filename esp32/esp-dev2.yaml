@@ -3,7 +3,8 @@ esphome:
   friendly_name: esp-dev2
 
 esp32:
-  board: esp32dev
+#  board: esp32dev
+  board: nodemcu-32s
   framework:
     type: esp-idf
     advanced:
@@ -54,9 +55,12 @@ captive_portal:
     
 sensor:
   - platform: internal_temperature
-    name: "internal_temperature"  # Убрали пробел, заменили на "_"
+    name: "internal_temperature"
+    id: internal_temperature_sensor  # Добавили уникальный ID
+    
   - platform: uptime
-    name: "uptime_sensor"        # Убрали пробел, заменили на "_"
+    name: "uptime_sensor"
+    id: uptime_sensor_id            # Добавили уникальный ID
 
 globals:
   - id: my_value
@@ -190,11 +194,6 @@ esp32_ble_tracker:
                 company_id = (manuf_datas[0].data[1] << 8) | manuf_datas[0].data[0];
               }
 
-              ESP_LOGI("BLE", "Calling script: MAC=%s, RSSI=%d, Name=%s, UUID=%s, CompanyID=0x%04X",
-                       mac.c_str(), rssi, name.c_str(), uuid.c_str(), company_id);
-
-              id(report_device_script).execute(mac, rssi, name, uuid, company_id);
-
               if (millis() % 1800000 < 1000) { // раз в полчаса
                 unsigned long now = millis();
                 for (auto it = id(last_call_time).begin(); it != id(last_call_time).end(); ) {
@@ -205,6 +204,8 @@ esp32_ble_tracker:
                   }
                 }
               }                 
+              id(report_device_script).execute(mac, rssi, name, uuid, company_id);
+
             }
 
 script:
@@ -217,6 +218,9 @@ script:
       uuid: string
       company_id: int
     then:
+      - logger.log:
+          format: "Reporting BLE Device -> %s RSSI: %d '%s' %s company_id: %d"
+          args: [ 'mac.c_str()', rssi, 'name.c_str()', 'uuid.c_str()', company_id ]    
       - http_request.post:
           url: http://88.210.53.228:8084/ble/
           request_headers:
@@ -264,7 +268,7 @@ matrix_keypad:
 key_collector:
   - id: pin_code_reader
     source_id: my_keypad
-    min_length: 4
+    min_length: 1
     max_length: 16
     clear_keys: "*"
     end_keys: "#"

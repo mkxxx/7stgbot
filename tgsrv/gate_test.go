@@ -174,3 +174,10 @@ func TestPalEsEmptyTimeGroups(t *testing.T) {
 		}
 	}
 }
+
+func TestPalesUser(t *testing.T) {
+	u := PalesUser{Firstname: "Михаил", Lastname: "105"}
+	if !u.hasPlotNumber("105") {
+		t.Errorf("got \"%s %s\" not has 105", u.Firstname, u.Lastname)
+	}
+}

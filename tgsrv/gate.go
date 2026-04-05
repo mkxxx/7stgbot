@@ -151,9 +151,9 @@ func (u *PalesUser) name() string {
 }
 
 func (u *PalesUser) hasPlotNumber(n string) bool {
-	pattern := `\b` + regexp.QuoteMeta(n) + `\b`
+	pattern := `(?i)(^|[^a-zа-я0-9])` + regexp.QuoteMeta(n) + `([^a-zа-я0-9]|$)`
 	re := regexp.MustCompile(pattern)
-	return re.MatchString(u.Firstname + u.Lastname)
+	return re.MatchString(u.Firstname + " " + u.Lastname)
 }
 
 func (u *PalesLogUser) timestamp() string {

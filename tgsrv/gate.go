@@ -432,11 +432,12 @@ func (g *Gate) sendToTelegram(msg string) {
 	}
 }
 
-func (g *Gate) sendOpenCommandToGate(phone string) error {
+func (g *Gate) sendOpenCommandToGate(text string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf(g.GateUrl, phone), strings.NewReader(""))
+	url := fmt.Sprintf(g.GateUrl, url.QueryEscape(text))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(""))
 	if err != nil {
 		return err
 	}
@@ -448,11 +449,15 @@ func (g *Gate) sendOpenCommandToGate(phone string) error {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		Logger.Errorf("%s error calling gate: %v", phone, err)
-	} else {
-		Logger.Infof("%s http %d", phone, resp.StatusCode)
-		defer resp.Body.Close()
+		Logger.Errorf("error calling gate %q: %v", url, err)
+		return err
 	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		Logger.Errorf("error calling gate %q: %d", url, resp.StatusCode)
+		return fmt.Errorf("http %d", resp.StatusCode)
+	}
+	Logger.Debugf("%q http %d", text, resp.StatusCode)
 	return err
 }
 

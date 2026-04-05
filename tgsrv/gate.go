@@ -150,6 +150,12 @@ func (u *PalesUser) name() string {
 	return fmt.Sprintf("%s %s%s", u.Id, u.Firstname, u.Lastname)
 }
 
+func (u *PalesUser) hasPlotNumber(n string) bool {
+	pattern := `\b` + regexp.QuoteMeta(n) + `\b`
+	re := regexp.MustCompile(pattern)
+	return re.MatchString(u.Firstname + u.Lastname)
+}
+
 func (u *PalesLogUser) timestamp() string {
 	return time.Unix(u.Tm, 0).In(Location).Format("2006-01-02 15:04:05")
 }
@@ -869,5 +875,25 @@ func If[T any](cond bool, a, b T) T {
 
 func (g *Gate) keypadCode(c KeypadCode) {
 	Logger.Infof("keypad code %s  %s", c.Code, c.timestampSent())
-	g.sendToTelegram(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
+	if len(c.Code) < 11 {
+		g.sendToTelegram(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
+		return
+	}
+	phone := "7" + c.Code[len(c.Code)-10:]
+	u, ok := g.Phones[phone]
+	if !ok {
+		g.sendToTelegram(fmt.Sprintf("keypad code %s  %s, phone not found", c.Code, c.timestampSent()))
+		return
+	}
+	plotNumber := c.Code[:len(c.Code)-10]
+	if !u.hasPlotNumber(plotNumber) {
+		g.sendToTelegram(fmt.Sprintf("keypad code %s  %s, phone and plot number mismatch", c.Code, c.timestampSent()))
+		return
+	}
+	err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code))
+	if err != nil {
+		g.sendToTelegram(fmt.Sprintf("keypad code %s  %v", c.Code, err))
+	} else {
+		g.sendToTelegram(fmt.Sprintf("keypad code OK %s", c.Code))
+	}
 }

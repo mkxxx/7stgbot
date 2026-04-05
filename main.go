@@ -146,6 +146,7 @@ func main() {
 	})
 	g.GateOpenNumber = cfg.GateOpenNumber
 	g.GateInfoNumber = cfg.GateInfoNumber
+	g.BLEPeriodSec = time.Duration(cfg.BLEPeriodSec)
 
 	fname := filepath.Join(cfgDir, "bt-macs.toml")
 	// ERROR	error parsing  "config.toml": toml: line 4 (last key "BTMacIgnore"): expected '.' or '=', but got ':' instead
@@ -194,6 +195,7 @@ type Config struct {
 	BleWatchLocation       int
 	GateOpenNumber         string
 	GateInfoNumber         string
+	BLEPeriodSec           int64
 }
 
 func stdinCredentials() (string, string) {

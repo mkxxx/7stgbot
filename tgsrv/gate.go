@@ -42,10 +42,12 @@ type Gate struct {
 	lastOpened             time.Time
 	lastOpenCommandTime    atomic.Int64
 	lastBLEOpenCommandTime map[string]time.Time
+	bleTimes               map[string]time.Time
 	GateOpenNumber         string
 	GateInfoNumber         string
 	BTMacs                 BTMacs
 	palEsTimeGroups        *PalEsTimeGroups
+	BLEPeriodSec           time.Duration
 }
 
 type BTMacs struct {
@@ -72,11 +74,12 @@ type PalesLog struct {
 }
 
 type PalesLogUser struct {
-	UserId    string
-	Sn        string
-	Approved  bool
-	Type      int
-	Tm        int64
+	UserId   string
+	Sn       string
+	Approved bool
+	Type     int
+	Tm       int64
+	// 12: Time group restriction – date not allowed
 	Reason    int
 	Firstname string
 	Lastname  string
@@ -173,6 +176,7 @@ func (g *Gate) Init() {
 	g.bleTrackings = make(chan *BLETracking, 8)
 	g.openedEvets = make(chan OpenTime, 8)
 	g.lastBLEOpenCommandTime = make(map[string]time.Time)
+	g.bleTimes = make(map[string]time.Time)
 	g.palesLastLog = &PalesLogUser{}
 	g.lastOpenCommandTime = atomic.Int64{}
 }
@@ -513,9 +517,6 @@ Loop:
 }
 
 func (g *Gate) checkAndOpenOnBT(bt *BLETracking) {
-	if time.Since(g.lastOpened) < 71*time.Second {
-		return
-	}
 	phone, ok := g.BTMacs.BTMacAutoOpenGate[bt.MAC]
 	if !ok {
 		return
@@ -524,11 +525,21 @@ func (g *Gate) checkAndOpenOnBT(bt *BLETracking) {
 	if !ok {
 		return
 	}
+	if time.Since(g.lastOpened) < 71*time.Second {
+		return
+	}
 	// open gate and telegram message lag
 	if time.Since(g.lastBLEOpenCommandTime[bt.MAC]) < time.Duration(g.BTMacs.BLEAutoOpenLagMin)*time.Minute {
 		return
 	}
 	g.lastBLEOpenCommandTime[bt.MAC] = time.Now()
+	lastMacTime := g.bleTimes[bt.MAC]
+	t := time.Unix(bt.Time, 0)
+	g.bleTimes[bt.MAC] = t
+	// avoid nuisance gate cycling while in range (under frequency period exceeded)
+	if t.Sub(lastMacTime) <= g.BLEPeriodSec*time.Second {
+		return
+	}
 	if !g.allowed(phone) {
 		g.sendToTelegram(fmt.Sprintf("%s BLE restricted %s", bt.timestamp(), u.name()))
 		return

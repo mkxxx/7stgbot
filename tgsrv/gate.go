@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -878,27 +879,33 @@ func If[T any](cond bool, a, b T) T {
 	return b
 }
 
-func (g *Gate) keypadCode(c KeypadCode) {
+var (
+	Err400BadFormat       = errors.New("bad format")
+	Err403Forbidden       = errors.New("forbidden")
+	Err429TooManyRequests = errors.New("too many requests")
+)
+
+func (g *Gate) keypadCode(c KeypadCode) error {
 	Logger.Infof("keypad code %s  %s", c.Code, c.timestampSent())
 	if len(c.Code) < 11 {
 		g.sendToTelegram(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
-		return
+		return Err400BadFormat
 	}
 	phone := "7" + c.Code[len(c.Code)-10:]
 	u, ok := g.Phones[phone]
 	if !ok {
 		g.sendToTelegram(fmt.Sprintf("keypad code %s  %s, phone not found", c.Code, c.timestampSent()))
-		return
+		return Err400BadFormat
 	}
 	plotNumber := c.Code[:len(c.Code)-10]
 	if !u.hasPlotNumber(plotNumber) {
 		g.sendToTelegram(fmt.Sprintf("keypad code %s  %s, phone and plot number mismatch", c.Code, c.timestampSent()))
-		return
+		return Err400BadFormat
 	}
 	info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
 	if !g.allowed(phone) {
 		g.sendToTelegram(fmt.Sprintf("keypad code restricted %s", info))
-		return
+		return Err403Forbidden
 	}
 	err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code))
 	if err != nil {
@@ -906,4 +913,5 @@ func (g *Gate) keypadCode(c KeypadCode) {
 	} else {
 		g.sendToTelegram(fmt.Sprintf("keypad code OK %s", info))
 	}
+	return err
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -607,6 +608,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == gateKeypadPath {
+		// 400 - bad format, 403 - forbidden, 429 - too many requests
 		defer r.Body.Close()
 		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 
@@ -623,8 +625,20 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		Logger.Debugf("keypad %s", string(bodyBytes))
-		w.WriteHeader(http.StatusOK)
-		s.gate.keypadCode(keypadCode)
+
+		err = s.gate.keypadCode(keypadCode)
+		switch {
+		case errors.Is(err, Err400BadFormat):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, Err403Forbidden):
+			http.Error(w, err.Error(), http.StatusForbidden)
+		case errors.Is(err, Err429TooManyRequests):
+			http.Error(w, err.Error(), http.StatusTooManyRequests)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
 		return
 	}
 	s.staticHandler.ServeHTTP(w, r)

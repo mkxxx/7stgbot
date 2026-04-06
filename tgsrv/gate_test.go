@@ -181,3 +181,76 @@ func TestPalesUser(t *testing.T) {
 		t.Errorf("got \"%s %s\" not has 105", u.Firstname, u.Lastname)
 	}
 }
+
+func TestHitCounter(t *testing.T) {
+	c := &HitCounter{N: 5}
+	c.init()
+	{
+		got := c.count(time.Minute)
+		want := 0
+		if got != want {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	}
+	loc, _ := time.LoadLocation("Europe/Moscow")
+	type test struct {
+		time time.Time
+		want int
+	}
+	tests := []test{
+		{time.Date(2026, time.April, 6, 20, 30, 0, 0, loc), 1},
+		{time.Date(2026, time.April, 6, 20, 32, 0, 0, loc), 1},
+		{time.Date(2026, time.April, 6, 20, 32, 0, 0, loc), 2},
+		{time.Date(2026, time.April, 6, 20, 32, 0, 0, loc), 3},
+		{time.Date(2026, time.April, 6, 20, 32, 0, 0, loc), 4},
+		{time.Date(2026, time.April, 6, 20, 32, 0, 0, loc), 5},
+		{time.Date(2026, time.April, 6, 20, 32, 0, 0, loc), 5},
+		{time.Date(2026, time.April, 6, 20, 33, 0, 0, loc), 5},
+		{time.Date(2026, time.April, 6, 20, 34, 0, 0, loc), 2},
+		{time.Date(2026, time.April, 6, 20, 36, 0, 0, loc), 1},
+	}
+	for i, tt := range tests {
+		c.hit(tt.time)
+		got := c.count(time.Minute)
+		if tt.want != got {
+			t.Errorf("%d: got %v, want %v", i, got, tt.want)
+		}
+	}
+	for i := 0; i < 100; i++ {
+		c.hit(time.Date(2026, time.April, 6, 20, 36, 0, 0, loc))
+	}
+	tests = []test{
+		{time.Date(2026, time.April, 6, 20, 36, 0, 0, loc), 5},
+		{time.Date(2026, time.April, 6, 20, 38, 0, 0, loc), 1},
+	}
+}
+
+func TestRateWatcher(t *testing.T) {
+	w := &RateWatcher{Duration: time.Minute, ThrottleDuration: 3 * time.Minute}
+	w.Init(5)
+	loc, _ := time.LoadLocation("Europe/Moscow")
+	type test struct {
+		time time.Time
+		want bool
+	}
+	tests := []test{
+		{time.Date(2026, time.April, 6, 20, 30, 0, 0, loc), true},
+		{time.Date(2026, time.April, 6, 20, 32, 0, 0, loc), true},
+		{time.Date(2026, time.April, 6, 20, 32, 0, 0, loc), true},
+		{time.Date(2026, time.April, 6, 20, 32, 0, 0, loc), true},
+		{time.Date(2026, time.April, 6, 20, 32, 0, 0, loc), true},
+		{time.Date(2026, time.April, 6, 20, 32, 0, 0, loc), false},
+		{time.Date(2026, time.April, 6, 20, 32, 0, 0, loc), false},
+		{time.Date(2026, time.April, 6, 20, 33, 0, 0, loc), false},
+		{time.Date(2026, time.April, 6, 20, 34, 0, 0, loc), false},
+		{time.Date(2026, time.April, 6, 20, 34, 59, 0, loc), false},
+		{time.Date(2026, time.April, 6, 20, 35, 0, 0, loc), true},
+		{time.Date(2026, time.April, 6, 20, 36, 0, 0, loc), true},
+	}
+	for i, tt := range tests {
+		got := w.hit(tt.time)
+		if tt.want != got {
+			t.Errorf("%d: got %v, want %v", i, got, tt.want)
+		}
+	}
+}

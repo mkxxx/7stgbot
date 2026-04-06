@@ -49,6 +49,7 @@ type Gate struct {
 	BTMacs                 BTMacs
 	palEsTimeGroups        *PalEsTimeGroups
 	BLEPeriodSec           time.Duration
+	RateWatcher            *RateWatcher
 }
 
 type BTMacs struct {
@@ -887,6 +888,11 @@ var (
 
 func (g *Gate) keypadCode(c KeypadCode) error {
 	Logger.Infof("keypad code %s  %s", c.Code, c.timestampSent())
+	t := time.Unix(c.Time, 0)
+	if !g.RateWatcher.hit(t) {
+		g.sendToTelegram(fmt.Sprintf("keypad code %s TOO MANY REQUESTS %s ", c.Code, c.timestampSent()))
+		return Err429TooManyRequests
+	}
 	if len(c.Code) < 11 {
 		g.sendToTelegram(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
 		return Err400BadFormat
@@ -914,4 +920,77 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		g.sendToTelegram(fmt.Sprintf("keypad code OK %s", info))
 	}
 	return err
+}
+
+type HitCounter struct {
+	N      int
+	buffer []time.Time
+	hits   []time.Time
+	end    int
+}
+
+func (c *HitCounter) init() {
+	sz := max(16, c.N*2)
+	c.buffer = make([]time.Time, sz, sz)
+	c.hits = c.buffer[:0]
+}
+
+func (c *HitCounter) hit(t time.Time) {
+	if c.end == len(c.buffer) {
+		c.end = c.N
+		copy(c.buffer, c.hits[1:])
+		c.buffer[c.N-1] = t
+		c.hits = c.buffer[:c.N]
+		return
+	}
+	c.end++
+	c.hits = append(c.hits, t)
+	if len(c.hits) > c.N {
+		c.hits = c.hits[1:]
+	}
+}
+
+func (c *HitCounter) count(d time.Duration) int {
+	if len(c.hits) == 0 || d <= 0 {
+		return 0
+	}
+	res := 1
+	if len(c.hits) == 1 {
+		return res
+	}
+	begin := c.hits[len(c.hits)-1].Add(-d)
+	for i := len(c.hits) - 2; i >= 0; i-- {
+		if c.hits[i].Before(begin) {
+			return res
+		}
+		res++
+	}
+	return res
+}
+
+func (c *HitCounter) till(t time.Time) time.Duration {
+	var last time.Time
+	if len(c.hits) != 0 {
+		last = c.hits[len(c.hits)-1]
+	}
+	return t.Sub(last)
+}
+
+type RateWatcher struct {
+	Duration         time.Duration
+	ThrottleDuration time.Duration
+	hitCounter       *HitCounter
+}
+
+func (w *RateWatcher) Init(limit int) {
+	w.hitCounter = &HitCounter{N: limit}
+	w.hitCounter.init()
+}
+
+func (w *RateWatcher) hit(t time.Time) bool {
+	if w.hitCounter.till(t) < w.ThrottleDuration && w.hitCounter.count(w.Duration) >= w.hitCounter.N {
+		return false
+	}
+	w.hitCounter.hit(t)
+	return w.hitCounter.count(w.Duration) < w.hitCounter.N
 }

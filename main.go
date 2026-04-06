@@ -147,6 +147,10 @@ func main() {
 	g.GateOpenNumber = cfg.GateOpenNumber
 	g.GateInfoNumber = cfg.GateInfoNumber
 	g.BLEPeriodSec = time.Duration(cfg.BLEPeriodSec)
+	g.RateWatcher = &tgsrv.RateWatcher{
+		Duration:         time.Duration(cfg.KeypadHitLimitDurationMinutes) * time.Minute,
+		ThrottleDuration: time.Duration(cfg.KeypadThrottleMinutes) * time.Minute}
+	g.RateWatcher.Init(cfg.KeypadHitLimit)
 
 	fname := filepath.Join(cfgDir, "bt-macs.toml")
 	// ERROR	error parsing  "config.toml": toml: line 4 (last key "BTMacIgnore"): expected '.' or '=', but got ':' instead
@@ -171,31 +175,34 @@ func main() {
 }
 
 type Config struct {
-	Port                   int
-	StaticDir              string
-	TgToken                string
-	Price                  map[string]float64
-	Coef                   map[string]float64
-	QR                     map[string]string
-	DiscordAlertChannelURL string
-	IfTTTKey               string
-	AdminEmails            []string
-	AdminPhone             string
-	SMSRateLimiterCfg      map[string]int
-	SMSRateLimiter         []tgsrv.Rate
-	GateUrl                string
-	TelegramUrl            string
-	TelegramChatId         string
-	TelegramTimeoutSec     int
-	ProxyUrl               string
-	GateUser               string
-	GatePwd                string
-	PalesPortalUser        string
-	PalesPortalPwd         string
-	BleWatchLocation       int
-	GateOpenNumber         string
-	GateInfoNumber         string
-	BLEPeriodSec           int64
+	Port                          int
+	StaticDir                     string
+	TgToken                       string
+	Price                         map[string]float64
+	Coef                          map[string]float64
+	QR                            map[string]string
+	DiscordAlertChannelURL        string
+	IfTTTKey                      string
+	AdminEmails                   []string
+	AdminPhone                    string
+	SMSRateLimiterCfg             map[string]int
+	SMSRateLimiter                []tgsrv.Rate
+	GateUrl                       string
+	TelegramUrl                   string
+	TelegramChatId                string
+	TelegramTimeoutSec            int
+	ProxyUrl                      string
+	GateUser                      string
+	GatePwd                       string
+	PalesPortalUser               string
+	PalesPortalPwd                string
+	BleWatchLocation              int
+	GateOpenNumber                string
+	GateInfoNumber                string
+	BLEPeriodSec                  int64
+	KeypadHitLimit                int
+	KeypadHitLimitDurationMinutes int64
+	KeypadThrottleMinutes         int64
 }
 
 func stdinCredentials() (string, string) {

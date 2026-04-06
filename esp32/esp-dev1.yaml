@@ -161,52 +161,53 @@ binary_sensor:
 http_request:
   timeout: 5s
 
+# Добавим отдельный таймер для очистки памяти, чтобы не нагружать BLE обработчик
+interval:
+  - interval: 1min
+    then:
+      - lambda: |-
+          unsigned long now = millis();
+          auto &m = id(last_call_time);
+          for (auto it = m.begin(); it != m.end(); ) {
+            if (now - it->second > 60000) it = m.erase(it);
+            else ++it;
+          }
+
 esp32_ble_tracker:
   on_ble_advertise:
     - then:
         - lambda: |-
+            // 1. Быстрая фильтрация по MAC (без создания строк лишний раз)
             std::string mac = x.address_str();
             unsigned long now = millis();
-            auto it = id(last_call_time).find(mac);
-            int interval = id(throttle_seconds) * 1000;
-
-            // Проверяем, нужно ли вызывать скрипт для этого MAC
-            if (it == id(last_call_time).end() || (now - it->second) >= interval) {
-              // Обновляем время вызова
-              id(last_call_time)[mac] = now;
-
-              int rssi = x.get_rssi();
-              std::string name = x.get_name();
-
-              // UUID из iBeacon (если есть)
-              std::string uuid = "";
-              auto ibeacon = x.get_ibeacon();
-              if (ibeacon.has_value()) {
-                char uuid_buf[37];
-                ibeacon->get_uuid().to_str(uuid_buf);
-                uuid = uuid_buf;
-              }
-
-              // Company ID из manufacturer data
-              uint16_t company_id = 0;
-              auto manuf_datas = x.get_manufacturer_datas();
-              if (!manuf_datas.empty() && manuf_datas[0].data.size() >= 2) {
-                company_id = (manuf_datas[0].data[1] << 8) | manuf_datas[0].data[0];
-              }
-
-              if (millis() % 1800000 < 1000) { // раз в полчаса
-                unsigned long now = millis();
-                for (auto it = id(last_call_time).begin(); it != id(last_call_time).end(); ) {
-                  if (now - it->second > 600000) { // старше часа
-                    it = id(last_call_time).erase(it);
-                  } else {
-                    ++it;
-                  }
-                }
-              }                 
-              id(report_device_script).execute(mac, rssi, name, uuid, company_id);
-
+            
+            // Проверка интервала (throttling)
+            if (id(last_call_time).count(mac) && (now - id(last_call_time)[mac] < id(throttle_seconds) * 1000)) {
+              return; 
             }
+            
+            // 2. Если прошли фильтр, обновляем время
+            id(last_call_time)[mac] = now;
+
+            // 3. Извлекаем данные только если прошли фильтр по времени
+            int rssi = x.get_rssi();
+            std::string name = x.get_name();
+            std::string uuid = "";
+            uint16_t company_id = 0;
+
+            auto ibeacon = x.get_ibeacon();
+            if (ibeacon.has_value()) {
+              uuid = ibeacon->get_uuid().to_string();
+            }
+
+            auto m_data = x.get_manufacturer_datas();
+            if (!m_data.empty() && m_data[0].data.size() >= 2) {
+              company_id = (m_data[0].data[1] << 8) | m_data[0].data[0];
+            }
+
+            // Вызываем скрипт
+            id(report_device_script).execute(mac, rssi, name, uuid, company_id);
+
 
 script:
   - id: report_device_script

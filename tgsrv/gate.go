@@ -895,14 +895,15 @@ func (g *Gate) keypadCode(c KeypadCode) {
 		g.sendToTelegram(fmt.Sprintf("keypad code %s  %s, phone and plot number mismatch", c.Code, c.timestampSent()))
 		return
 	}
+	info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
 	if !g.allowed(phone) {
-		g.sendToTelegram(fmt.Sprintf("keypad code restricted %s", c.Code))
+		g.sendToTelegram(fmt.Sprintf("keypad code restricted %s", info))
 		return
 	}
 	err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code))
 	if err != nil {
-		g.sendToTelegram(fmt.Sprintf("keypad code %s  %v", c.Code, err))
+		g.sendToTelegram(fmt.Sprintf("keypad code %s  %v", info, err))
 	} else {
-		g.sendToTelegram(fmt.Sprintf("keypad code OK %s", c.Code))
+		g.sendToTelegram(fmt.Sprintf("keypad code OK %s", info))
 	}
 }

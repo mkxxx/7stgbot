@@ -66,7 +66,7 @@ const (
 	gateSmsPath           = "/gate/sms/"
 	gateKeypadPath        = "/gate/keypad/"
 	logLevelPath          = "/app/log/"
-	genQRCodePath         = "/per/qr/ "
+	genQRCodePath         = "/per/qr/"
 
 	site = "https://7slavka.ru"
 

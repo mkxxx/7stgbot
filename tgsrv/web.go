@@ -3,7 +3,9 @@ package tgsrv
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +31,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/pquerna/otp/totp"
 	"github.com/skip2/go-qrcode"
 	"github.com/xuri/excelize/v2"
 )
@@ -62,6 +66,7 @@ const (
 	gateSmsPath           = "/gate/sms/"
 	gateKeypadPath        = "/gate/keypad/"
 	logLevelPath          = "/app/log/"
+	genQRCodePath         = "/per/qrcode/ "
 
 	site = "https://7slavka.ru"
 
@@ -80,6 +85,8 @@ const (
 	QRNameLastName = "LastName" // <= 18
 	QRNamePayeeINN = "PayeeINN" // <= 12
 )
+
+var tenDigitsPhoneRE = regexp.MustCompile(`^\d{10}$`)
 
 // {"mac":"5B:00:DF:94:DD:1C","uuid":"","rssi":-71,"name":"iTAG  ","company_id":56604,"location":2,"time":1775136766}
 type BLETracking struct {
@@ -368,6 +375,15 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			query.Get(paramNamePurpose),
 			query.Get(paramNameFio),
 		)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, genQRCodePath) {
+		phone := r.URL.Path[len(genQRCodePath):]
+		strings.TrimSuffix(phone, "/")
+		if !tenDigitsPhoneRE.MatchString(phone) {
+			http.Error(w, "10 digits expected", http.StatusBadRequest)
+		}
+		s.generateTOTPQRCodeImage(w, phone)
 		return
 	}
 	if r.URL.Path == qreImgPath {
@@ -861,6 +877,35 @@ func (s *webSrv) writeImage(w http.ResponseWriter, sum, purpose, lastName string
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	io.Copy(w, bytes.NewReader(imgBytes))
+}
+
+func (s *webSrv) generateTOTPQRCodeImage(w http.ResponseWriter, phone string) {
+	salt := "SNT Semislavka"
+	h := sha1.New()
+	h.Write([]byte(phone + salt))
+	hashBytes := h.Sum(nil)
+	hashStr := hex.EncodeToString(hashBytes)
+	secret := hashStr[:16]
+
+	key, err := totp.Generate(totp.GenerateOpts{
+		Issuer:      "СНТ Семиславка", // Название компании/приложения
+		AccountName: phone,            // Имя аккаунта (номер телефона)
+		Secret:      []byte(secret),   // Наш секрет из 16 символов
+	})
+	if err != nil {
+		Logger.Errorf("Ошибка при создании QR: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	var png []byte
+	png, err = qrcode.Encode(key.URL(), qrcode.Medium, 256)
+	if err != nil {
+		Logger.Errorf("Ошибка при создании QR: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Write(png)
 }
 
 func (s *webSrv) servePayTemplate(w http.ResponseWriter, r *http.Request) {

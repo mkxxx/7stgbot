@@ -51,6 +51,7 @@ type Gate struct {
 	palEsTimeGroups        *PalEsTimeGroups
 	BLEPeriodSec           time.Duration
 	RateWatcher            *RateWatcher
+	CallStore              *CallStore
 }
 
 type BTMacs struct {
@@ -320,6 +321,8 @@ Loop:
 				continue
 			}
 			if call.CalledNumber == g.GateInfoNumber {
+				g.CallStore.Set(call.Phone, call.time())
+				g.CallStore.Remove(func(_ string, v time.Time) bool { return time.Since(v) > 24*7*time.Hour })
 				if !ok {
 					g.sendToTelegram(fmt.Sprintf("%s не зарегистрирован", maskPhone(phone)))
 					continue
@@ -1001,4 +1004,38 @@ func (w *RateWatcher) hit(t time.Time) bool {
 	}
 	w.hitCounter.hit(t)
 	return w.hitCounter.count(w.Duration) < w.hitCounter.N
+}
+
+type CallStore struct {
+	mu    sync.Mutex
+	calls map[string]time.Time
+}
+
+func NewCallStore() *CallStore {
+	return &CallStore{
+		calls: make(map[string]time.Time),
+	}
+}
+
+func (s *CallStore) Get(phone string) (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.calls[phone]
+	return t, ok
+}
+
+func (s *CallStore) Set(phone string, t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls[phone] = t
+}
+
+func (s *CallStore) Remove(cond func(string, time.Time) bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, v := range s.calls {
+		if cond(k, v) {
+			delete(s.calls, k) // Безопасно в Go
+		}
+	}
 }

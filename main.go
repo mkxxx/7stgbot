@@ -151,9 +151,9 @@ func main() {
 		Duration:         time.Duration(cfg.KeypadHitLimitDurationMinutes) * time.Minute,
 		ThrottleDuration: time.Duration(cfg.KeypadThrottleMinutes) * time.Minute}
 	g.RateWatcher.Init(cfg.KeypadHitLimit)
+	g.CallStore = tgsrv.NewCallStore()
 
 	fname := filepath.Join(cfgDir, "bt-macs.toml")
-	// ERROR	error parsing  "config.toml": toml: line 4 (last key "BTMacIgnore"): expected '.' or '=', but got ':' instead
 	if _, err := toml.DecodeFile(fname, &g.BTMacs); err != nil {
 		logger.Errorf("error parsing  %q: %v", fname, err)
 	}

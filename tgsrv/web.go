@@ -882,7 +882,14 @@ func (s *webSrv) writeImage(w http.ResponseWriter, sum, purpose, lastName string
 }
 
 func (s *webSrv) generateTOTPQRCodeImage(w http.ResponseWriter, phone string) {
-	salt := "SNT Semislavka"
+	t, trueQR := s.gate.CallStore.Get("+7" + phone)
+	if trueQR {
+		trueQR = time.Since(t) <= 15*time.Second
+	}
+	salt := "--------------"
+	if trueQR {
+		salt = "SNT_Semislavka"
+	}
 	h := sha1.New()
 	h.Write([]byte(phone + salt))
 	hashBytes := h.Sum(nil)
@@ -906,6 +913,7 @@ func (s *webSrv) generateTOTPQRCodeImage(w http.ResponseWriter, phone string) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+	Logger.Infof("%v QR for +7%s generated", trueQR, phone)
 	w.Header().Set("Content-Type", "image/png")
 	w.Write(png)
 }

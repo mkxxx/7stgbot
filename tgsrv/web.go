@@ -3,6 +3,7 @@ package tgsrv
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/skip2/go-qrcode"
+	"github.com/xuri/excelize/v2"
 )
 
 const (
@@ -173,6 +175,8 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	fs := http.FileServer(http.Dir(staticDir))
 	//ws.staticHandler = http.StripPrefix("/static/", fs)
 	ws.staticHandler = fs
+
+	ws.loadSntClubUsers()
 
 	ws.registry.Store(loadRegistry(dir))
 	c := cron.New(cron.WithSeconds(), cron.WithLocation(Location))
@@ -1286,4 +1290,66 @@ func remoteIP(r *http.Request) string {
 		return ""
 	}
 	return ip
+}
+
+func (ws *webSrv) loadSntClubUsers() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		"https://file.sntclub.ru/upload/downloadfiles/5a6/45y97kpixruiqkj6fkigsqxpo571e24m/Registry_people_07-04-2026.xlsx", nil)
+
+	if err != nil {
+		Logger.Errorf("%v", err)
+		return
+	}
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
+	req.Header.Add("Referer", "https://lk.sntclub.ru/")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		Logger.Errorf("sntclub people registry http: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		Logger.Infof("sntclub people registry http %d", resp.StatusCode)
+		return
+	}
+	xlsxFile, err := excelize.OpenReader(resp.Body)
+	if err != nil {
+		Logger.Errorf("sntclub people registry excel reader: %v", err)
+		return
+	}
+	defer func() { _ = xlsxFile.Close() }()
+
+	sheetName := xlsxFile.GetSheetName(0)
+	if sheetName == "" {
+		Logger.Debugf("sntclub people registry excel reader: sheet not found")
+		return
+	}
+	rows, err := xlsxFile.GetRows(sheetName)
+	if err != nil {
+		Logger.Errorf("sntclub people registry excel reader: %v", err)
+		return
+	}
+	fname := filepath.Join(ws.dataDir, "sntclub_users.csv")
+	csvFile, err := os.Create(fname)
+	if err != nil {
+		Logger.Errorf("creating %s: %v", fname, err)
+		return
+	}
+	defer csvFile.Close()
+
+	writer := csv.NewWriter(csvFile)
+	defer writer.Flush()
+
+	// Записываем каждую строку в CSV
+	for i, row := range rows {
+		if err := writer.Write(row); err != nil {
+			Logger.Errorf("writing %d row to %s: %v", i, fname, err)
+			return
+		}
+	}
 }

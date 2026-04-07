@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -925,6 +926,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 type HitCounter struct {
 	N      int
 	buffer []time.Time
+	mu     sync.Mutex // guards hits and buffer
 	hits   []time.Time
 	end    int
 }
@@ -936,6 +938,8 @@ func (c *HitCounter) init() {
 }
 
 func (c *HitCounter) hit(t time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.end == len(c.buffer) {
 		c.end = c.N
 		copy(c.buffer, c.hits[1:])
@@ -951,6 +955,8 @@ func (c *HitCounter) hit(t time.Time) {
 }
 
 func (c *HitCounter) count(d time.Duration) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if len(c.hits) == 0 || d <= 0 {
 		return 0
 	}
@@ -969,6 +975,8 @@ func (c *HitCounter) count(d time.Duration) int {
 }
 
 func (c *HitCounter) till(t time.Time) time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	var last time.Time
 	if len(c.hits) != 0 {
 		last = c.hits[len(c.hits)-1]

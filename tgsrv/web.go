@@ -896,7 +896,7 @@ func (s *webSrv) generateTOTPQRCodeImage(w http.ResponseWriter, phone string) {
 	if trueQR {
 		salt = "SNT_Semislavka"
 	} else {
-		salt = strconv.Itoa(int(time.Since(time.Time{})))
+		salt = strconv.FormatInt(time.Now().UnixNano() % 1_000_000_000_000, 10)
 	}
 	h := sha1.New()
 	h.Write([]byte(phone + salt))

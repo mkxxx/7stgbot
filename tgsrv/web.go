@@ -882,17 +882,21 @@ func (s *webSrv) writeImage(w http.ResponseWriter, sum, purpose, lastName string
 }
 
 func (s *webSrv) generateTOTPQRCodeImage(w http.ResponseWriter, phone string) {
-	t, trueQR := s.gate.CallStore.Get("+7" + phone)
-	if trueQR {
-		d := time.Since(t)
-		trueQR = d <= 30*time.Second
-		Logger.Infof("generate TOTP QR: call %s was %ds ago", "+7"+phone, d/time.Second)
+	c, ok := s.gate.CallStore.Get("+7" + phone)
+	trueQR := false
+	if ok {
+		d := time.Since(c.time)
+		trueQR = c.cnt == 0 && d <= 30*time.Second
+		Logger.Infof("generate N %d TOTP QR: call %s was %ds ago", c.cnt, "+7"+phone, d/time.Second)
+		s.gate.CallStore.Increment("+7" + phone)
 	} else {
 		Logger.Infof("generate TOTP QR: call %s not fount", "+7"+phone)
 	}
-	salt := "--------------"
+	salt := ""
 	if trueQR {
 		salt = "SNT_Semislavka"
+	} else {
+		salt = strconv.Itoa(int(time.Since(time.Time{})))
 	}
 	h := sha1.New()
 	h.Write([]byte(phone + salt))

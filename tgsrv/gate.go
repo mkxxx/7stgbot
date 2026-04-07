@@ -322,7 +322,7 @@ Loop:
 			}
 			if call.CalledNumber == g.GateInfoNumber {
 				g.CallStore.Set(call.Phone, call.time())
-				g.CallStore.Remove(func(_ string, v time.Time) bool { return time.Since(v) > 24*7*time.Hour })
+				g.CallStore.Remove(func(_ string, v *StoredCall) bool { return time.Since(v.time) > 24*7*time.Hour })
 				if !ok {
 					g.sendToTelegram(fmt.Sprintf("%s не зарегистрирован", maskPhone(phone)))
 					continue
@@ -1008,29 +1008,35 @@ func (w *RateWatcher) hit(t time.Time) bool {
 
 type CallStore struct {
 	mu    sync.Mutex
-	calls map[string]time.Time
+	calls map[string]*StoredCall
 }
 
 func NewCallStore() *CallStore {
 	return &CallStore{
-		calls: make(map[string]time.Time),
+		calls: make(map[string]*StoredCall),
 	}
 }
 
-func (s *CallStore) Get(phone string) (time.Time, bool) {
+func (s *CallStore) Get(phone string) (*StoredCall, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t, ok := s.calls[phone]
-	return t, ok
+	c, ok := s.calls[phone]
+	return c, ok
 }
 
 func (s *CallStore) Set(phone string, t time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.calls[phone] = t
+	s.calls[phone] = &StoredCall{time: t}
 }
 
-func (s *CallStore) Remove(cond func(string, time.Time) bool) {
+func (s *CallStore) Increment(phone string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls[phone].cnt++
+}
+
+func (s *CallStore) Remove(cond func(string, *StoredCall) bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k, v := range s.calls {
@@ -1038,4 +1044,9 @@ func (s *CallStore) Remove(cond func(string, time.Time) bool) {
 			delete(s.calls, k) // Безопасно в Go
 		}
 	}
+}
+
+type StoredCall struct {
+	time time.Time
+	cnt  int
 }

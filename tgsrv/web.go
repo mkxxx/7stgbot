@@ -662,6 +662,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	Logger.Debugf("static resource %s", r.URL.Path)
 	s.staticHandler.ServeHTTP(w, r)
 }
 

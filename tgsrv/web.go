@@ -903,6 +903,7 @@ func (s *webSrv) generateTOTPQRCodeImage(w http.ResponseWriter, phone string) {
 	hashBytes := h.Sum(nil)
 	hashStr := hex.EncodeToString(hashBytes)
 	secret := hashStr[:16]
+	Logger.Debugf(hashStr)
 
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "СНТ Семиславка", // Название компании/приложения

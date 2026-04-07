@@ -66,7 +66,7 @@ const (
 	gateSmsPath           = "/gate/sms/"
 	gateKeypadPath        = "/gate/keypad/"
 	logLevelPath          = "/app/log/"
-	genQRCodePath         = "/per/qrcode/ "
+	genQRCodePath         = "/per/qr/ "
 
 	site = "https://7slavka.ru"
 
@@ -382,6 +382,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		strings.TrimSuffix(phone, "/")
 		if !tenDigitsPhoneRE.MatchString(phone) {
 			http.Error(w, "10 digits expected", http.StatusBadRequest)
+			return
 		}
 		s.generateTOTPQRCodeImage(w, phone)
 		return

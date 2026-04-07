@@ -884,7 +884,11 @@ func (s *webSrv) writeImage(w http.ResponseWriter, sum, purpose, lastName string
 func (s *webSrv) generateTOTPQRCodeImage(w http.ResponseWriter, phone string) {
 	t, trueQR := s.gate.CallStore.Get("+7" + phone)
 	if trueQR {
-		trueQR = time.Since(t) <= 15*time.Second
+		d := time.Since(t)
+		trueQR = d <= 15*time.Second
+		Logger.Infof("generate TOTP QR: call %s was %d ago", d/time.Second)
+	} else {
+		Logger.Infof("generate TOTP QR: call %s not fount", "+7"+phone)
 	}
 	salt := "--------------"
 	if trueQR {

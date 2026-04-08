@@ -521,7 +521,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == blePath {
 		if r.Method != "POST" {
-			w.WriteHeader(http.StatusNotFound)
+			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
 		defer r.Body.Close()
@@ -552,7 +552,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == gateCallPath {
 		if r.Method != "POST" {
-			w.WriteHeader(http.StatusNotFound)
+			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
 		defer r.Body.Close()
@@ -577,7 +577,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == gateSmsPath {
 		if r.Method != "POST" {
-			w.WriteHeader(http.StatusNotFound)
+			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
 		defer r.Body.Close()
@@ -602,7 +602,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == gateOpenedPath {
 		if r.Method != "POST" {
-			w.WriteHeader(http.StatusNotFound)
+			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
 		defer r.Body.Close()
@@ -623,7 +623,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == logLevelPath {
 		if r.Method != "POST" {
-			w.WriteHeader(http.StatusNotFound)
+			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
 		defer r.Body.Close()
@@ -651,7 +651,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == gateKeypadPath {
 		if r.Method != "POST" {
-			w.WriteHeader(http.StatusNotFound)
+			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
 		// 400 - bad format, 403 - forbidden, 429 - too many requests
@@ -689,7 +689,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == gateAutomatePath {
 		if r.Method != "POST" {
-			w.WriteHeader(http.StatusNotFound)
+			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
 		if time.Now().Unix()%2 == 0 {

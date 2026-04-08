@@ -66,7 +66,8 @@ const (
 	gateSmsPath           = "/gate/sms/"
 	gateKeypadPath        = "/gate/keypad/"
 	logLevelPath          = "/app/log/"
-	genQRCodePath         = "/per/qr/"
+	genQRCodePath         = "/gate/qr/"
+	gateAutomatePath      = "/gate/automate/"
 
 	site = "https://7slavka.ru"
 
@@ -518,7 +519,11 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if r.URL.Path == blePath && r.Method == "POST" {
+	if r.URL.Path == blePath {
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		defer r.Body.Close()
 		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 
@@ -545,7 +550,11 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	if r.URL.Path == gateCallPath && r.Method == "POST" {
+	if r.URL.Path == gateCallPath {
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		defer r.Body.Close()
 		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 
@@ -566,7 +575,11 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	if r.URL.Path == gateSmsPath && r.Method == "POST" {
+	if r.URL.Path == gateSmsPath {
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		defer r.Body.Close()
 		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 
@@ -588,6 +601,10 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == gateOpenedPath {
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		defer r.Body.Close()
 		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 
@@ -605,6 +622,10 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == logLevelPath {
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		defer r.Body.Close()
 		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 
@@ -629,6 +650,10 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == gateKeypadPath {
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		// 400 - bad format, 403 - forbidden, 429 - too many requests
 		defer r.Body.Close()
 		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
@@ -659,6 +684,18 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		default:
 			w.WriteHeader(http.StatusOK)
+		}
+		return
+	}
+	if r.URL.Path == gateAutomatePath {
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if time.Now().Unix()%2 == 0 {
+			fmt.Fprintln(w, `{"phone": "+79990010203"}`)
+		} else {
+			fmt.Fprintln(w, `{"phone": "+79990010203", "text": "привет"}`)
 		}
 		return
 	}
@@ -890,20 +927,19 @@ func (s *webSrv) generateTOTPQRCodeImage(w http.ResponseWriter, phone string) {
 		Logger.Infof("generate N %d TOTP QR: call %s was %ds ago", c.cnt, "+7"+phone, d/time.Second)
 		s.gate.CallStore.Increment("+7" + phone)
 	} else {
-		Logger.Infof("generate TOTP QR: call %s not fount", "+7"+phone)
+		Logger.Infof("generate TOTP QR: call %s not found", "+7"+phone)
 	}
 	salt := ""
 	if trueQR {
 		salt = "SNT_Semislavka"
 	} else {
-		salt = strconv.FormatInt(time.Now().UnixNano() % 1_000_000_000_000, 10)
+		salt = strconv.FormatInt(time.Now().UnixNano()%1_000_000_000_000, 10)
 	}
 	h := sha1.New()
 	h.Write([]byte(phone + salt))
 	hashBytes := h.Sum(nil)
 	hashStr := hex.EncodeToString(hashBytes)
 	secret := hashStr[:16]
-	Logger.Debugf(salt + " " + hashStr)
 
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "СНТ Семиславка", // Название компании/приложения

@@ -61,13 +61,14 @@ const (
 	internetElectrCSVPath = "/docs/electr.csv/"
 	internetDocsPath      = "/docs/"
 	blePath               = "/ble/"
-	gateCallPath          = "/gate/call/"
+	gateOnCallPath        = "/gate/call/"
 	gateOpenedPath        = "/gate/opened/"
-	gateSmsPath           = "/gate/sms/"
+	gateOnSmsPath         = "/gate/sms/"
 	gateKeypadPath        = "/gate/keypad/"
 	logLevelPath          = "/app/log/"
 	genQRCodePath         = "/gate/qr/"
-	gateAutomatePath      = "/gate/automate/"
+	gateAutomateCallPath  = "/gate/automate/call/"
+	gateAutomateSMSPath   = "/gate/automate/sms/"
 
 	site = "https://7slavka.ru"
 
@@ -550,7 +551,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	if r.URL.Path == gateCallPath {
+	if r.URL.Path == gateOnCallPath {
 		if r.Method != "POST" {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
@@ -575,7 +576,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	if r.URL.Path == gateSmsPath {
+	if r.URL.Path == gateOnSmsPath {
 		if r.Method != "POST" {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
@@ -687,16 +688,22 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if r.URL.Path == gateAutomatePath {
+	if r.URL.Path == gateAutomateCallPath {
 		if r.Method != "POST" {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
-		if time.Now().Unix()%10000 == 0 {
-			fmt.Fprintln(w, `{"phone": "+79263657878", "text": "привет"}`)
-		} else if time.Now().Unix()%419 == 0 {
-			fmt.Fprintln(w, `{"phone": "+79263657878"}`)
+		time.Sleep(20 * time.Second)
+		fmt.Fprint(w, `{"phone": "+79263657878"}`)
+		return
+	}
+	if r.URL.Path == gateAutomateSMSPath {
+		if r.Method != "POST" {
+			http.Error(w, "Resource not found", http.StatusNotFound)
+			return
 		}
+		time.Sleep(20 * time.Second)
+		fmt.Fprintln(w, `{"phone": "+79263657878", "text": "привет"}`)
 		return
 	}
 	Logger.Debugf("static resource %s", r.URL.Path)

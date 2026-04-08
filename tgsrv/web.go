@@ -692,10 +692,10 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
-		if time.Now().Unix()%2 == 0 {
-			fmt.Fprintln(w, `{"phone": "+79990010203"}`)
-		} else {
-			fmt.Fprintln(w, `{"phone": "+79990010203", "text": "привет"}`)
+		if time.Now().Unix()%10000 == 0 {
+			fmt.Fprintln(w, `{"phone": "+79263657878", "text": "привет"}`)
+		} else if time.Now().Unix()%419 == 0 {
+			fmt.Fprintln(w, `{"phone": "+79263657878"}`)
 		}
 		return
 	}

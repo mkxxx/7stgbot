@@ -378,7 +378,7 @@ Loop:
 		select {
 		case sms := <-g.phoneSmses:
 			phone := strings.TrimPrefix(sms.Phone, "+")
-			if !tenDigitsPhoneRE.MatchString(phone) {
+			if len(phone) != 11 || !digitsRE.MatchString(phone) {
 				continue
 			}
 			msg := strings.ToLower(strings.TrimSpace(sms.Sms))

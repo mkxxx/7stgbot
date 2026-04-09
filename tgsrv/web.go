@@ -88,7 +88,7 @@ const (
 	QRNamePayeeINN = "PayeeINN" // <= 12
 )
 
-var tenDigitsPhoneRE = regexp.MustCompile(`^\d{10}$`)
+var digitsRE = regexp.MustCompile(`^[0-9]+$`)
 
 // {"mac":"5B:00:DF:94:DD:1C","uuid":"","rssi":-71,"name":"iTAG  ","company_id":56604,"location":2,"time":1775136766}
 type BLETracking struct {
@@ -385,7 +385,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, genQRCodePath) {
 		phone := r.URL.Path[len(genQRCodePath):]
 		strings.TrimSuffix(phone, "/")
-		if !tenDigitsPhoneRE.MatchString(phone) {
+		if len(phone) != 10 || !digitsRE.MatchString(phone) {
 			http.Error(w, "10 digits expected", http.StatusBadRequest)
 			return
 		}

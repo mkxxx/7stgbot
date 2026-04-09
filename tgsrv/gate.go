@@ -466,10 +466,10 @@ func (g *Gate) loadSMSes() {
 	sess := make(map[int]*gate.SMS, len(smses))
 	cnt := 0
 	for _, m := range smses {
+		sess[m.ID] = &m
 		if _, ok := g.SMSSession[m.ID]; ok {
 			continue
 		}
-		sess[m.ID] = &m
 		g.PendingSMSes <- &m
 		cnt++
 	}

@@ -464,14 +464,17 @@ func (g *Gate) loadSMSes() {
 		return
 	}
 	sess := make(map[int]*gate.SMS, len(smses))
+	cnt := 0
 	for _, m := range smses {
 		if _, ok := g.SMSSession[m.ID]; ok {
 			continue
 		}
 		sess[m.ID] = &m
 		g.PendingSMSes <- &m
+		cnt++
 	}
 	g.SMSSession = sess
+	Logger.Debugf("read %d, add to channel %d", len(smses), cnt)
 }
 
 func cleanString(str string, delimiters string) string {

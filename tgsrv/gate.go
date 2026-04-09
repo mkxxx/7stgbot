@@ -409,7 +409,7 @@ Loop:
 				text := fmt.Sprintf("код для шлагбаума %s. действителен 20 мин", code)
 				now := time.Now()
 				dl := now.Add(20 * time.Minute)
-				m := &gate.SMS{Phone: "", Msg: text, CreatedAt: now.UnixMilli(), Deadline: dl.UnixMilli()}
+				m := &gate.SMS{Phone: sms.Phone, Msg: text, CreatedAt: now.UnixMilli(), Deadline: dl.UnixMilli()}
 				g.SMSes.Insert(m)
 				g.Stored <- struct{}{}
 				continue
@@ -474,7 +474,7 @@ func (g *Gate) loadSMSes() {
 		cnt++
 	}
 	g.SMSSession = sess
-	Logger.Debugf("read %d, add to channel %d", len(smses), cnt)
+	Logger.Debugf("read %d, add to channel %d sms", len(smses), cnt)
 }
 
 func cleanString(str string, delimiters string) string {

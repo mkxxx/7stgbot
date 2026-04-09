@@ -722,7 +722,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 				}
 				text := fmt.Sprintf(`{"phone": "%s", "text": "%s"}`, m.Phone, m.Msg)
 				Logger.Infof("%s <- %q", r.URL.Path, text)
-				fmt.Fprint(w, text)
+				fmt.Fprintln(w, text)
 				m.Sent()
 				s.gate.SMSes.Update(m)
 				return

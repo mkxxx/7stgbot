@@ -1,6 +1,7 @@
 package tgsrv
 
 import (
+	"7stgbot/gate"
 	"bytes"
 	"cmp"
 	"context"
@@ -8,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -52,6 +54,11 @@ type Gate struct {
 	BLEPeriodSec           time.Duration
 	RateWatcher            *RateWatcher
 	CallStore              *CallStore
+	PendingCalls           chan *gate.Call
+	PendingSMSes           chan *gate.SMS
+	SMSes                  gate.SMSesDAO
+	SMSSession             map[int]*gate.SMS
+	Stored                 chan struct{}
 }
 
 type BTMacs struct {
@@ -217,21 +224,28 @@ func (tg *PalEsTimeGroups) containsNow(groupId string, groupName string) bool {
 }
 
 func (tg *PalEsTimeGroups) contains(groupId string, groupName string, t time.Time) bool {
-	if len(groupId) == 0 && len(groupName) == 0 {
-		// no time group, then all time
-		return true
-	}
-	g := tg.groupMap[groupId]
+	g := tg.get(groupId, groupName)
 	if g != nil {
 		return g.contains(t)
 	}
-	for _, g := range tg.groupMap {
-		if g.GroupName == groupName {
-			return g.contains(t)
-		}
-	}
 	// group not found, so have to use all time
 	return true
+}
+
+func (tg *PalEsTimeGroups) get(groupId string, groupName string) *PalEsTimeGroup {
+	if len(groupId) == 0 && len(groupName) == 0 {
+		return nil
+	}
+	g := tg.groupMap[groupId]
+	if g != nil {
+		return g
+	}
+	for _, g := range tg.groupMap {
+		if g.GroupName == groupName {
+			return g
+		}
+	}
+	return nil
 }
 
 type PalEsTimeGroup struct {
@@ -342,8 +356,20 @@ Loop:
 
 func (g *Gate) allowed(phone string) bool {
 	u, ok := g.Phones[phone]
-	return ok && (u.DialToOpen || u.LocalOnly) && !g.RestrictedPhones[phone] &&
+	if !ok {
+		return false
+	}
+	return (u.DialToOpen || u.LocalOnly) && !g.RestrictedPhones[phone] &&
 		g.palEsTimeGroups.containsNow(u.TimeGroupId, u.TimeGroupName)
+}
+
+func (g *Gate) allowedKeypadCode(phone string) bool {
+	u, ok := g.Phones[phone]
+	if !ok {
+		return false
+	}
+	gr := g.palEsTimeGroups.get(u.TimeGroupId, u.TimeGroupName)
+	return (u.DialToOpen || u.LocalOnly) && !g.RestrictedPhones[phone] && gr == nil
 }
 
 func (g *Gate) handlingSmses(abort chan struct{}) {
@@ -352,14 +378,18 @@ Loop:
 		select {
 		case sms := <-g.phoneSmses:
 			phone := strings.TrimPrefix(sms.Phone, "+")
-			if phone == "MegaFon" {
+			if !tenDigitsPhoneRE.MatchString(phone) {
+				continue
+			}
+			msg := strings.ToLower(strings.TrimSpace(sms.Sms))
+			if msg == "totp" {
 				continue
 			}
 			name := phone
 			u, ok := g.Phones[phone]
 			allowed := false
 			if ok {
-				allowed = u.DialToOpen && !g.RestrictedPhones[phone]
+				allowed = g.allowedKeypadCode(phone)
 				name = u.name()
 			}
 			if !ok {
@@ -371,12 +401,77 @@ Loop:
 				continue
 			}
 			g.sendToTelegram(fmt.Sprintf("%s %s sent SMS: %s", sms.timestampSent(), name, sms.Sms))
-			//smsText := cleanString(sms.Sms, ",")
+			if msg == "20m" {
+				min := 10000
+				max := 99999
+				n := rand.IntN(max-min+1) + min
+				code := strconv.Itoa(n)
+				text := fmt.Sprintf("код для шлагбаума %s. действителен 20 мин", code)
+				now := time.Now()
+				dl := now.Add(20 * time.Minute)
+				m := &gate.SMS{Phone: "", Msg: text, CreatedAt: now.UnixMilli(), Deadline: dl.UnixMilli()}
+				g.SMSes.Insert(m)
+				g.Stored <- struct{}{}
+				continue
+			}
+			if msg == "(48h)" {
+				min := 100000
+				max := 999999
+				n := rand.IntN(max-min+1) + min
+				code := strconv.Itoa(n)
+				text := fmt.Sprintf("код для шлагбаума %s. действителен 48 ч с первого ввода", code)
+				now := time.Now()
+				dl := now.Add(20 * time.Minute)
+				m := &gate.SMS{Phone: "", Msg: text, CreatedAt: now.UnixMilli(), Deadline: dl.UnixMilli()}
+				g.SMSes.Insert(m)
+				g.Stored <- struct{}{}
+				continue
+			}
 
 		case <-abort:
 			break Loop
 		}
 	}
+}
+
+func (g *Gate) readingSMSesForSend(abort chan struct{}) {
+	ticker := time.NewTicker(20 * time.Second)
+Loop:
+	for {
+		select {
+		case <-ticker.C:
+			if len(g.PendingSMSes) > 1 {
+				continue
+			}
+			g.loadSMSes()
+
+		case <-g.Stored:
+			if len(g.PendingSMSes) > 1 {
+				continue
+			}
+			g.loadSMSes()
+
+		case <-abort:
+			break Loop
+		}
+	}
+}
+
+func (g *Gate) loadSMSes() {
+	smses, err := g.SMSes.ListNew(min(10, cap(g.PendingSMSes)-10))
+	if err != nil {
+		Logger.Errorf("error reading smses %v", err)
+		return
+	}
+	sess := make(map[int]*gate.SMS, len(smses))
+	for _, m := range smses {
+		if _, ok := g.SMSSession[m.ID]; ok {
+			continue
+		}
+		sess[m.ID] = &m
+		g.PendingSMSes <- &m
+	}
+	g.SMSSession = sess
 }
 
 func cleanString(str string, delimiters string) string {

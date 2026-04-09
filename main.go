@@ -1,6 +1,7 @@
 package main
 
 import (
+	"7stgbot/gate"
 	"7stgbot/tgsrv"
 	"bufio"
 	"encoding/csv"
@@ -76,6 +77,7 @@ func main() {
 	)
 	logger = zap.New(core).Sugar()
 	tgsrv.Logger = logger
+	gate.Logger = logger
 	defer logger.Sync()
 
 	log.SetOutput(w)
@@ -152,6 +154,11 @@ func main() {
 		ThrottleDuration: time.Duration(cfg.KeypadThrottleMinutes) * time.Minute}
 	g.RateWatcher.Init(cfg.KeypadHitLimit)
 	g.CallStore = tgsrv.NewCallStore()
+	g.PendingCalls = make(chan *gate.Call, 32)
+	g.PendingSMSes = make(chan *gate.SMS, 32)
+	g.SMSSession = make(map[int]*gate.SMS)
+	g.SMSes = gate.NewSMSes()
+	g.Stored = make(chan struct{}, 8)
 
 	fname := filepath.Join(cfgDir, "bt-macs.toml")
 	if _, err := toml.DecodeFile(fname, &g.BTMacs); err != nil {

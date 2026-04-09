@@ -184,6 +184,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	fs := http.FileServer(http.Dir(staticDir))
 	//ws.staticHandler = http.StripPrefix("/static/", fs)
 	ws.staticHandler = fs
+	ws.abort = abort
 
 	ws.loadSntClubUsers()
 
@@ -206,6 +207,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	go g.handlingCalls(abort)
 	go g.handlingSmses(abort)
 	go g.handlingBLETracking(abort)
+	go g.readingSMSesForSend(abort)
 
 	http.HandleFunc("/", ws.handle)
 
@@ -289,6 +291,7 @@ type webSrv struct {
 	pinger        *pingMonitor
 	registry      atomic.Value
 	gate          *Gate
+	abort         chan struct{}
 }
 
 func (s *webSrv) start(port int) {
@@ -693,18 +696,38 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
-		time.Sleep(20 * time.Second)
-		fmt.Fprint(w, `{"phone": "+79263657878"}`)
-		return
+		for {
+			select {
+			case c := <-s.gate.PendingCalls:
+				if c.Deadline < time.Now().UnixMilli() {
+					continue
+				}
+				fmt.Fprintf(w, `{"phone": "%s"}`, c.Phone)
+				return
+			case <-s.abort:
+				return
+			}
+		}
 	}
 	if r.URL.Path == gateAutomateSMSPath {
 		if r.Method != "POST" {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
-		time.Sleep(20 * time.Second)
-		fmt.Fprintln(w, `{"phone": "+79263657878", "text": "привет"}`)
-		return
+		for {
+			select {
+			case m := <-s.gate.PendingSMSes:
+				if m.Expired() {
+					continue
+				}
+				fmt.Fprintf(w, `{"phone": "%s", "text": "%s"}`, m.Phone, m.Msg)
+				m.Sent()
+				s.gate.SMSes.Update(m)
+				return
+			case <-s.abort:
+				return
+			}
+		}
 	}
 	Logger.Debugf("static resource %s", r.URL.Path)
 	s.staticHandler.ServeHTTP(w, r)

@@ -720,7 +720,9 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 				if m.Expired() {
 					continue
 				}
-				fmt.Fprintf(w, `{"phone": "%s", "text": "%s"}`, m.Phone, m.Msg)
+				text := fmt.Sprintf(`{"phone": "%s", "text": "%s"}`, m.Phone, m.Msg)
+				Logger.Infof("%s <- %q", r.URL.Path, text)
+				fmt.Fprint(w, text)
 				m.Sent()
 				s.gate.SMSes.Update(m)
 				return

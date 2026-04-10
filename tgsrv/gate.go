@@ -34,8 +34,8 @@ type Gate struct {
 	ProxyUrl               string
 	User                   string
 	Password               string
-	phoneCalls             chan PhoneCall
-	phoneSmses             chan PhoneSms
+	phoneCalls             chan *PhoneCall
+	phoneSmses             chan *PhoneSms
 	bleTrackings           chan *BLETracking
 	openedEvets            chan OpenTime
 	PalesPortalUser        string
@@ -57,7 +57,9 @@ type Gate struct {
 	CallStore              *CallStore
 	PendingCalls           chan *gate.Call
 	PendingSMSes           chan *gate.SMS
+	KeypadCodesRequests    chan *PhoneSms
 	SMSes                  gate.SMSesDAO
+	KeypadCodes            gate.KeypadCodesDAO
 	SMSSession             map[int]*gate.SMS
 	Stored                 chan struct{}
 }
@@ -189,8 +191,8 @@ func (u *PalesLogUser) typeName() string {
 }
 
 func (g *Gate) Init() {
-	g.phoneCalls = make(chan PhoneCall)
-	g.phoneSmses = make(chan PhoneSms)
+	g.phoneCalls = make(chan *PhoneCall)
+	g.phoneSmses = make(chan *PhoneSms)
 	g.bleTrackings = make(chan *BLETracking, 8)
 	g.openedEvets = make(chan OpenTime, 8)
 	g.lastBLEOpenCommandTime = make(map[string]time.Time)
@@ -382,8 +384,7 @@ Loop:
 			if len(phone) != 11 || !digitsRE.MatchString(phone) {
 				continue
 			}
-			msg := strings.ToLower(strings.TrimSpace(sms.Sms))
-			if msg == "totp" {
+			if sms.isTOTP() {
 				continue
 			}
 			name := phone
@@ -402,30 +403,8 @@ Loop:
 				continue
 			}
 			g.sendToTelegram(fmt.Sprintf("%s %s sent SMS: %s", sms.timestampSent(), name, sms.Sms))
-			if msg == "20m" {
-				min := 10000
-				max := 99999
-				n := rand.IntN(max-min+1) + min
-				code := strconv.Itoa(n)
-				text := fmt.Sprintf("код для шлагбаума %s. действителен 20 мин", code)
-				now := time.Now()
-				dl := now.Add(20 * time.Minute)
-				m := &gate.SMS{Phone: sms.Phone, Msg: text, CreatedAtMilli: now.UnixMilli(), DeadlineMilli: dl.UnixMilli()}
-				g.SMSes.Insert(m)
-				g.Stored <- struct{}{}
-				continue
-			}
-			if msg == "(48h)" {
-				min := 100000
-				max := 999999
-				n := rand.IntN(max-min+1) + min
-				code := strconv.Itoa(n)
-				text := fmt.Sprintf("код для шлагбаума %s. действителен 48 ч с первого ввода", code)
-				now := time.Now()
-				dl := now.Add(20 * time.Minute)
-				m := &gate.SMS{Phone: "", Msg: text, CreatedAtMilli: now.UnixMilli(), DeadlineMilli: dl.UnixMilli()}
-				g.SMSes.Insert(m)
-				g.Stored <- struct{}{}
+			if sms.isTempCode() {
+				g.KeypadCodesRequests <- sms
 				continue
 			}
 
@@ -630,6 +609,69 @@ Loop:
 			break Loop
 		}
 	}
+}
+
+func (g *Gate) handlingKeypadRequests(abort chan struct{}) {
+	codes := make(map[string]*gate.KeypadCode)
+	cc, err := g.KeypadCodes.ListActive()
+	if err != nil {
+		Logger.Error("error readind db kpcodes %v", err)
+	}
+	for _, c := range cc {
+		codes[c.Code] = &c
+	}
+Loop:
+	for {
+		select {
+		case sms := <-g.KeypadCodesRequests:
+			msg := sms.Sms
+			now := time.Now()
+			if sms.isTempCode() {
+				min := 100000
+				max := 999999
+				if msg == "30m" {
+					min = 10000
+					max = 99999
+				}
+				code := ""
+				for {
+					n := rand.IntN(max-min+1) + min
+					code = strconv.Itoa(n)
+					if _, ok := codes[code]; !ok {
+						break
+					}
+				}
+				m := &gate.SMS{Phone: sms.Phone, CreatedAtMilli: now.UnixMilli(),
+					DeadlineMilli: now.Add(20 * time.Minute).UnixMilli()}
+				kpCode := &gate.KeypadCode{RequesterPhone: sms.Phone}
+				if msg == "30m" {
+					kpCode.EndTimeMilli = now.Add(30 * time.Minute).UnixMilli()
+					m.Msg = fmt.Sprintf("код для шлагбаума %s. действителен 30 мин", code)
+				} else if msg == ".48h." {
+					kpCode.TTLMinutes = 48 * 60
+					m.Msg = fmt.Sprintf("код для шлагбаума %s. действителен 48 ч с первого ввода", code)
+				} else if msg == ".24h." {
+					kpCode.TTLMinutes = 24 * 60
+					m.Msg = fmt.Sprintf("код для шлагбаума %s. действителен 24 ч с первого ввода", code)
+				}
+				err := g.KeypadCodes.Insert(kpCode)
+				if err != nil {
+					Logger.Errorf("error saving to db sms %v", err)
+					continue
+				}
+				err = g.SMSes.Insert(m)
+				if err != nil {
+					Logger.Errorf("error saving to db sms %v", err)
+					continue
+				}
+				g.Stored <- struct{}{}
+				continue
+			}
+		case <-abort:
+			break Loop
+		}
+	}
+
 }
 
 func (g *Gate) checkAndOpenOnBT(bt *BLETracking) {

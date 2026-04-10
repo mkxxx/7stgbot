@@ -158,7 +158,9 @@ func main() {
 	g.PendingSMSes = make(chan *gate.SMS, 32)
 	g.SMSSession = make(map[int]*gate.SMS)
 	g.SMSes = gate.NewSMSes()
+	g.KeypadCodes = gate.NewKeypadCodes()
 	g.Stored = make(chan struct{}, 8)
+	g.KeypadCodesRequests = make(chan *tgsrv.PhoneSms, 32)
 
 	fname := filepath.Join(cfgDir, "bt-macs.toml")
 	if _, err := toml.DecodeFile(fname, &g.BTMacs); err != nil {

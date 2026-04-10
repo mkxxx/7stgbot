@@ -134,6 +134,15 @@ func (s *PhoneSms) timestampSent() string {
 	return time.Unix(int64(unix), 0).In(Location).Format("2006-01-02 15:04:05")
 }
 
+func (s *PhoneSms) isTOTP() bool {
+	return strings.ToLower(strings.TrimSpace(s.Sms)) == "totp"
+}
+
+func (s *PhoneSms) isTempCode() bool {
+	text := strings.ToLower(strings.TrimSpace(s.Sms))
+	return text == "30m" || text == ".48m." || text == ".18m."
+}
+
 type OpenTime struct {
 	Time int64
 }
@@ -208,6 +217,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	go g.handlingSmses(abort)
 	go g.handlingBLETracking(abort)
 	go g.readingSMSesForSend(abort)
+	go g.handlingKeypadRequests(abort)
 
 	http.HandleFunc("/", ws.handle)
 
@@ -575,7 +585,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		Logger.Infof("Call received: %s   %s", phoneCall.Phone, string(bodyBytes))
-		s.gate.phoneCalls <- phoneCall
+		s.gate.phoneCalls <- &phoneCall
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -600,7 +610,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		Logger.Infof("Sms received: %s   %s", phoneSms.Phone, string(bodyBytes))
-		s.gate.phoneSmses <- phoneSms
+		s.gate.phoneSmses <- &phoneSms
 		w.WriteHeader(http.StatusOK)
 		return
 	}

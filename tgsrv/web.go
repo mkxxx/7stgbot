@@ -723,13 +723,17 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "cannot read request body", http.StatusInternalServerError)
 			return
 		}
+		timer55s := time.NewTimer(time.Second * 55)
 		var automateReq AutomateReq
 		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&automateReq); err != nil {
 			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			select {
+			case <-timer55s.C:
+			case <-s.abort:
+			}
 			return
 		}
-		timer := time.NewTimer(time.Second * 55)
 		for {
 			select {
 			case m := <-s.gate.PendingSMSes:
@@ -751,7 +755,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 				s.gate.SMSes.Update(m)
 				return
 
-			case <-timer.C:
+			case <-timer55s.C:
 				w.WriteHeader(http.StatusRequestTimeout)
 				return
 

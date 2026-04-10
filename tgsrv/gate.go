@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"net/url"
@@ -1150,8 +1151,12 @@ type StoredCall struct {
 }
 
 type AutomateReq struct {
-	Time       int64
-	HostNumber string `json:"host_number"`
+	TimeMilli  float64 `json:"time"`
+	HostNumber string  `json:"host_number"`
+}
+
+func (r *AutomateReq) time() time.Time {
+	return time.UnixMilli(int64(math.Round(r.TimeMilli * 1000)))
 }
 
 type AutomateSMS struct {

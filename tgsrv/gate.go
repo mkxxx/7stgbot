@@ -1148,3 +1148,13 @@ type StoredCall struct {
 	time time.Time
 	cnt  int
 }
+
+type AutomateReq struct {
+	Time       int64
+	HostNumber string `json:"host_number"`
+}
+
+type AutomateSMS struct {
+	Phone string
+	Text  string
+}

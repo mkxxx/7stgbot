@@ -714,19 +714,49 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
+		defer r.Body.Close()
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+			http.Error(w, "cannot read request body", http.StatusInternalServerError)
+			return
+		}
+		var automateReq AutomateReq
+		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&automateReq); err != nil {
+			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		timer := time.NewTimer(time.Second * 55)
 		for {
 			select {
 			case m := <-s.gate.PendingSMSes:
 				if m.Expired() {
 					continue
 				}
-				text := fmt.Sprintf(`{"phone": "%s", "text": "%s"}`, m.Phone, m.Msg)
-				Logger.Infof("%s <- %q", r.URL.Path, text)
-				fmt.Fprintln(w, text)
+				var automateSMS AutomateSMS
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				text := fmt.Sprintf("phone: %s, text: %q", m.Phone, m.Msg)
+				err := json.NewEncoder(w).Encode(automateSMS)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					Logger.Errorf("%s error serializing response %v  %s", r.URL.Path, err, text)
+				} else {
+					Logger.Infof("%s <- %s", r.URL.Path, text)
+				}
 				m.Sent()
 				s.gate.SMSes.Update(m)
 				return
+
+			case <-timer.C:
+				w.WriteHeader(http.StatusRequestTimeout)
+				return
+
 			case <-s.abort:
+				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
 		}

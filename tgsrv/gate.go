@@ -410,7 +410,7 @@ Loop:
 				text := fmt.Sprintf("код для шлагбаума %s. действителен 20 мин", code)
 				now := time.Now()
 				dl := now.Add(20 * time.Minute)
-				m := &gate.SMS{Phone: sms.Phone, Msg: text, CreatedAt: now.UnixMilli(), Deadline: dl.UnixMilli()}
+				m := &gate.SMS{Phone: sms.Phone, Msg: text, CreatedAtMilli: now.UnixMilli(), DeadlineMilli: dl.UnixMilli()}
 				g.SMSes.Insert(m)
 				g.Stored <- struct{}{}
 				continue
@@ -423,7 +423,7 @@ Loop:
 				text := fmt.Sprintf("код для шлагбаума %s. действителен 48 ч с первого ввода", code)
 				now := time.Now()
 				dl := now.Add(20 * time.Minute)
-				m := &gate.SMS{Phone: "", Msg: text, CreatedAt: now.UnixMilli(), Deadline: dl.UnixMilli()}
+				m := &gate.SMS{Phone: "", Msg: text, CreatedAtMilli: now.UnixMilli(), DeadlineMilli: dl.UnixMilli()}
 				g.SMSes.Insert(m)
 				g.Stored <- struct{}{}
 				continue

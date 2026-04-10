@@ -1160,6 +1160,6 @@ func (r *AutomateReq) time() time.Time {
 }
 
 type AutomateSMS struct {
-	Phone string
-	Text  string
+	Phone string `json:"phone"`
+	Text  string `json:"text"`
 }

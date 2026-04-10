@@ -740,7 +740,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 				if m.Expired() {
 					continue
 				}
-				var automateSMS AutomateSMS
+				automateSMS := &AutomateSMS{Phone: m.Phone, Text: m.Msg}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				text := fmt.Sprintf("phone: %s, text: %q", m.Phone, m.Msg)

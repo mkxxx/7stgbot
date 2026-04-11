@@ -748,6 +748,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			select {
 			case m := <-s.gate.PendingSMSes:
 				if m.Expired() {
+					Logger.Debugf("expired SMS: %s %q", m.Phone, m.Msg)
 					continue
 				}
 				automateSMS := &AutomateSMS{Phone: m.Phone, Text: m.Msg}
@@ -763,6 +764,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 				}
 				m.Sent()
 				s.gate.SMSes.Update(m)
+				s.gate.sendToTelegram(fmt.Sprintf("sent SMS: %s %q", m.Phone, m.Msg))
 				return
 
 			case <-timer55s.C:

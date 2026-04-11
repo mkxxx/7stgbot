@@ -55,7 +55,7 @@ func NewKeypadCodes() KeypadCodesDAO {
 }
 
 func (s *KeypadCodes) Insert(p *KeypadCode) error {
-	_, err := s.db.Exec("INSERT INTO kpcodes (code, req_phone, end_time_ms, ttl_min) VALUES(?,?,?);",
+	_, err := s.db.Exec("INSERT INTO kpcodes (code, req_phone, end_time_ms, ttl_min) VALUES(?,?,?,?);",
 		p.Code, p.RequesterPhone, p.EndTimeMilli, p.TTLMinutes)
 	if err != nil {
 		return err

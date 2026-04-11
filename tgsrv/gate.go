@@ -161,7 +161,7 @@ func PalesUserFromCsv(row []string, cols map[string]int) *PalesUser {
 }
 
 func (u *PalesUser) name() string {
-	return fmt.Sprintf("%s %s%s", u.Id, u.Firstname, u.Lastname)
+	return fmt.Sprintf("%s %s %s", u.Id, u.Firstname, u.Lastname)
 }
 
 func (u *PalesUser) hasPlotNumber(n string) bool {
@@ -402,11 +402,11 @@ Loop:
 				g.sendToTelegram(fmt.Sprintf("%s restricted sender of SMS: %s", name, sms.Sms))
 				continue
 			}
-			g.sendToTelegram(fmt.Sprintf("%s %s sent SMS: %s", sms.timestampSent(), name, sms.Sms))
 			if sms.isTempCode() {
 				g.KeypadCodesRequests <- sms
 				continue
 			}
+			g.sendToTelegram(fmt.Sprintf("unknown sms format. sent: %s by: %s: text: %q", sms.timestampSent(), name, sms.Sms))
 
 		case <-abort:
 			break Loop
@@ -454,7 +454,7 @@ func (g *Gate) loadSMSes() {
 		cnt++
 	}
 	g.SMSSession = sess
-	Logger.Debugf("read %d, add to channel %d sms", len(smses), cnt)
+	Logger.Debugf("read: %d, added to channel: %d, pending: %d sms", len(smses), cnt, len(g.PendingSMSes))
 }
 
 func cleanString(str string, delimiters string) string {
@@ -665,6 +665,7 @@ Loop:
 					continue
 				}
 				g.Stored <- struct{}{}
+				Logger.Debugf("pending SMS: %s %q", m.Phone, m.Msg)
 				continue
 			}
 		case <-abort:

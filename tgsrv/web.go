@@ -140,7 +140,7 @@ func (s *PhoneSms) isTOTP() bool {
 
 func (s *PhoneSms) isTempCode() bool {
 	text := strings.ToLower(strings.TrimSpace(s.Sms))
-	return text == "30m" || text == ".48h." || text == ".18h."
+	return text == "30m" || text == ".48h." || text == ".16h."
 }
 
 func (s *PhoneSms) tempCodeTTLHours() int {
@@ -148,8 +148,8 @@ func (s *PhoneSms) tempCodeTTLHours() int {
 	switch text {
 	case ".48h.":
 		return 48
-	case ".18h.":
-		return 18
+	case ".16h.":
+		return 16
 	}
 	return 0
 }

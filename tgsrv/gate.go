@@ -643,7 +643,7 @@ Loop:
 				}
 				m := &gate.SMS{Phone: sms.Phone, CreatedAtMilli: now.UnixMilli(),
 					DeadlineMilli: now.Add(20 * time.Minute).UnixMilli()}
-				kpCode := &gate.KeypadCode{RequesterPhone: sms.Phone}
+				kpCode := &gate.KeypadCode{Code: code, RequesterPhone: sms.Phone}
 				hours := sms.tempCodeTTLHours()
 				if hours != 0 {
 					kpCode.TTLMinutes = hours * 60

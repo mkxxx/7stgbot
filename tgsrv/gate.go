@@ -615,7 +615,7 @@ func (g *Gate) handlingKeypadRequests(abort chan struct{}) {
 	codes := make(map[string]*gate.KeypadCode)
 	cc, err := g.KeypadCodes.ListActive()
 	if err != nil {
-		Logger.Error("error readind db kpcodes %v", err)
+		Logger.Errorf("error reading db kpcodes: %v", err)
 	}
 	for _, c := range cc {
 		codes[c.Code] = &c
@@ -656,12 +656,12 @@ Loop:
 				}
 				err := g.KeypadCodes.Insert(kpCode)
 				if err != nil {
-					Logger.Errorf("error saving to db sms %v", err)
+					Logger.Errorf("error saving to db kpcodes: %v", err)
 					continue
 				}
 				err = g.SMSes.Insert(m)
 				if err != nil {
-					Logger.Errorf("error saving to db sms %v", err)
+					Logger.Errorf("error saving to db kpcodes: %v", err)
 					continue
 				}
 				g.Stored <- struct{}{}

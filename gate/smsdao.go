@@ -11,11 +11,11 @@ var Logger *zap.SugaredLogger
 
 const createSMSes string = `
   CREATE TABLE IF NOT EXISTS sms (
-  id INTEGER PRIMARY KEY,     
+  id INTEGER PRIMARY KEY,
   phone TEXT NOT NULL,
-  created_at_ms int NOT NULL,                           
-  deadline_ms int NOT NULL,                           
-  sent_at_ms int,                           
+  created_at_ms int NOT NULL,
+  deadline_ms int NOT NULL,
+  sent_at_ms int,
   msg TEXT NOT NULL
   );`
 

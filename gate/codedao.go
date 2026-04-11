@@ -7,11 +7,11 @@ import (
 
 const createKeypadCodes string = `
   CREATE TABLE IF NOT EXISTS kpcodes (
-  id INTEGER PRIMARY KEY,     
-  code TEXT NOT NULL,                         
-  req_phone TEXT NOT NULL,                         
-  end_time_ms int                                            
-  ttl_min int                                            
+  id INTEGER PRIMARY KEY,
+  code TEXT NOT NULL,
+  req_phone TEXT NOT NULL,
+  end_time_ms int,
+  ttl_min int
   );`
 
 const keypadCodesFile string = "kpcodes.db"

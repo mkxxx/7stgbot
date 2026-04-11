@@ -1037,6 +1037,29 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		g.sendToTelegram(fmt.Sprintf("keypad code %s TOO MANY REQUESTS %s ", c.Code, c.timestampSent()))
 		return Err429TooManyRequests
 	}
+	n := len(c.Code)
+	if n == 5 || n == 6 {
+		code, err := gate.Find(g.KeypadCodes, c.Code)
+		if err != nil {
+			Logger.Errorf("error finding kpcode %v", err)
+			return Err400BadFormat
+		}
+		if code == nil {
+			g.sendToTelegram(fmt.Sprintf("keypad code %s expired or not found", c.Code))
+			return Err400BadFormat
+		}
+		if code.EndTimeMilli == 0 {
+			code.EndTimeMilli = time.Now().Add(time.Duration(code.TTLMinutes) * time.Minute).UnixMilli()
+			g.KeypadCodes.Update(code)
+		}
+		err = g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", code.Code))
+		if err != nil {
+			g.sendToTelegram(fmt.Sprintf("keypad code OK %s, open command error %v", code.Code, err))
+		} else {
+			g.sendToTelegram(fmt.Sprintf("keypad code OK %s, sent open command", code.Code))
+		}
+		return err
+	}
 	if len(c.Code) < 11 {
 		g.sendToTelegram(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
 		return Err400BadFormat

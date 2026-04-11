@@ -74,7 +74,7 @@ func (s *KeypadCodes) Update(p *KeypadCode) error {
 
 func (s *KeypadCodes) ListActive() ([]KeypadCode, error) {
 	now := time.Now().UnixMilli()
-	rows, err := s.db.Query("SELECT id, code, req_phone, end_time_ms, ttl_min FROM kpcodes WHERE end_time_ms > ?", now)
+	rows, err := s.db.Query("SELECT id, code, req_phone, end_time_ms, ttl_min FROM kpcodes WHERE end_time_ms > ? || end_time_ms == 0", now)
 	if err != nil {
 		return nil, err
 	}
@@ -105,4 +105,17 @@ func (s *NullKeypadCodes) Insert(p *KeypadCode) error {
 
 func (s *NullKeypadCodes) Update(p *KeypadCode) error {
 	return nil
+}
+
+func Find(dao KeypadCodesDAO, code string) (*KeypadCode, error) {
+	codes, err := dao.ListActive()
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range codes {
+		if c.Code == code {
+			return &c, nil
+		}
+	}
+	return nil, nil
 }

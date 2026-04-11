@@ -644,15 +644,13 @@ Loop:
 				m := &gate.SMS{Phone: sms.Phone, CreatedAtMilli: now.UnixMilli(),
 					DeadlineMilli: now.Add(20 * time.Minute).UnixMilli()}
 				kpCode := &gate.KeypadCode{RequesterPhone: sms.Phone}
-				if msg == "30m" {
+				hours := sms.tempCodeTTLHours()
+				if hours != 0 {
+					kpCode.TTLMinutes = hours * 60
+					m.Msg = fmt.Sprintf("код для шлагбаума %s. действителен %d ч с первого ввода", code, hours)
+				} else {
 					kpCode.EndTimeMilli = now.Add(30 * time.Minute).UnixMilli()
 					m.Msg = fmt.Sprintf("код для шлагбаума %s. действителен 30 мин", code)
-				} else if msg == ".48h." {
-					kpCode.TTLMinutes = 48 * 60
-					m.Msg = fmt.Sprintf("код для шлагбаума %s. действителен 48 ч с первого ввода", code)
-				} else if msg == ".24h." {
-					kpCode.TTLMinutes = 24 * 60
-					m.Msg = fmt.Sprintf("код для шлагбаума %s. действителен 24 ч с первого ввода", code)
 				}
 				err := g.KeypadCodes.Insert(kpCode)
 				if err != nil {

@@ -140,7 +140,18 @@ func (s *PhoneSms) isTOTP() bool {
 
 func (s *PhoneSms) isTempCode() bool {
 	text := strings.ToLower(strings.TrimSpace(s.Sms))
-	return text == "30m" || text == ".48m." || text == ".18m."
+	return text == "30m" || text == ".48h." || text == ".18h."
+}
+
+func (s *PhoneSms) tempCodeTTLHours() int {
+	text := strings.ToLower(strings.TrimSpace(s.Sms))
+	switch text {
+	case ".48h.":
+		return 48
+	case ".18h.":
+		return 18
+	}
+	return 0
 }
 
 type OpenTime struct {

@@ -22,6 +22,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/AnthonyHewins/gotfy"
 )
 
 type Gate struct {
@@ -62,6 +64,9 @@ type Gate struct {
 	KeypadCodes            gate.KeypadCodesDAO
 	SMSSession             map[int]*gate.SMS
 	Stored                 chan struct{}
+	SystemNotification     chan string
+	UserNotification       chan string
+	KeypadReleased         bool
 }
 
 type BTMacs struct {
@@ -312,28 +317,28 @@ Loop:
 			}
 			if call.CalledNumber == g.GateOpenNumber {
 				if !ok {
-					g.sendToTelegram(fmt.Sprintf("%s %s uknown", call.timestamp(), phone))
+					g.sendSystemNotification(fmt.Sprintf("%s %s uknown", call.timestamp(), phone))
 					continue
 				}
 				if !g.allowed(phone) {
-					g.sendToTelegram(fmt.Sprintf("%s dial2 restricted %s", call.timestamp(), name))
+					g.sendSystemNotification(fmt.Sprintf("%s dial2 restricted %s", call.timestamp(), name))
 					continue
 				}
 				if time.Since(gateTime) < 10*time.Second {
-					g.sendToTelegram(fmt.Sprintf("%s dial2 ok, opening already in action %s", call.timestamp(), name))
+					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok, opening already in action %s", call.timestamp(), name))
 					continue
 				}
 				gateTime = time.Now()
 				elapsed := time.Since(call.time())
 				if elapsed > 20*time.Second {
-					g.sendToTelegram(fmt.Sprintf("%s dial2 ok, but call is overdue %d s  %s", call.timestamp(), elapsed/time.Second, name))
+					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok, but call is overdue %d s  %s", call.timestamp(), elapsed/time.Second, name))
 					continue
 				}
 				err := g.sendOpenCommandToGate(phone)
 				if err != nil {
-					g.sendToTelegram(fmt.Sprintf("%s dial2 ok, %v  %s", call.timestamp(), name, err))
+					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok, %v  %s", call.timestamp(), name, err))
 				} else {
-					g.sendToTelegram(fmt.Sprintf("%s dial2 ok  %s", call.timestamp(), name))
+					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok  %s", call.timestamp(), name))
 				}
 				continue
 			}
@@ -341,14 +346,14 @@ Loop:
 				g.CallStore.Set(call.Phone, call.time())
 				g.CallStore.Remove(func(_ string, v *StoredCall) bool { return time.Since(v.time) > 24*7*time.Hour })
 				if !ok {
-					g.sendToTelegram(fmt.Sprintf("%s не зарегистрирован", maskPhone(phone)))
+					g.sendUserNotification(fmt.Sprintf("%s не зарегистрирован", maskPhone(phone)))
 					continue
 				}
 				if !g.allowed(phone) {
-					g.sendToTelegram(fmt.Sprintf("%s проезд запрещен", maskPhone(phone)))
+					g.sendUserNotification(fmt.Sprintf("%s проезд запрещен", maskPhone(phone)))
 					continue
 				}
-				g.sendToTelegram(fmt.Sprintf("%s OK", maskPhone(phone)))
+				g.sendUserNotification(fmt.Sprintf("%s OK", maskPhone(phone)))
 				continue
 			}
 		case <-abort:
@@ -395,18 +400,21 @@ Loop:
 				name = u.name()
 			}
 			if !ok {
-				g.sendToTelegram(fmt.Sprintf("%s uknown sender of SMS: %s", phone, sms.Sms))
+				g.sendSystemNotification(fmt.Sprintf("%s uknown sender of SMS: %q", phone, sms.Sms))
+				g.sendUserNotification(fmt.Sprintf("%s uknown sender of SMS: %q", maskPhone(phone), sms.Sms))
 				continue
 			}
 			if !allowed {
-				g.sendToTelegram(fmt.Sprintf("%s restricted sender of SMS: %s", name, sms.Sms))
+				g.sendSystemNotification(fmt.Sprintf("%s restricted sender of SMS: %q", name, sms.Sms))
+				g.sendUserNotification(fmt.Sprintf("%s restricted sender of SMS: %q", maskPhone(phone), sms.Sms))
 				continue
 			}
 			if sms.isTempCode() {
 				g.KeypadCodesRequests <- sms
 				continue
 			}
-			g.sendToTelegram(fmt.Sprintf("unknown sms format. sent: %s by: %s: text: %q", sms.timestampSent(), name, sms.Sms))
+			g.sendSystemNotification(fmt.Sprintf("unknown sms format. sent: %s by: %s: text: %q", sms.timestampSent(), name, sms.Sms))
+			g.sendUserNotification(fmt.Sprintf("unknown sms format. sent: %s by: %s: text: %q", sms.timestampSent(), maskPhone(phone), sms.Sms))
 
 		case <-abort:
 			break Loop
@@ -482,37 +490,20 @@ func maskPhone(s string) string {
 	return strings.Repeat("*", length-4) + string(rs[length-4:])
 }
 
-func (g *Gate) sendToTelegram(msg string) {
-	Logger.Infof("telegram: %s", msg)
-	var client *http.Client
-	if len(g.ProxyUrl) != 0 {
-		proxyURL, err := url.Parse(g.ProxyUrl)
-		if err != nil {
-			Logger.Errorf("error calling telegram: %v", err)
-			return
-		}
-		client = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
-	} else {
-		client = &http.Client{}
-	}
-	formData := url.Values{
-		"chat_id": {g.TelegramChatId},
-		"text":    {msg + time.Now().In(Location).Format(" (2006-01-02 15:04:05)")},
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.TelegramTimeoutSec)*time.Second)
-	defer cancel()
+func (g *Gate) sendSystemNotification(msg string) {
+	g.sendNotification(msg, true, false)
+}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", g.TelegramUrl, strings.NewReader(formData.Encode()))
-	if err != nil {
-		Logger.Errorf("error calling telegram: %v", err)
-		return
+func (g *Gate) sendUserNotification(msg string) {
+	g.sendNotification(msg, false, true)
+}
+
+func (g *Gate) sendNotification(msg string, system, user bool) {
+	if system {
+		g.SystemNotification <- msg
 	}
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := client.Do(req)
-	if err != nil {
-		Logger.Errorf("error calling telegram: %v", err)
-	} else {
-		defer resp.Body.Close()
+	if user {
+		g.UserNotification <- msg
 	}
 }
 
@@ -603,7 +594,7 @@ Loop:
 			}
 			g.lastOpened = time.Now()
 			Logger.Infof("gate opened %s", t.timestampSent())
-			g.sendToTelegram(fmt.Sprintf("gate opened %s", t.timestampSent()))
+			g.sendSystemNotification(fmt.Sprintf("gate opened %s", t.timestampSent()))
 
 		case <-abort:
 			break Loop
@@ -698,14 +689,14 @@ func (g *Gate) checkAndOpenOnBT(bt *BLETracking) {
 		return
 	}
 	if !g.allowed(phone) {
-		g.sendToTelegram(fmt.Sprintf("%s BLE restricted %s", bt.timestamp(), u.name()))
+		g.sendSystemNotification(fmt.Sprintf("%s BLE restricted %s", bt.timestamp(), u.name()))
 		return
 	}
 	err := g.sendOpenCommandToGate(fmt.Sprintf("%s %s", bt.MAC, phone))
 	if err != nil {
-		g.sendToTelegram(fmt.Sprintf("%s BLE:%s ok, %v  %s", bt.timestamp(), bt.MAC, u.name(), err))
+		g.sendSystemNotification(fmt.Sprintf("%s BLE:%s ok, %v  %s", bt.timestamp(), bt.MAC, u.name(), err))
 	} else {
-		g.sendToTelegram(fmt.Sprintf("%s BLE:%s ok  %s", bt.timestamp(), bt.MAC, u.name()))
+		g.sendSystemNotification(fmt.Sprintf("%s BLE:%s ok  %s", bt.timestamp(), bt.MAC, u.name()))
 	}
 }
 
@@ -742,7 +733,7 @@ func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
 		}
 		msg.WriteString("\n")
 	}
-	g.sendToTelegram(msg.String())
+	g.sendSystemNotification(msg.String())
 }
 
 func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}) {
@@ -902,7 +893,7 @@ func (g *Gate) loadPalesLogs(timeout time.Duration) int {
 	}
 	g.palesLastLog = maxLog
 	Logger.Infof("received %d pal-es log records", len(result.Log.List))
-	g.sendToTelegram(msg.String())
+	g.sendSystemNotification(msg.String())
 	return resp.StatusCode
 }
 
@@ -1034,7 +1025,8 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 	Logger.Infof("keypad code %s  %s", c.Code, c.timestampSent())
 	t := time.Unix(c.Time, 0)
 	if !g.RateWatcher.hit(t) {
-		g.sendToTelegram(fmt.Sprintf("keypad code %s TOO MANY REQUESTS %s ", c.Code, c.timestampSent()))
+		g.sendSystemNotification(fmt.Sprintf("keypad code %s TOO MANY REQUESTS %s ", c.Code, c.timestampSent()))
+		g.sendUserNotification(fmt.Sprintf("keypad code TOO MANY REQUESTS %s ", c.timestampSent()))
 		return Err429TooManyRequests
 	}
 	n := len(c.Code)
@@ -1045,48 +1037,125 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			return Err400BadFormat
 		}
 		if code == nil {
-			g.sendToTelegram(fmt.Sprintf("keypad code %s expired or not found", c.Code))
+			g.sendUserNotification(fmt.Sprintf("keypad code %s expired or not found", c.Code))
 			return Err400BadFormat
 		}
 		if code.EndTimeMilli == 0 {
 			code.EndTimeMilli = time.Now().Add(time.Duration(code.TTLMinutes) * time.Minute).UnixMilli()
 			g.KeypadCodes.Update(code)
 		}
-		err = g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", code.Code))
+		if g.KeypadReleased {
+			err = g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", code.Code))
+		}
 		if err != nil {
-			g.sendToTelegram(fmt.Sprintf("keypad code OK %s, open command error %v", code.Code, err))
+			g.sendSystemNotification(fmt.Sprintf("keypad code OK %s, open command error %v", code.Code, err))
 		} else {
-			g.sendToTelegram(fmt.Sprintf("keypad code OK %s, sent open command", code.Code))
+			g.sendSystemNotification(fmt.Sprintf("keypad code OK %s, sent open command", code.Code))
+			if code.Temporal() {
+				g.sendUserNotification(fmt.Sprintf("гость %s успешно ввел код", maskPhone(code.RequesterPhone)))
+			}
 		}
 		return err
 	}
 	if len(c.Code) < 11 {
-		g.sendToTelegram(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
+		g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
 		return Err400BadFormat
 	}
 	phone := "7" + c.Code[len(c.Code)-10:]
 	u, ok := g.Phones[phone]
 	if !ok {
-		g.sendToTelegram(fmt.Sprintf("keypad code %s  %s, phone not found", c.Code, c.timestampSent()))
+		g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s, phone not found", c.Code, c.timestampSent()))
 		return Err400BadFormat
 	}
 	plotNumber := c.Code[:len(c.Code)-10]
 	if !u.hasPlotNumber(plotNumber) {
-		g.sendToTelegram(fmt.Sprintf("keypad code %s  %s, phone and plot number mismatch", c.Code, c.timestampSent()))
+		g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s, phone and plot number mismatch", c.Code, c.timestampSent()))
 		return Err400BadFormat
 	}
 	info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
 	if !g.allowed(phone) {
-		g.sendToTelegram(fmt.Sprintf("keypad code restricted %s", info))
+		g.sendSystemNotification(fmt.Sprintf("keypad code restricted %s", info))
 		return Err403Forbidden
 	}
 	err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code))
 	if err != nil {
-		g.sendToTelegram(fmt.Sprintf("keypad code %s  %v", info, err))
+		g.sendSystemNotification(fmt.Sprintf("keypad code %s  %v", info, err))
 	} else {
-		g.sendToTelegram(fmt.Sprintf("keypad code OK %s", info))
+		g.sendSystemNotification(fmt.Sprintf("keypad code OK %s", info))
 	}
 	return err
+}
+
+func (g *Gate) sendingSystemNotification(abort chan struct{}) {
+Loop:
+	for {
+		select {
+		case msg := <-g.SystemNotification:
+			Logger.Infof("telegram: %s", msg)
+			var client *http.Client
+			if len(g.ProxyUrl) != 0 {
+				proxyURL, err := url.Parse(g.ProxyUrl)
+				if err != nil {
+					Logger.Errorf("error calling telegram: %v", err)
+					return
+				}
+				client = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+			} else {
+				client = &http.Client{}
+			}
+			formData := url.Values{
+				"chat_id": {g.TelegramChatId},
+				"text":    {msg + time.Now().In(Location).Format(" (2006-01-02 15:04:05)")},
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.TelegramTimeoutSec)*time.Second)
+			defer cancel()
+
+			req, err := http.NewRequestWithContext(ctx, "POST", g.TelegramUrl, strings.NewReader(formData.Encode()))
+			if err != nil {
+				Logger.Errorf("error calling telegram: %v", err)
+				return
+			}
+			req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+			resp, err := client.Do(req)
+			if err != nil {
+				Logger.Errorf("error calling telegram: %v", err)
+			} else {
+				defer resp.Body.Close()
+			}
+
+		case <-abort:
+			break Loop
+		}
+	}
+}
+
+func (g *Gate) sendingUserNotification(abort chan struct{}) {
+	server, _ := url.Parse("http://localhost:8081")
+	token := "tk_czrr8cbyfeoamjseb1di5b5hqfzuk"
+	publisher, err := gotfy.NewPublisher(server, gotfy.WithAuth("", token))
+	if err != nil {
+		Logger.Errorf("error NewPublisher: %v", err)
+	}
+Loop:
+	for {
+		select {
+		case msg := <-g.UserNotification:
+			if publisher != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.TelegramTimeoutSec)*time.Second)
+				defer cancel()
+				publisher.SendMessage(ctx, &gotfy.Message{
+					Topic:   "7g-events",
+					Message: msg,
+				})
+				Logger.Infof("ntfy: %s", msg)
+			} else {
+				Logger.Debugf("CAN'T SEND TO ntfy DUE TO PREVIOUS ERROR: %s", msg)
+			}
+
+		case <-abort:
+			break Loop
+		}
+	}
 }
 
 type HitCounter struct {

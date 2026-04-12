@@ -229,6 +229,8 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	go g.handlingBLETracking(abort)
 	go g.readingSMSesForSend(abort)
 	go g.handlingKeypadRequests(abort)
+	go g.sendingSystemNotification(abort)
+	go g.sendingUserNotification(abort)
 
 	http.HandleFunc("/", ws.handle)
 
@@ -775,7 +777,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 				}
 				m.Sent()
 				s.gate.SMSes.Update(m)
-				s.gate.sendToTelegram(fmt.Sprintf("sent SMS: %s %q", m.Phone, m.Msg))
+				s.gate.sendSystemNotification(fmt.Sprintf("sent SMS: %s %q", m.Phone, m.Msg))
 				return
 
 			case <-timer55s.C:

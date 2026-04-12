@@ -19,7 +19,9 @@ require (
 )
 
 require (
+	github.com/AnthonyHewins/gotfy v0.0.11 // indirect
 	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
+	github.com/goccy/go-json v0.10.4 // indirect
 	github.com/pquerna/otp v1.5.0 // indirect
 	github.com/richardlehane/mscfb v1.0.6 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect

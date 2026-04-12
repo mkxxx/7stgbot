@@ -20,12 +20,21 @@ type KeypadCodes struct {
 	db *sql.DB
 }
 
+	// TODO add created time
 type KeypadCode struct {
 	ID             int
 	Code           string
 	RequesterPhone string
 	EndTimeMilli   int64
 	TTLMinutes     int
+}
+
+func (s *KeypadCode) Temporal() bool {
+	if s.TTLMinutes <= 60*24*3 {
+		return true
+	}
+	// TODO add created time
+	return false
 }
 
 func (s *KeypadCode) Expired() bool {

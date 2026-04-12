@@ -136,6 +136,7 @@ func main() {
 	g.Password = cfg.GatePwd
 	g.PalesPortalUser = cfg.PalesPortalUser
 	g.PalesPortalPwd = cfg.PalesPortalPwd
+	g.KeypadReleased = cfg.KeypadReleased
 	g.Phones = make(map[string]*tgsrv.PalesUser)
 	readCsv(filepath.Join(cfgDir, "pales_users.csv"), palgateUserFunc(g.Phones))
 	g.RestrictedPhones = make(map[string]bool)
@@ -160,6 +161,8 @@ func main() {
 	g.SMSes = gate.NewSMSes()
 	g.KeypadCodes = gate.NewKeypadCodes()
 	g.Stored = make(chan struct{}, 8)
+	g.SystemNotification = make(chan string, 32)
+	g.UserNotification = make(chan string, 32)
 	g.KeypadCodesRequests = make(chan *tgsrv.PhoneSms, 32)
 
 	fname := filepath.Join(cfgDir, "bt-macs.toml")
@@ -212,6 +215,7 @@ type Config struct {
 	KeypadHitLimit                int
 	KeypadHitLimitDurationMinutes int64
 	KeypadThrottleMinutes         int64
+	KeypadReleased                bool
 }
 
 func stdinCredentials() (string, string) {

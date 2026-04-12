@@ -1131,7 +1131,7 @@ Loop:
 
 func (g *Gate) sendingUserNotification(abort chan struct{}) {
 	server, _ := url.Parse("http://localhost:8081")
-	token := "tk_czrr8cbyfeoamjseb1di5b5hqfzuk"
+	token := "tk_udrisab6z7y2almvr22i0bmc2wijg"
 	publisher, err := gotfy.NewPublisher(server, gotfy.WithAuth("", token))
 	if err != nil {
 		Logger.Errorf("error NewPublisher: %v", err)
@@ -1143,11 +1143,15 @@ Loop:
 			if publisher != nil {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.TelegramTimeoutSec)*time.Second)
 				defer cancel()
-				publisher.SendMessage(ctx, &gotfy.Message{
+				_, err := publisher.SendMessage(ctx, &gotfy.Message{
 					Topic:   "7g-events",
 					Message: msg,
 				})
-				Logger.Infof("ntfy: %s", msg)
+				if err != nil {
+					Logger.Errorf("ntfy: %s  error: %v", msg, err)
+				} else {
+					Logger.Infof("ntfy: %s", msg)
+				}
 			} else {
 				Logger.Debugf("CAN'T SEND TO ntfy DUE TO PREVIOUS ERROR: %s", msg)
 			}

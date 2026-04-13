@@ -161,8 +161,8 @@ func main() {
 	g.SMSes = gate.NewSMSes()
 	g.KeypadCodes = gate.NewKeypadCodes()
 	g.Stored = make(chan struct{}, 8)
-	g.SystemNotification = make(chan string, 32)
-	g.UserNotification = make(chan string, 32)
+	g.TelegramNotification = make(chan *tgsrv.Notification, 32)
+	g.NtfyNotification = make(chan *tgsrv.Notification, 32)
 	g.KeypadCodesRequests = make(chan *tgsrv.PhoneSms, 32)
 
 	fname := filepath.Join(cfgDir, "bt-macs.toml")

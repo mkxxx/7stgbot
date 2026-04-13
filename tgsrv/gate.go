@@ -64,9 +64,15 @@ type Gate struct {
 	KeypadCodes            gate.KeypadCodesDAO
 	SMSSession             map[int]*gate.SMS
 	Stored                 chan struct{}
-	SystemNotification     chan string
-	UserNotification       chan string
+	TelegramNotification   chan *Notification
+	NtfyNotification       chan *Notification
 	KeypadReleased         bool
+}
+
+type Notification struct {
+	msg    string
+	system bool
+	user   bool
 }
 
 type BTMacs struct {
@@ -500,10 +506,10 @@ func (g *Gate) sendUserNotification(msg string) {
 
 func (g *Gate) sendNotification(msg string, system, user bool) {
 	if system {
-		g.SystemNotification <- msg
+		g.TelegramNotification <- &Notification{msg: msg, system: system, user: user}
 	}
 	if user {
-		g.UserNotification <- msg
+		g.NtfyNotification <- &Notification{msg: msg, system: system, user: user}
 	}
 }
 
@@ -1029,6 +1035,10 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		g.sendUserNotification(fmt.Sprintf("keypad code TOO MANY REQUESTS %s ", c.timestampSent()))
 		return Err429TooManyRequests
 	}
+	if c.Code == "0000" {
+		g.sendUserNotification(fmt.Sprintf(`неизвесный гость ввел код %s "я приехал"`, c.Code))
+		return nil
+	}
 	n := len(c.Code)
 	if n == 5 || n == 6 {
 		code, err := gate.Find(g.KeypadCodes, c.Code)
@@ -1090,42 +1100,47 @@ func (g *Gate) sendingSystemNotification(abort chan struct{}) {
 Loop:
 	for {
 		select {
-		case msg := <-g.SystemNotification:
+		case m := <-g.TelegramNotification:
+			msg := m.msg
 			Logger.Infof("telegram: %s", msg)
-			var client *http.Client
-			if len(g.ProxyUrl) != 0 {
-				proxyURL, err := url.Parse(g.ProxyUrl)
-				if err != nil {
-					Logger.Errorf("error calling telegram: %v", err)
-					return
-				}
-				client = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
-			} else {
-				client = &http.Client{}
-			}
-			formData := url.Values{
-				"chat_id": {g.TelegramChatId},
-				"text":    {msg + time.Now().In(Location).Format(" (2006-01-02 15:04:05)")},
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.TelegramTimeoutSec)*time.Second)
-			defer cancel()
-
-			req, err := http.NewRequestWithContext(ctx, "POST", g.TelegramUrl, strings.NewReader(formData.Encode()))
-			if err != nil {
-				Logger.Errorf("error calling telegram: %v", err)
-				return
-			}
-			req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-			resp, err := client.Do(req)
-			if err != nil {
-				Logger.Errorf("error calling telegram: %v", err)
-			} else {
-				defer resp.Body.Close()
-			}
+			g.sendTelegram(msg)
 
 		case <-abort:
 			break Loop
 		}
+	}
+}
+
+func (g *Gate) sendTelegram(msg string) {
+	var client *http.Client
+	if len(g.ProxyUrl) != 0 {
+		proxyURL, err := url.Parse(g.ProxyUrl)
+		if err != nil {
+			Logger.Errorf("error calling telegram: %v", err)
+			return
+		}
+		client = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	} else {
+		client = &http.Client{}
+	}
+	formData := url.Values{
+		"chat_id": {g.TelegramChatId},
+		"text":    {msg + time.Now().In(Location).Format(" (2006-01-02 15:04:05)")},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.TelegramTimeoutSec)*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", g.TelegramUrl, strings.NewReader(formData.Encode()))
+	if err != nil {
+		Logger.Errorf("error calling telegram: %v", err)
+		return
+	}
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
+	if err != nil {
+		Logger.Errorf("error calling telegram: %v", err)
+	} else {
+		defer resp.Body.Close()
 	}
 }
 
@@ -1139,26 +1154,36 @@ func (g *Gate) sendingUserNotification(abort chan struct{}) {
 Loop:
 	for {
 		select {
-		case msg := <-g.UserNotification:
-			if publisher != nil {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.TelegramTimeoutSec)*time.Second)
-				defer cancel()
-				_, err := publisher.SendMessage(ctx, &gotfy.Message{
-					Topic:   "7g-events",
-					Message: msg,
-				})
-				if err != nil {
-					Logger.Errorf("ntfy: %s  error: %v", msg, err)
-				} else {
-					Logger.Infof("ntfy: %s", msg)
-				}
-			} else {
+		case m := <-g.NtfyNotification:
+			msg := m.msg
+			if publisher == nil {
 				Logger.Debugf("CAN'T SEND TO ntfy DUE TO PREVIOUS ERROR: %s", msg)
+				continue
+			}
+			if m.user {
+				g.sendNtfy(publisher, "7g-events", msg)
+			}
+			if m.system {
+				g.sendNtfy(publisher, "system", msg)
 			}
 
 		case <-abort:
 			break Loop
 		}
+	}
+}
+
+func (g *Gate) sendNtfy(publisher *gotfy.Publisher, topic, msg string) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.TelegramTimeoutSec)*time.Second)
+	defer cancel()
+	_, err := publisher.SendMessage(ctx, &gotfy.Message{
+		Topic:   topic,
+		Message: msg,
+	})
+	if err != nil {
+		Logger.Errorf("ntfy: %s  error: %v", msg, err)
+	} else {
+		Logger.Infof("ntfy: %s", msg)
 	}
 }
 

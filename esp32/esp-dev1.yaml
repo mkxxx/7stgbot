@@ -69,13 +69,13 @@ globals:
   - id: gate_busy
     type: bool
     restore_value: no
-    initial_value: 'false'
+    initial_value: "false"
   - id: last_call_time
     type: std::map<std::string, unsigned long>
     restore_value: no
   - id: throttle_seconds
     type: int
-    initial_value: '30'   # Не чаще 1 раза в полминуты для одного MAC
+    initial_value: "30" # Не чаще 1 раза в минуту для одного MAC
 
 substitutions:
   relay_pin: "GPIO32"
@@ -84,7 +84,7 @@ switch:
   - platform: gpio
     name: "Main Relay"
     id: relay_1
-    pin: 
+    pin:
       number: ${relay_pin}
       mode:
         output: true
@@ -98,12 +98,12 @@ text:
     name: "Relay_With_Message"
     id: relay_msg_trigger
     mode: text
-    optimistic: true 
+    optimistic: true
     on_value:
       then:
         - logger.log:
             format: "%s received"
-            args: [ 'x.c_str()' ]
+            args: ["x.c_str()"]
         - switch.turn_on: relay_1
         - delay: 1s
         - switch.turn_off: relay_1
@@ -151,7 +151,7 @@ binary_sensor:
       then:
         - logger.log: "Ворота открываются!"
         - http_request.post:
-            url: "http://88.210.53.228:8084/gate/opened/"
+            url: !secret url_gate_opened
             request_headers:
               Content-Type: application/json
             json: !lambda |-
@@ -163,13 +163,13 @@ http_request:
 
 # Добавим отдельный таймер для очистки памяти, чтобы не нагружать BLE обработчик
 interval:
-  - interval: 1min
+  - interval: 10min
     then:
       - lambda: |-
           unsigned long now = millis();
           auto &m = id(last_call_time);
           for (auto it = m.begin(); it != m.end(); ) {
-            if (now - it->second > 60000) it = m.erase(it);
+            if (now - it->second > 600000) it = m.erase(it);
             else ++it;
           }
 
@@ -180,12 +180,12 @@ esp32_ble_tracker:
             // 1. Быстрая фильтрация по MAC (без создания строк лишний раз)
             std::string mac = x.address_str();
             unsigned long now = millis();
-            
+
             // Проверка интервала (throttling)
             if (id(last_call_time).count(mac) && (now - id(last_call_time)[mac] < id(throttle_seconds) * 1000)) {
               return; 
             }
-            
+
             // 2. Если прошли фильтр, обновляем время
             id(last_call_time)[mac] = now;
 
@@ -211,7 +211,7 @@ esp32_ble_tracker:
 
 script:
   - id: report_device_script
-    mode: single   # или parallel, но с max_parallel: 1
+    mode: single # или parallel, но с max_parallel: 1
     parameters:
       mac: string
       rssi: int
@@ -221,9 +221,10 @@ script:
     then:
       - logger.log:
           format: "Reporting BLE Device -> %s RSSI: %d '%s' %s company_id: %d"
-          args: [ 'mac.c_str()', rssi, 'name.c_str()', 'uuid.c_str()', company_id ]    
+          args:
+            ["mac.c_str()", rssi, "name.c_str()", "uuid.c_str()", company_id]
       - http_request.post:
-          url: http://88.210.53.228:8084/ble/
+          url: !secret url_ble
           request_headers:
             Content-Type: application/json
           json: |-

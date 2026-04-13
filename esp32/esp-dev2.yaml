@@ -69,13 +69,13 @@ globals:
   - id: gate_busy
     type: bool
     restore_value: no
-    initial_value: 'false'
+    initial_value: "false"
   - id: last_call_time
     type: std::map<std::string, unsigned long>
     restore_value: no
   - id: throttle_seconds
     type: int
-    initial_value: '30'   # Не чаще 1 раза в минуту для одного MAC
+    initial_value: "30" # Не чаще 1 раза в минуту для одного MAC
 
 substitutions:
   relay_pin: "GPIO32"
@@ -84,7 +84,7 @@ switch:
   - platform: gpio
     name: "Main Relay"
     id: relay_1
-    pin: 
+    pin:
       number: ${relay_pin}
       mode:
         output: true
@@ -98,12 +98,12 @@ text:
     name: "Relay_With_Message"
     id: relay_msg_trigger
     mode: text
-    optimistic: true 
+    optimistic: true
     on_value:
       then:
         - logger.log:
             format: "%s received"
-            args: [ 'x.c_str()' ]
+            args: ["x.c_str()"]
         - switch.turn_on: relay_1
         - delay: 1s
         - switch.turn_off: relay_1
@@ -151,7 +151,7 @@ binary_sensor:
       then:
         - logger.log: "Ворота открываются!"
         - http_request.post:
-            url: "http://88.210.53.228:8084/gate/opened/"
+            url: !secret url_gate_opened
             request_headers:
               Content-Type: application/json
             json: !lambda |-
@@ -180,12 +180,12 @@ esp32_ble_tracker:
             // 1. Быстрая фильтрация по MAC (без создания строк лишний раз)
             std::string mac = x.address_str();
             unsigned long now = millis();
-            
+
             // Проверка интервала (throttling)
             if (id(last_call_time).count(mac) && (now - id(last_call_time)[mac] < id(throttle_seconds) * 1000)) {
               return; 
             }
-            
+
             // 2. Если прошли фильтр, обновляем время
             id(last_call_time)[mac] = now;
 
@@ -208,10 +208,71 @@ esp32_ble_tracker:
             // Вызываем скрипт
             id(report_device_script).execute(mac, rssi, name, uuid, company_id);
 
-
 script:
+  - id: beep_short
+    mode: restart
+    then:
+      - output.set_level: { id: buzzer_pin, level: 100% }
+      - delay: 50ms
+      - output.set_level: { id: buzzer_pin, level: 0% }
+
+  # 1. Успех (200 OK) — Короткий приятный пик
+  - id: sound_success
+    mode: restart
+    then:
+      - delay: 100ms
+      - output.set_level: { id: buzzer_pin, level: 100% }
+      - delay: 100ms
+      - output.set_level: { id: buzzer_pin, level: 0% }
+
+  # 2. Доступ запрещен (403 Forbidden / Неверный код) — Один длинный гудок
+  - id: sound_forbidden
+    mode: restart
+    then:
+      - delay: 100ms
+      - output.set_level: { id: buzzer_pin, level: 100% }
+      - delay: 1000ms
+      - output.set_level: { id: buzzer_pin, level: 0% }
+
+  # 3. Мораторий/Перебор (429 Too Many Requests) — Три быстрых тревожных пика
+  - id: sound_too_many_requests
+    mode: restart
+    then:
+      - repeat:
+          count: 3
+          then:
+            - delay: 100ms
+            - output.set_level: { id: buzzer_pin, level: 100% }
+            - delay: 1000ms
+            - output.set_level: { id: buzzer_pin, level: 0% }
+            - delay: 400ms
+
+  # 4. Неизвестная ошибка (500, 404, нет сети)
+  - id: sound_error
+    mode: restart
+    then:
+      - repeat:
+          count: 4
+          then:
+            - delay: 100ms
+            - output.set_level: { id: buzzer_pin, level: 100% }
+            - delay: 200ms
+            - output.set_level: { id: buzzer_pin, level: 0% }
+
+    # 5. Неверный формат (400 Bad Request) — 3 быстрых пика
+  - id: sound_bad_format
+    mode: restart
+    then:
+      - repeat:
+          count: 3
+          then:
+            - delay: 100ms
+            - output.set_level: { id: buzzer_pin, level: 100% }
+            - delay: 100ms
+            - output.set_level: { id: buzzer_pin, level: 0% }
+
   - id: report_device_script
-    mode: single   # или parallel, но с max_parallel: 1
+    mode: single # или parallel, но с max_parallel: 1
     parameters:
       mac: string
       rssi: int
@@ -221,9 +282,10 @@ script:
     then:
       - logger.log:
           format: "Reporting BLE Device -> %s RSSI: %d '%s' %s company_id: %d"
-          args: [ 'mac.c_str()', rssi, 'name.c_str()', 'uuid.c_str()', company_id ]    
+          args:
+            ["mac.c_str()", rssi, "name.c_str()", "uuid.c_str()", company_id]
       - http_request.post:
-          url: http://88.210.53.228:8084/ble/
+          url: !secret url_ble
           request_headers:
             Content-Type: application/json
           json: |-
@@ -246,25 +308,25 @@ script:
           on_error:
             - logger.log: "Ошибка сети при отправке"
 
-
 matrix_keypad:
   id: my_keypad
   rows:
-    - pin: GPIO13
-    - pin: GPIO21  # Заменили 12 на 32 # ЗАМЕНИЛИ 32 на 21, чтобы не конфликтовать с реле
-    - pin: GPIO14
-    - pin: GPIO27
+    - pin: GPIO13 # 1 (key 7 side)
+    - pin: GPIO21 # 2  Заменили 12 на 32 # ЗАМЕНИЛИ 32 на 21, чтобы не конфликтовать с реле
+    - pin: GPIO14 # 3
+    - pin: GPIO27 # 4
   columns:
-    - pin: GPIO26
-    - pin: GPIO25
-    - pin: GPIO33
+    - pin: GPIO26 # 5
+    - pin: GPIO25 # 6
+    - pin: GPIO33 # 7
   keys: "123456789*0#"
-  
-  # Правильное событие и аргумент
+
   on_key:
-    - logger.log:
-        format: "Нажата клавиша: %c"
-        args: [ 'x' ]
+    then:
+      - script.execute: beep_short # Пищим при каждом нажатии
+      - logger.log:
+          format: "Нажата клавиша: %c"
+          args: ["x"]
 
 key_collector:
   - id: pin_code_reader
@@ -273,29 +335,55 @@ key_collector:
     max_length: 16
     clear_keys: "*"
     end_keys: "#"
-    
+
     # Это событие срабатывает при каждом нажатии клавиши (включая цифры)
     on_progress:
       - logger.log:
           format: "Ввод: %s (длина: %d)"
-          args: [ 'x.c_str()', 'x.length()' ]
+          args: ["x.c_str()", "x.length()"]
 
-    # Срабатывает ТОЛЬКО если нажата '#' и введено от 4 до 16 символов
+    # Срабатывает ТОЛЬКО если нажата '#' и введено от 1 до 16 символов
     on_result:
       then:
         - logger.log:
-            format: "Успех! Отправка POST: %s"
-            args: [ 'x.c_str()' ]
+            format: "Отправка POST: %s"
+            args: ["x.c_str()"]
+        - output.set_level: { id: buzzer_pin, level: 0% }
         - http_request.post:
-            url: "http://88.210.53.228:8084/gate/keypad/"
+            url: !secret url_keypad
             request_headers:
               Content-Type: application/json
             json: !lambda |-
               root["code"] = x; // x здесь это std::string
               root["time"] = (int)id(sntp_time).now().timestamp; // число
+            on_response:
+              then:
+                - lambda: |-
+                    // Явно указываем, что получаем статус как целое число
+                    int status_val = response->status_code;
+                    if (status_val == 200) {
+                      id(sound_success).execute(); 
+                      ESP_LOGI("keypad", "Доступ разрешен (200)");
+                    } else if (status_val == 400) {
+                      id(sound_bad_format).execute();
+                      ESP_LOGW("keypad", "Неверный формат (400)");
+                    } else if (status_val == 403) {
+                      id(sound_forbidden).execute();
+                      ESP_LOGW("keypad", "Доступ отклонен (403)");
+                    } else if (status_val == 429) {
+                      id(sound_too_many_requests).execute();
+                      ESP_LOGE("keypad", "Мораторий (429)");
+                    } else {
+                      id(sound_error).execute();
+                      ESP_LOGE("keypad", "Статус: %d", status_val);
+                    }
 
-    # Срабатывает если нажата '#' НО введено меньше 4 символов
+    # Срабатывает если нажата '#' НО введено меньше 1 символов
     on_timeout:
       then:
-        - logger.log: "Ошибка: Нужно минимум 4 цифры перед нажатием #"
+        - logger.log: "Ошибка: Мало цифр"
 
+output:
+  - platform: ledc # Используем ledc для плавности, но можно и gpio
+    pin: GPIO18
+    id: buzzer_pin

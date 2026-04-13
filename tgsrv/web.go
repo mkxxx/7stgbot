@@ -61,6 +61,7 @@ const (
 	internetElectrCSVPath = "/docs/electr.csv/"
 	internetDocsPath      = "/docs/"
 	blePath               = "/ble/"
+	ble2Path              = "/ble2/"
 	gateOnCallPath        = "/gate/call/"
 	gateOpenedPath        = "/gate/opened/"
 	gateOnSmsPath         = "/gate/sms/"
@@ -574,6 +575,34 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 				bleTracking.MAC, bleTracking.RSSI, bleTracking.Name, bleTracking.Location)
 		}
 		s.gate.bleTrackings <- &bleTracking
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.URL.Path == ble2Path {
+		if r.Method != "POST" {
+			http.Error(w, "Resource not found", http.StatusNotFound)
+			return
+		}
+		defer r.Body.Close()
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+			http.Error(w, "cannot read request body", http.StatusInternalServerError)
+			return
+		}
+		var bleTrackings []*BLETracking
+		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&bleTrackings); err != nil {
+			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		for _, bt := range bleTrackings {
+			Logger.Debugf("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d",
+				bt.MAC, bt.RSSI, bt.Name, bt.Location)
+			s.gate.bleTrackings <- bt
+		}
 		w.WriteHeader(http.StatusOK)
 		return
 	}

@@ -76,6 +76,10 @@ globals:
   - id: throttle_seconds
     type: int
     initial_value: "30" # Не чаще 1 раза в минуту для одного MAC
+  - id: ble_queue
+    type: "std::vector<std::map<std::string, std::string>>"
+    restore_value: no
+
 
 substitutions:
   relay_pin: "GPIO32"
@@ -173,40 +177,77 @@ interval:
             else ++it;
           }
 
+  - interval: 4s
+    then:
+      - lambda: |-
+          if (id(ble_queue).empty()) return;
+
+          auto current_batch = id(ble_queue);
+          id(ble_queue).clear();
+
+          std::string json_payload = "[";
+          for (size_t i = 0; i < current_batch.size(); i++) {
+            json_payload += "{";
+            bool first = true;
+            for (auto const& [key, val] : current_batch[i]) {
+              if (!first) json_payload += ",";
+              
+              json_payload += "\"" + key + "\":";
+              
+              // Проверяем, является ли поле числовым
+              if (key == "rssi" || key == "time" || key == "location" || key == "company_id") {
+                // Если значение пустое (например, time не определен), пишем null или 0
+                json_payload += (val.empty() ? "0" : val);
+              } else {
+                // Для всех остальных (mac, uuid, name) — в кавычках
+                json_payload += "\"" + val + "\"";
+              }
+              first = false;
+            }
+            json_payload += "}";
+            if (i < current_batch.size() - 1) json_payload += ",";
+          }
+          json_payload += "]";
+
+          id(send_batch_script).execute(json_payload);
+
+
+
 esp32_ble_tracker:
   on_ble_advertise:
     - then:
         - lambda: |-
-            // 1. Быстрая фильтрация по MAC (без создания строк лишний раз)
             std::string mac = x.address_str();
             unsigned long now = millis();
 
-            // Проверка интервала (throttling)
             if (id(last_call_time).count(mac) && (now - id(last_call_time)[mac] < id(throttle_seconds) * 1000)) {
               return; 
             }
-
-            // 2. Если прошли фильтр, обновляем время
             id(last_call_time)[mac] = now;
 
-            // 3. Извлекаем данные только если прошли фильтр по времени
-            int rssi = x.get_rssi();
-            std::string name = x.get_name();
-            std::string uuid = "";
-            uint16_t company_id = 0;
-
+            std::map<std::string, std::string> device;          
+            device["mac"] = mac;
+            device["rssi"] = std::to_string(x.get_rssi());
+            device["name"] = x.get_name();
+            device["location"] = "1";
             auto ibeacon = x.get_ibeacon();
             if (ibeacon.has_value()) {
-              uuid = ibeacon->get_uuid().to_string();
+              device["uuid"] = ibeacon->get_uuid().to_string();
+            }
+            // Извлечение Company ID (Manufacturer Data)
+            auto m_datas = x.get_manufacturer_datas();
+            if (!m_datas.empty() && m_datas[0].data.size() >= 2) {
+              // В ESPHome data — это std::vector<uint8_t>
+              uint16_t cid = (m_datas[0].data[1] << 8) | m_datas[0].data[0];
+              device["company_id"] = std::to_string(cid);
+            } else {
+              device["company_id"] = "0";
+            }
+            if (id(sntp_time).now().is_valid()) {
+              device["time"] = std::to_string(id(sntp_time).now().timestamp);
             }
 
-            auto m_data = x.get_manufacturer_datas();
-            if (!m_data.empty() && m_data[0].data.size() >= 2) {
-              company_id = (m_data[0].data[1] << 8) | m_data[0].data[0];
-            }
-
-            // Вызываем скрипт
-            id(report_device_script).execute(mac, rssi, name, uuid, company_id);
+            id(ble_queue).push_back(device);
 
 script:
   - id: beep_short
@@ -307,6 +348,21 @@ script:
                 }
           on_error:
             - logger.log: "Ошибка сети при отправке"
+
+  - id: send_batch_script
+    parameters:
+      payload: string
+    then:
+      - http_request.post:
+          url: !secret url_ble2
+          request_headers:
+            Content-Type: application/json
+          body: !lambda |-
+            return payload;
+          on_response:
+            - lambda: |-
+                ESP_LOGD("batch_http", "Batch sent. Status: %d", response->status_code);
+          
 
 matrix_keypad:
   id: my_keypad

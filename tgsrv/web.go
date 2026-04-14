@@ -99,7 +99,7 @@ type BLETracking struct {
 	UUID      string
 	CompanyId int `json:"company_id"`
 	Location  int
-	Time      int64
+	Time      int64 // seconds
 }
 
 func (t *BLETracking) timestamp() string {

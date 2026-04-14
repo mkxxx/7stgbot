@@ -507,6 +507,7 @@ func (g *Gate) sendUserNotification(msg string) {
 func (g *Gate) sendNotification(msg string, system, user bool) {
 	if system {
 		g.TelegramNotification <- &Notification{msg: msg, system: system, user: user}
+		g.NtfyNotification <- &Notification{msg: msg, system: system, user: user}
 	}
 	if user {
 		g.NtfyNotification <- &Notification{msg: msg, system: system, user: user}
@@ -690,7 +691,7 @@ func (g *Gate) checkAndOpenOnBT(bt *BLETracking) {
 	lastMacTime := g.bleTimes[bt.MAC]
 	t := time.Unix(bt.Time, 0)
 	g.bleTimes[bt.MAC] = t
-	// avoid nuisance gate cycling while in range (under frequency period exceeded)
+	// avoid nuisance gate cycling while in range
 	if t.Sub(lastMacTime) <= g.BLEPeriodSec*time.Second {
 		return
 	}

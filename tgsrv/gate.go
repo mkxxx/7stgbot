@@ -407,12 +407,12 @@ Loop:
 			}
 			if !ok {
 				g.sendSystemNotification(fmt.Sprintf("%s uknown sender of SMS: %q", phone, sms.Sms))
-				g.sendUserNotification(fmt.Sprintf("%s uknown sender of SMS: %q", maskPhone(phone), sms.Sms))
+				g.sendUserNotification(fmt.Sprintf("%s неизвестный номер SMS: %q", maskPhone(phone), sms.Sms))
 				continue
 			}
 			if !allowed {
 				g.sendSystemNotification(fmt.Sprintf("%s restricted sender of SMS: %q", name, sms.Sms))
-				g.sendUserNotification(fmt.Sprintf("%s restricted sender of SMS: %q", maskPhone(phone), sms.Sms))
+				g.sendUserNotification(fmt.Sprintf("%s нет разрешения на проезд SMS: %q", maskPhone(phone), sms.Sms))
 				continue
 			}
 			if sms.isTempCode() {
@@ -420,7 +420,7 @@ Loop:
 				continue
 			}
 			g.sendSystemNotification(fmt.Sprintf("unknown sms format. sent: %s by: %s: text: %q", sms.timestampSent(), name, sms.Sms))
-			g.sendUserNotification(fmt.Sprintf("unknown sms format. sent: %s by: %s: text: %q", sms.timestampSent(), maskPhone(phone), sms.Sms))
+			g.sendUserNotification(fmt.Sprintf("Неизвестный формат. Отправлено: %s номер: %s: SMS: %q", sms.timestampSent(), maskPhone(phone), sms.Sms))
 
 		case <-abort:
 			break Loop
@@ -1032,14 +1032,26 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 	t := time.Unix(c.Time, 0)
 	if !g.RateWatcher.hit(t) {
 		g.sendSystemNotification(fmt.Sprintf("keypad code %s TOO MANY REQUESTS %s ", c.Code, c.timestampSent()))
-		g.sendUserNotification(fmt.Sprintf("keypad code TOO MANY REQUESTS %s ", c.timestampSent()))
+		g.sendUserNotification(fmt.Sprintf("слишком много попыток ввода кода. подождите несколько минут %s ", c.timestampSent()))
 		return Err429TooManyRequests
 	}
-	if c.Code == "0000" {
-		g.sendUserNotification(fmt.Sprintf(`неизвесный гость ввел код %s "я приехал"`, c.Code))
-		return nil
-	}
 	n := len(c.Code)
+	if strings.HasPrefix(c.Code, "0") {
+		if c.Code == "0000" {
+			g.sendUserNotification(fmt.Sprintf(`неизвесный гость ввел код %s "я приехал"`, c.Code))
+			return nil
+		}
+		if strings.HasPrefix(c.Code, "00") && n >= 3 && n <= 5 {
+			plotN, err := strconv.Atoi(c.Code)
+			if err == nil && plotN >= 1 && plotN <= 315 {
+				g.sendUserNotification(fmt.Sprintf("ввели код %s - гости %d участка запрашивают проезд", c.Code, plotN))
+				return nil
+			}
+		}
+		g.sendUserNotification(fmt.Sprintf("неизвестный код %s", c.Code))
+		return Err400BadFormat
+
+	}
 	if n == 5 || n == 6 {
 		code, err := gate.Find(g.KeypadCodes, c.Code)
 		if err != nil {
@@ -1047,7 +1059,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			return Err400BadFormat
 		}
 		if code == nil {
-			g.sendUserNotification(fmt.Sprintf("keypad code %s expired or not found", c.Code))
+			g.sendUserNotification(fmt.Sprintf("код %s не найден или уже закончил свое действие", c.Code))
 			return Err400BadFormat
 		}
 		if code.EndTimeMilli == 0 {

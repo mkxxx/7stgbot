@@ -122,3 +122,10 @@ func (s *NullSMSes) Insert(p *SMS) error {
 func (s *NullSMSes) Update(p *SMS) error {
 	return nil
 }
+
+func NewSMS(phone string, dl time.Time) *SMS {
+	m := &SMS{Phone: phone, CreatedAtMilli: time.Now().UnixMilli(),
+		DeadlineMilli: dl.UnixMilli()}
+	return m
+}
+

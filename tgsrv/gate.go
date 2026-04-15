@@ -5,10 +5,15 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	crand "crypto/rand"
+	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"math/rand/v2"
 	"net/http"
@@ -67,6 +72,8 @@ type Gate struct {
 	TelegramNotification   chan *Notification
 	NtfyNotification       chan *Notification
 	KeypadReleased         bool
+	NtfyURL                string
+	NtfyToken              string
 }
 
 type Notification struct {
@@ -396,6 +403,22 @@ Loop:
 				continue
 			}
 			if sms.isTOTP() {
+				s := phone + time.Now().In(Location).Format("200601021504")[3:]
+				secret, err := Encrypt(s)
+				if err != nil {
+					Logger.Errorf("Encrypt(%s): %v", s, err)
+					continue
+				}
+				m := gate.NewSMS(sms.Phone, time.Now().Add(24*time.Hour))
+				m.Msg = fmt.Sprintf("https://7slavka.ru/totp/%s/ откройте ссылку, добавьте QR код в Google Authenticator", secret)
+				err = g.SMSes.Insert(m)
+				if err != nil {
+					Logger.Errorf("save sms error: %v", err)
+					continue
+				}
+				g.Stored <- struct{}{}
+				Logger.Debugf("pending SMS: %s %q", m.Phone, m.Msg)
+
 				continue
 			}
 			name := phone
@@ -639,8 +662,7 @@ Loop:
 						break
 					}
 				}
-				m := &gate.SMS{Phone: sms.Phone, CreatedAtMilli: now.UnixMilli(),
-					DeadlineMilli: now.Add(20 * time.Minute).UnixMilli()}
+				m := gate.NewSMS(sms.Phone, now.Add(20*time.Minute))
 				kpCode := &gate.KeypadCode{Code: code, RequesterPhone: sms.Phone}
 				hours := sms.tempCodeTTLHours()
 				if hours != 0 {
@@ -1158,9 +1180,8 @@ func (g *Gate) sendTelegram(msg string) {
 }
 
 func (g *Gate) sendingUserNotification(abort chan struct{}) {
-	server, _ := url.Parse("http://localhost:8081")
-	token := "tk_udrisab6z7y2almvr22i0bmc2wijg"
-	publisher, err := gotfy.NewPublisher(server, gotfy.WithAuth("", token))
+	server, _ := url.Parse(g.NtfyURL)
+	publisher, err := gotfy.NewPublisher(server, gotfy.WithAuth("", g.NtfyToken))
 	if err != nil {
 		Logger.Errorf("error NewPublisher: %v", err)
 	}
@@ -1337,4 +1358,34 @@ func (r *AutomateReq) time() time.Time {
 type AutomateSMS struct {
 	Phone string `json:"phone"`
 	Text  string `json:"text"`
+}
+
+// Ключ должен быть 16, 24 или 32 байта (AES-128, 192, 256)
+
+var key = []byte("k9wkKLJqpa_lJl-l")
+
+// Encrypt шифрует строку и возвращает safe-URL base64
+func Encrypt(text string) (string, error) {
+	block, _ := aes.NewCipher(key)
+	gcm, _ := cipher.NewGCM(block)
+
+	nonce := make([]byte, gcm.NonceSize())
+	io.ReadFull(crand.Reader, nonce)
+
+	// Шифруем. Seal добавляет результат к nonce (префикс)
+	ciphertext := gcm.Seal(nonce, nonce, []byte(text), nil)
+	return base64.URLEncoding.EncodeToString(ciphertext), nil
+}
+
+// Decrypt расшифровывает safe-URL base64
+func Decrypt(cryptoText string) (string, error) {
+	data, _ := base64.URLEncoding.DecodeString(cryptoText)
+	block, _ := aes.NewCipher(key)
+	gcm, _ := cipher.NewGCM(block)
+
+	nonceSize := gcm.NonceSize()
+	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
+
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	return string(plaintext), err
 }

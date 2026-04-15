@@ -149,6 +149,8 @@ func main() {
 	})
 	g.GateOpenNumber = cfg.GateOpenNumber
 	g.GateInfoNumber = cfg.GateInfoNumber
+	g.NtfyURL = cfg.NtfyURL
+	g.NtfyToken = cfg.NtfyToken
 	g.BLEPeriodSec = time.Duration(cfg.BLEPeriodSec)
 	g.RateWatcher = &tgsrv.RateWatcher{
 		Duration:         time.Duration(cfg.KeypadHitLimitDurationMinutes) * time.Minute,
@@ -216,6 +218,8 @@ type Config struct {
 	KeypadHitLimitDurationMinutes int64
 	KeypadThrottleMinutes         int64
 	KeypadReleased                bool
+	NtfyURL                       string
+	NtfyToken                     string
 }
 
 func stdinCredentials() (string, string) {

@@ -9,6 +9,7 @@ import (
 	"crypto/cipher"
 	crand "crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -404,7 +405,7 @@ Loop:
 			}
 			if sms.isTOTP() {
 				s := phone + time.Now().In(Location).Format("200601021504")[3:]
-				secret, err := Encrypt(s)
+				secret, err := encrypt(s)
 				if err != nil {
 					Logger.Errorf("Encrypt(%s): %v", s, err)
 					continue
@@ -1363,23 +1364,48 @@ type AutomateSMS struct {
 // Ключ должен быть 16, 24 или 32 байта (AES-128, 192, 256)
 
 var key = []byte("k9wkKLJqpa_lJl-l")
+var april2026 = time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
 
-// Encrypt шифрует строку и возвращает safe-URL base64
-func Encrypt(text string) (string, error) {
+func EncryptPhone(phone string, tm time.Time) (string, error) {
+	if len(phone) > 9 {
+		phone = phone[len(phone)-9:]
+	}
+	hours := tm.Sub(april2026) / time.Hour
+	return encrypt(phone + strconv.Itoa(int(hours)))
+}
+
+func encrypt(digits string) (string, error) {
+	num, err := strconv.ParseUint(digits, 10, 64)
+	if err != nil {
+		return "", err
+	}
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, num)
+
 	block, _ := aes.NewCipher(key)
 	gcm, _ := cipher.NewGCM(block)
-
 	nonce := make([]byte, gcm.NonceSize())
 	io.ReadFull(crand.Reader, nonce)
 
-	// Шифруем. Seal добавляет результат к nonce (префикс)
-	ciphertext := gcm.Seal(nonce, nonce, []byte(text), nil)
-	return base64.URLEncoding.EncodeToString(ciphertext), nil
+	ciphertext := gcm.Seal(nonce, nonce, buf, nil)
+
+	return base64.RawURLEncoding.EncodeToString(ciphertext), nil
 }
 
-// Decrypt расшифровывает safe-URL base64
-func Decrypt(cryptoText string) (string, error) {
-	data, _ := base64.URLEncoding.DecodeString(cryptoText)
+func DecryptPhone(cryptoText string) (string, time.Time, error) {
+	s, err := decrypt(cryptoText)
+	if err != nil {
+		return s, time.Time{}, err
+	}
+	months, err := strconv.Atoi(s[9:])
+	return "79" + s[:9], april2026.Add(time.Duration(months) * time.Hour), err
+}
+
+func decrypt(cryptoText string) (string, error) {
+	data, err := base64.RawURLEncoding.DecodeString(cryptoText)
+	if err != nil {
+		return "", err
+	}
 	block, _ := aes.NewCipher(key)
 	gcm, _ := cipher.NewGCM(block)
 
@@ -1387,5 +1413,11 @@ func Decrypt(cryptoText string) (string, error) {
 	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
 
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
-	return string(plaintext), err
+	if err != nil {
+		return "", err
+	}
+
+	// Конвертируем байты обратно в число, а число в строку
+	num := binary.BigEndian.Uint64(plaintext)
+	return strconv.Itoa(int(num)), nil // %016d сохранит ведущие нули
 }

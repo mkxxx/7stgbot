@@ -822,15 +822,13 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, totpPath) {
 		secret := strings.TrimSuffix(r.URL.Path[len(totpPath):], "/")
-		str, err := Decrypt(secret)
+		phone, tm, err := DecryptPhone(secret)
 		if err != nil {
 			http.Error(w, "wtf", http.StatusBadRequest)
 			Logger.Debugf("%s decrypt error: %v", r.URL.Path, err)
 			return
 		}
-		phone := str[:10]
-		tm := "202" + str[10:]
-		if tm < time.Now().Add(48*time.Hour).In(Location).Format("200601021504") {
+		if time.Since(tm) > 49*time.Hour {
 			http.Error(w, "ссылка просрочена. запросите новую", http.StatusBadRequest)
 			msg := fmt.Sprintf("%s ссылка просрочена %s %s", r.URL.Path, phone, tm)
 			Logger.Debugf(msg)

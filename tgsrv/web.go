@@ -1066,7 +1066,7 @@ func (s *webSrv) generateTOTPQRCodeImage(w http.ResponseWriter, phone string) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	Logger.Infof("QR for +7%s generated", phone)
+	Logger.Infof("QR for +%s generated", phone)
 	w.Header().Set("Content-Type", "image/png")
 	w.Write(png)
 }

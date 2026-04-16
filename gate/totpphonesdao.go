@@ -27,13 +27,13 @@ type TOTPPhonesDAO interface {
 }
 
 func NewTOTPPhones() TOTPPhonesDAO {
-	db, err := sql.Open("sqlite3", smsFile)
+	db, err := sql.Open("sqlite3", totpFile)
 	if err != nil {
-		Logger.Errorf("opening %s %v", smsFile, err)
+		Logger.Errorf("opening %s %v", totpFile, err)
 		return &NullTOTPPhones{}
 	}
 	if _, err := db.Exec(createSMSes); err != nil {
-		Logger.Errorf("creating table %s %v", smsFile, err)
+		Logger.Errorf("creating table %s %v", totpFile, err)
 		return &NullTOTPPhones{}
 	}
 	return &TOTPPhones{

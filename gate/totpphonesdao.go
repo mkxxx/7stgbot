@@ -6,8 +6,7 @@ import (
 
 const createTOTP string = `
   CREATE TABLE IF NOT EXISTS totp (
-  id INTEGER PRIMARY KEY,
-  phone TEXT NOT NULL,
+  phone TEXT PRIMARY KEY,
   created_at_ms int NOT NULL
   );`
 
@@ -18,7 +17,6 @@ type TOTPPhones struct {
 }
 
 type TOTPPhone struct {
-	ID             int
 	Phone          string
 	CreatedAtMilli int64
 }
@@ -44,7 +42,7 @@ func NewTOTPPhones() TOTPPhonesDAO {
 }
 
 func (s *TOTPPhones) Insert(p *TOTPPhone) error {
-	_, err := s.db.Exec("INSERT INTO totp (phone, created_at_ms) VALUES(?,?);",
+	_, err := s.db.Exec("INSERT OR IGNORE INTO totp (phone, created_at_ms) VALUES(?,?);",
 		p.Phone, p.CreatedAtMilli)
 	if err != nil {
 		return err
@@ -54,7 +52,7 @@ func (s *TOTPPhones) Insert(p *TOTPPhone) error {
 
 func (s *TOTPPhones) ListEndsWith(postfix string) ([]TOTPPhone, error) {
 	postfix = "%" + postfix
-	rows, err := s.db.Query("SELECT id, phone, created_at_ms FROM totp WHERE phone LIKE ?", postfix)
+	rows, err := s.db.Query("SELECT phone, created_at_ms FROM totp WHERE phone LIKE ?", postfix)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +61,7 @@ func (s *TOTPPhones) ListEndsWith(postfix string) ([]TOTPPhone, error) {
 	phones := []TOTPPhone{}
 	for rows.Next() {
 		phone := TOTPPhone{}
-		err = rows.Scan(&phone.ID, &phone.Phone, &phone.CreatedAtMilli)
+		err = rows.Scan(&phone.Phone, &phone.CreatedAtMilli)
 		if err != nil {
 			return nil, err
 		}

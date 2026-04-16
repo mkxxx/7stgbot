@@ -404,10 +404,9 @@ Loop:
 				continue
 			}
 			if sms.isTOTP() {
-				s := phone + time.Now().In(Location).Format("200601021504")[3:]
-				secret, err := encrypt(s)
+				secret, err := EncryptPhone(phone, time.Now())
 				if err != nil {
-					Logger.Errorf("Encrypt(%s): %v", s, err)
+					Logger.Errorf("Encrypt(%s, now): %v", phone, err)
 					continue
 				}
 				m := gate.NewSMS(sms.Phone, time.Now().Add(24*time.Hour))
@@ -1060,7 +1059,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		return Err429TooManyRequests
 	}
 	n := len(c.Code)
-	if strings.HasPrefix(c.Code, "0") {
+	if n <= 5 && strings.HasPrefix(c.Code, "0") {
 		if c.Code == "0000" {
 			g.sendUserNotification(fmt.Sprintf(`неизвесный гость ввел код %s "я приехал"`, c.Code))
 			return nil
@@ -1076,7 +1075,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		return Err400BadFormat
 
 	}
-	if n == 5 || n == 6 {
+	if n == 5 {
 		code, err := gate.Find(g.KeypadCodes, c.Code)
 		if err != nil {
 			Logger.Errorf("error finding kpcode %v", err)

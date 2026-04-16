@@ -32,7 +32,7 @@ func NewTOTPPhones() TOTPPhonesDAO {
 		Logger.Errorf("opening %s %v", totpFile, err)
 		return &NullTOTPPhones{}
 	}
-	if _, err := db.Exec(createSMSes); err != nil {
+	if _, err := db.Exec(createTOTP); err != nil {
 		Logger.Errorf("creating table %s %v", totpFile, err)
 		return &NullTOTPPhones{}
 	}

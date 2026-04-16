@@ -155,8 +155,7 @@ func main() {
 	g.RateWatcher = &tgsrv.RateWatcher{
 		Duration:         time.Duration(cfg.KeypadHitLimitDurationMinutes) * time.Minute,
 		ThrottleDuration: time.Duration(cfg.KeypadThrottleMinutes) * time.Minute}
-	g.RateWatcher.Init(cfg.KeypadHitLimit)
-	g.CallStore = tgsrv.NewCallStore()
+	g.RateWatcher.Init(cfg.KeypadHitLimit)	
 	g.PendingCalls = make(chan *gate.Call, 32)
 	g.PendingSMSes = make(chan *gate.SMS, 32)
 	g.SMSSession = make(map[int]*gate.SMS)

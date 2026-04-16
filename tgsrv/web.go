@@ -67,7 +67,6 @@ const (
 	gateOnSmsPath         = "/gate/sms/"
 	gateKeypadPath        = "/gate/keypad/"
 	logLevelPath          = "/app/log/"
-	genQRCodePath         = "/gate/qr/"
 	gateAutomateCallPath  = "/gate/automate/call/"
 	gateAutomateSMSPath   = "/gate/automate/sms/"
 	totpPath              = "/totp/"
@@ -405,16 +404,6 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			query.Get(paramNamePurpose),
 			query.Get(paramNameFio),
 		)
-		return
-	}
-	if strings.HasPrefix(r.URL.Path, genQRCodePath) {
-		phone := r.URL.Path[len(genQRCodePath):]
-		strings.TrimSuffix(phone, "/")
-		if len(phone) != 10 || !digitsRE.MatchString(phone) {
-			http.Error(w, "10 digits expected", http.StatusBadRequest)
-			return
-		}
-		s.generateTOTPQRCodeImage(w, phone)
 		return
 	}
 	if r.URL.Path == qreImgPath {
@@ -835,6 +824,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			s.gate.sendSystemNotification(msg)
 			return
 		}
+		s.generateTOTPQRCodeImage(w, phone)
 		return
 	}
 	Logger.Debugf("static resource %s", r.URL.Path)
@@ -1057,22 +1047,7 @@ func (s *webSrv) writeImage(w http.ResponseWriter, sum, purpose, lastName string
 }
 
 func (s *webSrv) generateTOTPQRCodeImage(w http.ResponseWriter, phone string) {
-	c, ok := s.gate.CallStore.Get("+7" + phone)
-	trueQR := false
-	if ok {
-		d := time.Since(c.time)
-		trueQR = c.cnt == 0 && d <= 30*time.Second
-		Logger.Infof("generate N %d TOTP QR: call %s was %ds ago", c.cnt, "+7"+phone, d/time.Second)
-		s.gate.CallStore.Increment("+7" + phone)
-	} else {
-		Logger.Infof("generate TOTP QR: call %s not found", "+7"+phone)
-	}
-	salt := ""
-	if trueQR {
-		salt = "SNT_Semislavka"
-	} else {
-		salt = strconv.FormatInt(time.Now().UnixNano()%1_000_000_000_000, 10)
-	}
+	salt := "SNT_Semislavka"
 	h := sha1.New()
 	h.Write([]byte(phone + salt))
 	hashBytes := h.Sum(nil)
@@ -1096,7 +1071,7 @@ func (s *webSrv) generateTOTPQRCodeImage(w http.ResponseWriter, phone string) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	Logger.Infof("%v QR for +7%s generated", trueQR, phone)
+	Logger.Infof("QR for +7%s generated", phone)
 	w.Header().Set("Content-Type", "image/png")
 	w.Write(png)
 }

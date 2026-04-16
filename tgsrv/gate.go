@@ -8,9 +8,11 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	crand "crypto/rand"
+	"crypto/sha1"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +32,8 @@ import (
 	"time"
 
 	"github.com/AnthonyHewins/gotfy"
+	"github.com/pquerna/otp"
+	"github.com/pquerna/otp/totp"
 )
 
 type Gate struct {
@@ -67,6 +71,7 @@ type Gate struct {
 	KeypadCodesRequests    chan *PhoneSms
 	SMSes                  gate.SMSesDAO
 	KeypadCodes            gate.KeypadCodesDAO
+	TOTPPhones             gate.TOTPPhonesDAO
 	SMSSession             map[int]*gate.SMS
 	Stored                 chan struct{}
 	TelegramNotification   chan *Notification
@@ -1099,24 +1104,24 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		}
 		return err
 	}
-	if len(c.Code) < 11 {
+	if len(c.Code) != 9 {
 		g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
 		return Err400BadFormat
 	}
-	phone := "7" + c.Code[len(c.Code)-10:]
+	totpCode := c.Code[len(c.Code)-6:]
+	phonePostfix := c.Code[:len(c.Code)-6]
+	phone := g.findTOTPPhoneByCode(phonePostfix, totpCode)
+	if phone == "" {
+		return Err403Forbidden
+	}
 	u, ok := g.Phones[phone]
 	if !ok {
-		g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s, phone not found", c.Code, c.timestampSent()))
-		return Err400BadFormat
-	}
-	plotNumber := c.Code[:len(c.Code)-10]
-	if !u.hasPlotNumber(plotNumber) {
-		g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s, phone and plot number mismatch", c.Code, c.timestampSent()))
-		return Err400BadFormat
+		g.sendSystemNotification(fmt.Sprintf("keypad code %s is valid totp code for %s, but phone is not found in gate register", c.Code, phone))
+		return Err403Forbidden
 	}
 	info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
 	if !g.allowed(phone) {
-		g.sendSystemNotification(fmt.Sprintf("keypad code restricted %s", info))
+		g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
 		return Err403Forbidden
 	}
 	err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code))
@@ -1126,6 +1131,40 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		g.sendSystemNotification(fmt.Sprintf("keypad code OK %s", info))
 	}
 	return err
+}
+
+func (g *Gate) findTOTPPhoneByCode(phonePostfix string, totpCode string) string {
+	totpPhones, err := g.TOTPPhones.ListEndsWith(phonePostfix)
+	if err != nil {
+		Logger.Errorf("error finding totp phone %v", err)
+		return ""
+	}
+	for _, p := range totpPhones {
+		valid, err := totp.ValidateCustom(totpCode, totpSecret(p.Phone), time.Now(), totp.ValidateOpts{
+			Period:    30, // стандарт для Google Authenticator
+			Skew:      1,  // позволяет код из прошлого или следующего 30-секундного интервала
+			Digits:    otp.DigitsSix,
+			Algorithm: otp.AlgorithmSHA1,
+		})
+		if err != nil {
+			Logger.Errorf("totp validation error %v", err)
+			continue
+		}
+		if valid {
+			return p.Phone
+		}
+	}
+	return ""
+}
+
+func totpSecret(phone string) string {
+	salt := "SNT_Semislavka"
+	h := sha1.New()
+	h.Write([]byte(phone + salt))
+	hashBytes := h.Sum(nil)
+	hashStr := hex.EncodeToString(hashBytes)
+	secret := hashStr[:16]
+	return secret
 }
 
 func (g *Gate) sendingSystemNotification(abort chan struct{}) {

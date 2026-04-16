@@ -161,6 +161,7 @@ func main() {
 	g.SMSSession = make(map[int]*gate.SMS)
 	g.SMSes = gate.NewSMSes()
 	g.KeypadCodes = gate.NewKeypadCodes()
+	g.TOTPPhones = gate.NewTOTPPhones()
 	g.Stored = make(chan struct{}, 8)
 	g.TelegramNotification = make(chan *tgsrv.Notification, 32)
 	g.NtfyNotification = make(chan *tgsrv.Notification, 32)

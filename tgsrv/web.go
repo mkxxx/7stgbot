@@ -1,11 +1,10 @@
 package tgsrv
 
 import (
+	"7stgbot/gate"
 	"bytes"
 	"context"
-	"crypto/sha1"
 	"encoding/csv"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -824,6 +823,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			s.gate.sendSystemNotification(msg)
 			return
 		}
+		s.gate.TOTPPhones.Insert(&gate.TOTPPhone{Phone: phone, CreatedAtMilli: time.Now().UnixMilli()})
 		s.generateTOTPQRCodeImage(w, phone)
 		return
 	}
@@ -1047,12 +1047,7 @@ func (s *webSrv) writeImage(w http.ResponseWriter, sum, purpose, lastName string
 }
 
 func (s *webSrv) generateTOTPQRCodeImage(w http.ResponseWriter, phone string) {
-	salt := "SNT_Semislavka"
-	h := sha1.New()
-	h.Write([]byte(phone + salt))
-	hashBytes := h.Sum(nil)
-	hashStr := hex.EncodeToString(hashBytes)
-	secret := hashStr[:16]
+	secret := totpSecret(phone)
 
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "СНТ Семиславка", // Название компании/приложения

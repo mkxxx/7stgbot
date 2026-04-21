@@ -209,7 +209,7 @@ type MattermostRequest struct {
 	ChannelName string `schema:"channel_name"`    // town-square
 	Command     string `schema:"command"`         // /totp_auth
 	ResponseUrl string `schema:"response_url"`    // https://mattermost.7slavka.ru/hooks/commands/nq4n1ha3fbny5krpy9zwty4n4o
-	TeamDomain  string `schema:"namteam_domaine"` // snt-semislavka
+	TeamDomain  string `schema:"team_domain"` // snt-semislavka
 	TeamId      string `schema:"team_id"`         // 838fra6nsi8tzfgnscwg98679a
 	Text        string `schema:"text"`
 	Token       string `schema:"token"`

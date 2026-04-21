@@ -205,12 +205,12 @@ func NewMattermostResponse(text string) *MattermostResponse {
 }
 
 type MattermostRequest struct {
-	ChannelId   string `schema:"channel_id"`      // 7u35jijrnjfsixujqdg9ifmt4o
-	ChannelName string `schema:"channel_name"`    // town-square
-	Command     string `schema:"command"`         // /totp_auth
-	ResponseUrl string `schema:"response_url"`    // https://mattermost.7slavka.ru/hooks/commands/nq4n1ha3fbny5krpy9zwty4n4o
-	TeamDomain  string `schema:"team_domain"` // snt-semislavka
-	TeamId      string `schema:"team_id"`         // 838fra6nsi8tzfgnscwg98679a
+	ChannelId   string `schema:"channel_id"`   // 7u35jijrnjfsixujqdg9ifmt4o
+	ChannelName string `schema:"channel_name"` // town-square
+	Command     string `schema:"command"`      // /totp_auth
+	ResponseUrl string `schema:"response_url"` // https://mattermost.7slavka.ru/hooks/commands/nq4n1ha3fbny5krpy9zwty4n4o
+	TeamDomain  string `schema:"team_domain"`  // snt-semislavka
+	TeamId      string `schema:"team_id"`      // 838fra6nsi8tzfgnscwg98679a
 	Text        string `schema:"text"`
 	Token       string `schema:"token"`
 	TriggerId   string `schema:"trigger_id"` // ZDM2c3o2dzRnM243aWtwM2NiZXRzcHN6NGg6cmRtejlyamF5dHJ0M2c3NGp0ZWY3NW9iZnI6MTc3Njc1NjYxNDk0MzpNRVFDSUdFTHVJNVZZenAveUhkV2ZRMklTYVdiSVcrdnh3ZDh5Zi9yS01aNjZVQjNBaUJxWGZabmdWbDJuWVcxbFFMQURNbGIvWFkxeHNUS1A5bW84MWZBQ3FJbGtnPT0%3D
@@ -891,6 +891,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			encoder.Encode(NewMattermostResponse("произошла ошибка"))
 			return
 		}
+		Logger.Infof("%s POST: %s", r.URL.Path, r.PostForm.Encode())
 		var req MattermostRequest
 		err = decoder.Decode(&req, r.PostForm)
 		if err != nil {

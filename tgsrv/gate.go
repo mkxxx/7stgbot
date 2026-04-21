@@ -57,8 +57,9 @@ type Gate struct {
 	PalesPortalUserToken   string
 	CfgDir                 string
 	palesLastLog           *PalesLogUser
-	lastOpened             time.Time
+	lastOpenedNotification time.Time
 	lastOpenCommandTime    atomic.Int64
+	lastOpenedTime         atomic.Int64
 	lastBLEOpenCommandTime map[string]time.Time
 	bleTimes               map[string]time.Time
 	GateOpenNumber         string
@@ -223,6 +224,7 @@ func (g *Gate) Init() {
 	g.bleTimes = make(map[string]time.Time)
 	g.palesLastLog = &PalesLogUser{}
 	g.lastOpenCommandTime = atomic.Int64{}
+	g.lastOpenedTime = atomic.Int64{}
 }
 
 type PalEsTimeGroups struct {
@@ -552,7 +554,8 @@ func (g *Gate) sendOpenCommandToGate(text string) error {
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(g.User, g.Password)
 
-	g.lastOpenCommandTime.Store(time.Now().Unix())
+	now := time.Now()
+	g.lastOpenCommandTime.Store(now.Unix())
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -565,6 +568,7 @@ func (g *Gate) sendOpenCommandToGate(text string) error {
 		Logger.Errorf("error calling gate %q: %d", url, resp.StatusCode)
 		return fmt.Errorf("http %d", resp.StatusCode)
 	}
+	g.updateLastOpenedTime(now)
 	Logger.Debugf("%q http %d", text, resp.StatusCode)
 	return err
 }
@@ -621,16 +625,30 @@ Loop:
 
 		case t := <-g.openedEvets:
 			//g.openCommandTime.Store(time.Now().Unix())
-			if time.Since(g.lastOpened) < 71*time.Second {
+			if time.Since(g.lastOpenedNotification) < 71*time.Second {
 				Logger.Debugf("gate opened %s", t.timestampSent())
 				continue
 			}
-			g.lastOpened = time.Now()
+			now := time.Now()
+			g.lastOpenedNotification = now
+			g.updateLastOpenedTime(now)
 			Logger.Infof("gate opened %s", t.timestampSent())
 			g.sendSystemNotification(fmt.Sprintf("gate opened %s", t.timestampSent()))
 
 		case <-abort:
 			break Loop
+		}
+	}
+}
+
+func (g *Gate) updateLastOpenedTime(now time.Time) {
+	for {
+		nanos := g.lastOpenedTime.Load()
+		if now.UnixNano() <= nanos {
+			break
+		}
+		if g.lastOpenedTime.CompareAndSwap(nanos, now.UnixNano()) {
+			break
 		}
 	}
 }
@@ -705,7 +723,7 @@ func (g *Gate) checkAndOpenOnBT(bt *BLETracking) {
 	if !ok {
 		return
 	}
-	if time.Since(g.lastOpened) < 71*time.Second {
+	if time.Since(g.lastOpenedNotification) < 71*time.Second {
 		return
 	}
 	// open gate and telegram message lag
@@ -908,6 +926,9 @@ func (g *Gate) loadPalesLogs(timeout time.Duration) int {
 	for _, l := range result.Log.List {
 		if l.Tm > maxLog.Tm {
 			maxLog = l
+		}
+		if l.Approved {
+			g.updateLastOpenedTime(time.Unix(l.Tm, 0))
 		}
 		if g.palesLastLog.UserId == l.UserId && g.palesLastLog.Tm == l.Tm && g.palesLastLog.Type == l.Type {
 			continue

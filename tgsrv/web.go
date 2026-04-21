@@ -36,39 +36,40 @@ import (
 )
 
 const (
-	paramNameSum          = "sum"
-	paramNameYear         = "yyyy"
-	paramNameMonth        = "mm"
-	paramNamePrevElectr   = "prev"
-	paramNameCurrElectr   = "curr"
-	paramNameDebt         = "debt"
-	paramNameFio          = "fio"
-	paramNameNumber       = "n"
-	paramNameHash         = "h"
-	paramNamePrevKey      = "prevyyyymmnumber"
-	paramNamePurpose      = "purpose"
-	paramNamePrice        = "price"
-	paramNameCoef         = "coef"
-	qrImgPath             = "/images/qr.jpg"
-	qreImgPath            = "/images/qre.jpg"
-	qrcImgPath            = "/images/qrc.jpg"
-	qrPath                = "/docs/qr/"
-	payPath               = "/docs/оплата/"
-	payElectrPath         = "/docs/оплата-эл/"
-	contactsPath          = "/docs/contacts/"
-	internetPath          = "/docs/internet/"
-	internetElectrCSVPath = "/docs/electr.csv/"
-	internetDocsPath      = "/docs/"
-	blePath               = "/ble/"
-	ble2Path              = "/ble2/"
-	gateOnCallPath        = "/gate/call/"
-	gateOpenedPath        = "/gate/opened/"
-	gateOnSmsPath         = "/gate/sms/"
-	gateKeypadPath        = "/gate/keypad/"
-	logLevelPath          = "/app/log/"
-	gateAutomateCallPath  = "/gate/automate/call/"
-	gateAutomateSMSPath   = "/gate/automate/sms/"
-	totpPath              = "/totp/"
+	paramNameSum               = "sum"
+	paramNameYear              = "yyyy"
+	paramNameMonth             = "mm"
+	paramNamePrevElectr        = "prev"
+	paramNameCurrElectr        = "curr"
+	paramNameDebt              = "debt"
+	paramNameFio               = "fio"
+	paramNameNumber            = "n"
+	paramNameHash              = "h"
+	paramNamePrevKey           = "prevyyyymmnumber"
+	paramNamePurpose           = "purpose"
+	paramNamePrice             = "price"
+	paramNameCoef              = "coef"
+	qrImgPath                  = "/images/qr.jpg"
+	qreImgPath                 = "/images/qre.jpg"
+	qrcImgPath                 = "/images/qrc.jpg"
+	qrPath                     = "/docs/qr/"
+	payPath                    = "/docs/оплата/"
+	payElectrPath              = "/docs/оплата-эл/"
+	contactsPath               = "/docs/contacts/"
+	internetPath               = "/docs/internet/"
+	internetElectrCSVPath      = "/docs/electr.csv/"
+	internetDocsPath           = "/docs/"
+	blePath                    = "/ble/"
+	ble2Path                   = "/ble2/"
+	gateOnCallPath             = "/gate/call/"
+	gateOpenedPath             = "/gate/opened/"
+	gateOnSmsPath              = "/gate/sms/"
+	gateKeypadPath             = "/gate/keypad/"
+	logLevelPath               = "/app/log/"
+	gateAutomateCallPath       = "/gate/automate/call/"
+	gateAutomateSMSPath        = "/gate/automate/sms/"
+	gateMattermostTotpAuthPath = "/gate/mm_totp_auth/"
+	totpPath                   = "/totp/"
 
 	site = "https://7slavka.ru"
 
@@ -330,11 +331,11 @@ func (s *webSrv) start(port int) {
 
 func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == payPath {
-		if r.Method == "GET" {
+		if r.Method == http.MethodGet {
 			s.servePayTemplate(w, r)
 			return
 		}
-		if r.Method == "POST" {
+		if r.Method == http.MethodPost {
 			// Call ParseForm() to parse the raw query and update r.PostForm and r.Form.
 			if err := r.ParseForm(); err != nil {
 				Logger.Errorf("ParseForm() err: %v", err)
@@ -352,11 +353,11 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == payElectrPath {
-		if r.Method == "GET" {
+		if r.Method == http.MethodGet {
 			s.servePayElectrTemplate(w, r)
 			return
 		}
-		if r.Method == "POST" {
+		if r.Method == http.MethodPost {
 			// Call ParseForm() to parse the raw query and update r.PostForm and r.Form.
 			if err := r.ParseForm(); err != nil {
 				Logger.Errorf("ParseForm() err: %v", err)
@@ -390,7 +391,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == qrPath {
-		if r.Method == "GET" {
+		if r.Method == http.MethodGet {
 			s.serveQRTemplate(w, r)
 			return
 		}
@@ -537,7 +538,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == blePath {
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
@@ -568,7 +569,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == ble2Path {
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
@@ -596,7 +597,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == gateOnCallPath {
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
@@ -621,7 +622,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == gateOnSmsPath {
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
@@ -646,7 +647,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == gateOpenedPath {
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
@@ -667,7 +668,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == logLevelPath {
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
@@ -695,7 +696,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == gateKeypadPath {
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
@@ -733,7 +734,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == gateAutomateCallPath {
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
@@ -751,7 +752,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if r.URL.Path == gateAutomateSMSPath {
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
@@ -816,15 +817,36 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			Logger.Debugf("%s decrypt error: %v", r.URL.Path, err)
 			return
 		}
-		if time.Since(tm) > 49*time.Hour {
-			http.Error(w, "ссылка просрочена. запросите новую", http.StatusBadRequest)
-			msg := fmt.Sprintf("%s ссылка просрочена %s %s", r.URL.Path, phone, tm)
+		if time.Since(tm) > time.Hour {
+			http.Error(w, "ссылка просрочена (срок 1 час). запросите новую", http.StatusBadRequest)
+			msg := fmt.Sprintf("%s ссылка просрочена (срок 1 час) %s %s", r.URL.Path, phone, tm)
 			Logger.Debugf(msg)
 			s.gate.sendSystemNotification(msg)
 			return
 		}
 		s.gate.TOTPPhones.Insert(&gate.TOTPPhone{Phone: phone, CreatedAtMilli: time.Now().UnixMilli()})
 		s.generateTOTPQRCodeImage(w, phone)
+		return
+	}
+	if r.URL.Path == gateMattermostTotpAuthPath {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Resource not found", http.StatusNotFound)
+			return
+		}
+		defer r.Body.Close()
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		encoder := json.NewEncoder(w)
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+			encoder.Encode(NewMMTOTPResponse("произошла ошибка"))
+		} else {
+			Logger.Debugf("%s POST: %q", r.URL.Path, string(bodyBytes))
+			encoder.Encode(NewMMTOTPResponse("OK"))
+		}
 		return
 	}
 	Logger.Debugf("static resource %s", r.URL.Path)
@@ -1504,7 +1526,7 @@ func (ws *webSrv) loadSntClubUsers() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET",
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		"https://file.sntclub.ru/upload/downloadfiles/5a6/45y97kpixruiqkj6fkigsqxpo571e24m/Registry_people_07-04-2026.xlsx", nil)
 
 	if err != nil {
@@ -1559,5 +1581,34 @@ func (ws *webSrv) loadSntClubUsers() {
 			Logger.Errorf("writing %d row to %s: %v", i, fname, err)
 			return
 		}
+	}
+}
+
+/*
+	"props": {
+	    "test_data": {
+	        "ios": 78,
+	        "server": 948,
+	        "web": 123
+	    }
+	},
+*/
+type MMTOTPResponse struct {
+	ResponseType   string `json:"response_type"` // "in_channel"
+	Text           string `json:"text"`
+	Username       string `json:"username"` // anjella
+	IconUrl        string `json:"icon_url"` // https://7slavka.ru/images/anjella.png
+	ExtraResponses []struct {
+		Text     string `json:"text"`
+		Username string `json:"username"` // anjella
+	} `json:"company_id"`
+}
+
+func NewMMTOTPResponse(text string) *MMTOTPResponse {
+	return &MMTOTPResponse{
+		ResponseType: "in_channel",
+		Text:         text,
+		Username:     "anjella",
+		IconUrl:      "https://7slavka.ru/images/anjella.png",
 	}
 }

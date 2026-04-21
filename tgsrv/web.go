@@ -88,6 +88,10 @@ const (
 	QRNameSum      = "Sum"      // <= 18
 	QRNameLastName = "LastName" // <= 18
 	QRNamePayeeINN = "PayeeINN" // <= 12
+
+	mattermostCommandResponseUsername = "anjella"
+	mattermostCommandResponseIconUrl  = "https://7slavka.ru/images/anjella.png"
+	systemBotId                       = "f1bkn94xnfyutngcbphnzt18zr"
 )
 
 var digitsRE = regexp.MustCompile(`^[0-9]+$`)
@@ -199,8 +203,8 @@ func NewMattermostResponse(text string) *MattermostResponse {
 	return &MattermostResponse{
 		ResponseType: "in_channel",
 		Text:         text,
-		Username:     "anjella",
-		IconUrl:      "https://7slavka.ru/images/anjella.png",
+		Username:     mattermostCommandResponseUsername,
+		IconUrl:      mattermostCommandResponseIconUrl,
 	}
 }
 
@@ -216,6 +220,12 @@ type MattermostRequest struct {
 	TriggerId   string `schema:"trigger_id"` // ZDM2c3o2dzRnM243aWtwM2NiZXRzcHN6NGg6cmRtejlyamF5dHJ0M2c3NGp0ZWY3NW9iZnI6MTc3Njc1NjYxNDk0MzpNRVFDSUdFTHVJNVZZenAveUhkV2ZRMklTYVdiSVcrdnh3ZDh5Zi9yS01aNjZVQjNBaUJxWGZabmdWbDJuWVcxbFFMQURNbGIvWFkxeHNUS1A5bW84MWZBQ3FJbGtnPT0%3D
 	UserId      string `schema:"user_id"`    // rdmz9rjaytrt3g74jtef75obfr
 	UserName    string `schema:"user_name"`  // michael
+}
+
+func (r *MattermostRequest) systemBotDirectMessage() bool {
+	const template = "%s__%s"
+	return r.ChannelName == fmt.Sprintf(template, systemBotId, r.UserId) ||
+		r.ChannelName == fmt.Sprintf(template, r.UserId, systemBotId)
 }
 
 func init() {
@@ -905,6 +915,10 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if req.Command == "/totp_auth" {
+			if !req.systemBotDirectMessage() {
+				encoder.Encode(NewMattermostResponse("напишите это сообщение system-bot"))
+				return
+			}
 			encoder.Encode(NewMattermostResponse("OK"))
 		}
 		return

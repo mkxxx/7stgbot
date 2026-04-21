@@ -30,46 +30,47 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/gorilla/schema"
 	"github.com/pquerna/otp/totp"
 	"github.com/skip2/go-qrcode"
 	"github.com/xuri/excelize/v2"
 )
 
 const (
-	paramNameSum               = "sum"
-	paramNameYear              = "yyyy"
-	paramNameMonth             = "mm"
-	paramNamePrevElectr        = "prev"
-	paramNameCurrElectr        = "curr"
-	paramNameDebt              = "debt"
-	paramNameFio               = "fio"
-	paramNameNumber            = "n"
-	paramNameHash              = "h"
-	paramNamePrevKey           = "prevyyyymmnumber"
-	paramNamePurpose           = "purpose"
-	paramNamePrice             = "price"
-	paramNameCoef              = "coef"
-	qrImgPath                  = "/images/qr.jpg"
-	qreImgPath                 = "/images/qre.jpg"
-	qrcImgPath                 = "/images/qrc.jpg"
-	qrPath                     = "/docs/qr/"
-	payPath                    = "/docs/оплата/"
-	payElectrPath              = "/docs/оплата-эл/"
-	contactsPath               = "/docs/contacts/"
-	internetPath               = "/docs/internet/"
-	internetElectrCSVPath      = "/docs/electr.csv/"
-	internetDocsPath           = "/docs/"
-	blePath                    = "/ble/"
-	ble2Path                   = "/ble2/"
-	gateOnCallPath             = "/gate/call/"
-	gateOpenedPath             = "/gate/opened/"
-	gateOnSmsPath              = "/gate/sms/"
-	gateKeypadPath             = "/gate/keypad/"
-	logLevelPath               = "/app/log/"
-	gateAutomateCallPath       = "/gate/automate/call/"
-	gateAutomateSMSPath        = "/gate/automate/sms/"
-	gateMattermostTotpAuthPath = "/gate/mm_totp_auth/"
-	totpPath                   = "/totp/"
+	paramNameSum              = "sum"
+	paramNameYear             = "yyyy"
+	paramNameMonth            = "mm"
+	paramNamePrevElectr       = "prev"
+	paramNameCurrElectr       = "curr"
+	paramNameDebt             = "debt"
+	paramNameFio              = "fio"
+	paramNameNumber           = "n"
+	paramNameHash             = "h"
+	paramNamePrevKey          = "prevyyyymmnumber"
+	paramNamePurpose          = "purpose"
+	paramNamePrice            = "price"
+	paramNameCoef             = "coef"
+	qrImgPath                 = "/images/qr.jpg"
+	qreImgPath                = "/images/qre.jpg"
+	qrcImgPath                = "/images/qrc.jpg"
+	qrPath                    = "/docs/qr/"
+	payPath                   = "/docs/оплата/"
+	payElectrPath             = "/docs/оплата-эл/"
+	contactsPath              = "/docs/contacts/"
+	internetPath              = "/docs/internet/"
+	internetElectrCSVPath     = "/docs/electr.csv/"
+	internetDocsPath          = "/docs/"
+	blePath                   = "/ble/"
+	ble2Path                  = "/ble2/"
+	gateOnCallPath            = "/gate/call/"
+	gateOpenedPath            = "/gate/opened/"
+	gateOnSmsPath             = "/gate/sms/"
+	gateKeypadPath            = "/gate/keypad/"
+	logLevelPath              = "/app/log/"
+	gateAutomateCallPath      = "/gate/automate/call/"
+	gateAutomateSMSPath       = "/gate/automate/sms/"
+	gateMattermostCommandPath = "/gate/mmcommand/"
+	totpPath                  = "/totp/"
 
 	site = "https://7slavka.ru"
 
@@ -170,6 +171,51 @@ type KeypadCode struct {
 
 func (t *KeypadCode) timestampSent() string {
 	return time.Unix(t.Time, 0).In(Location).Format("2006-01-02 15:04:05")
+}
+
+var decoder = schema.NewDecoder()
+
+/*
+	"props": {
+	    "test_data": {
+	        "ios": 78,
+	        "server": 948,
+	        "web": 123
+	    }
+	},
+*/
+type MattermostResponse struct {
+	ResponseType   string `json:"response_type"` // "in_channel"
+	Text           string `json:"text"`
+	Username       string `json:"username"` // anjella
+	IconUrl        string `json:"icon_url"` // https://7slavka.ru/images/anjella.png
+	ExtraResponses []struct {
+		Text     string `json:"text"`
+		Username string `json:"username"` // anjella
+	} `json:"company_id"`
+}
+
+func NewMattermostResponse(text string) *MattermostResponse {
+	return &MattermostResponse{
+		ResponseType: "in_channel",
+		Text:         text,
+		Username:     "anjella",
+		IconUrl:      "https://7slavka.ru/images/anjella.png",
+	}
+}
+
+type MattermostRequest struct {
+	ChannelId   string `schema:"channel_id"`      // 7u35jijrnjfsixujqdg9ifmt4o
+	ChannelName string `schema:"channel_name"`    // town-square
+	Command     string `schema:"command"`         // /totp_auth
+	ResponseUrl string `schema:"response_url"`    // https://mattermost.7slavka.ru/hooks/commands/nq4n1ha3fbny5krpy9zwty4n4o
+	TeamDomain  string `schema:"namteam_domaine"` // snt-semislavka
+	TeamId      string `schema:"team_id"`         // 838fra6nsi8tzfgnscwg98679a
+	Text        string `schema:"text"`
+	Token       string `schema:"token"`
+	TriggerId   string `schema:"trigger_id"` // ZDM2c3o2dzRnM243aWtwM2NiZXRzcHN6NGg6cmRtejlyamF5dHJ0M2c3NGp0ZWY3NW9iZnI6MTc3Njc1NjYxNDk0MzpNRVFDSUdFTHVJNVZZenAveUhkV2ZRMklTYVdiSVcrdnh3ZDh5Zi9yS01aNjZVQjNBaUJxWGZabmdWbDJuWVcxbFFMQURNbGIvWFkxeHNUS1A5bW84MWZBQ3FJbGtnPT0%3D
+	UserId      string `schema:"user_id"`    // rdmz9rjaytrt3g74jtef75obfr
+	UserName    string `schema:"user_name"`  // michael
 }
 
 func init() {
@@ -828,24 +874,37 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		s.generateTOTPQRCodeImage(w, phone)
 		return
 	}
-	if r.URL.Path == gateMattermostTotpAuthPath {
+	if r.URL.Path == gateMattermostCommandPath {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Resource not found", http.StatusNotFound)
 			return
 		}
 		defer r.Body.Close()
-		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		encoder := json.NewEncoder(w)
-		bodyBytes, err := io.ReadAll(r.Body)
+
+		err := r.ParseForm()
 		if err != nil {
-			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
-			encoder.Encode(NewMMTOTPResponse("произошла ошибка"))
-		} else {
-			Logger.Debugf("%s POST: %q", r.URL.Path, string(bodyBytes))
-			encoder.Encode(NewMMTOTPResponse("OK"))
+			Logger.Errorf("%s cannot read form %v", r.URL.Path, err)
+			encoder.Encode(NewMattermostResponse("произошла ошибка"))
+			return
+		}
+		var req MattermostRequest
+		err = decoder.Decode(&req, r.PostForm)
+		if err != nil {
+			Logger.Errorf("%s cannot read form %v", r.URL.Path, err)
+			encoder.Encode(NewMattermostResponse("произошла ошибка"))
+			return
+		}
+		if req.Token != "pbegqjtqu78w8nx5fw19sk6egc" {
+			Logger.Infof("%s bad token", r.URL.Path)
+			http.Error(w, "wtf", http.StatusBadRequest)
+			return
+		}
+		if req.Command == "/totp_auth" {
+			encoder.Encode(NewMattermostResponse("OK"))
 		}
 		return
 	}
@@ -1581,34 +1640,5 @@ func (ws *webSrv) loadSntClubUsers() {
 			Logger.Errorf("writing %d row to %s: %v", i, fname, err)
 			return
 		}
-	}
-}
-
-/*
-	"props": {
-	    "test_data": {
-	        "ios": 78,
-	        "server": 948,
-	        "web": 123
-	    }
-	},
-*/
-type MMTOTPResponse struct {
-	ResponseType   string `json:"response_type"` // "in_channel"
-	Text           string `json:"text"`
-	Username       string `json:"username"` // anjella
-	IconUrl        string `json:"icon_url"` // https://7slavka.ru/images/anjella.png
-	ExtraResponses []struct {
-		Text     string `json:"text"`
-		Username string `json:"username"` // anjella
-	} `json:"company_id"`
-}
-
-func NewMMTOTPResponse(text string) *MMTOTPResponse {
-	return &MMTOTPResponse{
-		ResponseType: "in_channel",
-		Text:         text,
-		Username:     "anjella",
-		IconUrl:      "https://7slavka.ru/images/anjella.png",
 	}
 }

@@ -74,6 +74,7 @@ type Gate struct {
 	SMSes                  gate.SMSesDAO
 	KeypadCodes            gate.KeypadCodesDAO
 	TOTPPhones             gate.TOTPPhonesDAO
+	MattermostUsers        gate.MattermostUsersDAO
 	SMSSession             map[int]*gate.SMS
 	Stored                 chan struct{}
 	TelegramNotification   chan *Notification
@@ -684,7 +685,7 @@ Loop:
 					}
 				}
 				m := gate.NewSMS(sms.Phone, now.Add(20*time.Minute))
-				kpCode := &gate.KeypadCode{Code: code, RequesterPhone: sms.Phone}
+				kpCode := &gate.KeypadCode{Code: code, RequesterPhone: sms.Phone, CreatedTimeMilli: time.Now().UnixMilli()}
 				hours := sms.tempCodeTTLHours()
 				if hours != 0 {
 					kpCode.TTLMinutes = hours * 60

@@ -10,8 +10,6 @@ const createTOTP string = `
   created_at_ms int NOT NULL
   );`
 
-const totpFile string = "totp.db"
-
 type TOTPPhones struct {
 	db *sql.DB
 }
@@ -26,14 +24,12 @@ type TOTPPhonesDAO interface {
 	Insert(p *TOTPPhone) error
 }
 
-func NewTOTPPhones() TOTPPhonesDAO {
-	db, err := sql.Open("sqlite3", totpFile)
-	if err != nil {
-		Logger.Errorf("opening %s %v", totpFile, err)
+func NewTOTPPhones(db *sql.DB) TOTPPhonesDAO {
+	if db == nil {
 		return &NullTOTPPhones{}
 	}
 	if _, err := db.Exec(createTOTP); err != nil {
-		Logger.Errorf("creating table %s %v", totpFile, err)
+		Logger.Errorf("creating table totp %v", err)
 		return &NullTOTPPhones{}
 	}
 	return &TOTPPhones{

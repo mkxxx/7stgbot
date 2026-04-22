@@ -10,23 +10,23 @@ const createKeypadCodes string = `
   id INTEGER PRIMARY KEY,
   code TEXT NOT NULL,
   req_phone TEXT NOT NULL,
+  created_at_ms int NOT NULL,
   end_time_ms int,
   ttl_min int
   );`
-
-const keypadCodesFile string = "kpcodes.db"
 
 type KeypadCodes struct {
 	db *sql.DB
 }
 
-	// TODO add created time
+// TODO add created time
 type KeypadCode struct {
-	ID             int
-	Code           string
-	RequesterPhone string
-	EndTimeMilli   int64
-	TTLMinutes     int
+	ID               int
+	Code             string
+	RequesterPhone   string
+	CreatedTimeMilli int64
+	EndTimeMilli     int64
+	TTLMinutes       int
 }
 
 func (s *KeypadCode) Temporal() bool {
@@ -47,15 +47,12 @@ type KeypadCodesDAO interface {
 	Update(p *KeypadCode) error
 }
 
-func NewKeypadCodes() KeypadCodesDAO {
-	file := keypadCodesFile
-	db, err := sql.Open("sqlite3", file)
-	if err != nil {
-		Logger.Errorf("opening %s %v", file, err)
+func NewKeypadCodes(db *sql.DB) KeypadCodesDAO {
+	if db == nil {
 		return &NullKeypadCodes{}
 	}
 	if _, err := db.Exec(createKeypadCodes); err != nil {
-		Logger.Errorf("creating table %s %v", file, err)
+		Logger.Errorf("creating table kpcodes %v", err)
 		return &NullKeypadCodes{}
 	}
 	return &KeypadCodes{
@@ -64,8 +61,8 @@ func NewKeypadCodes() KeypadCodesDAO {
 }
 
 func (s *KeypadCodes) Insert(p *KeypadCode) error {
-	_, err := s.db.Exec("INSERT INTO kpcodes (code, req_phone, end_time_ms, ttl_min) VALUES(?,?,?,?);",
-		p.Code, p.RequesterPhone, p.EndTimeMilli, p.TTLMinutes)
+	_, err := s.db.Exec("INSERT INTO kpcodes (code, req_phone, created_at_ms, end_time_ms, ttl_min) VALUES(?,?,?,?,?);",
+		p.Code, p.RequesterPhone, p.CreatedTimeMilli, p.EndTimeMilli, p.TTLMinutes)
 	if err != nil {
 		return err
 	}
@@ -83,7 +80,7 @@ func (s *KeypadCodes) Update(p *KeypadCode) error {
 
 func (s *KeypadCodes) ListActive() ([]KeypadCode, error) {
 	now := time.Now().UnixMilli()
-	rows, err := s.db.Query("SELECT id, code, req_phone, end_time_ms, ttl_min FROM kpcodes WHERE end_time_ms > ? || end_time_ms == 0", now)
+	rows, err := s.db.Query("SELECT id, code, req_phone, created_at_ms, end_time_ms, ttl_min FROM kpcodes WHERE end_time_ms > ? || end_time_ms == 0", now)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +89,7 @@ func (s *KeypadCodes) ListActive() ([]KeypadCode, error) {
 	codes := []KeypadCode{}
 	for rows.Next() {
 		code := KeypadCode{}
-		err = rows.Scan(&code.ID, &code.Code, &code.RequesterPhone, &code.EndTimeMilli, &code.TTLMinutes)
+		err = rows.Scan(&code.ID, &code.Code, &code.RequesterPhone, &code.CreatedTimeMilli, &code.EndTimeMilli, &code.TTLMinutes)
 		if err != nil {
 			return nil, err
 		}

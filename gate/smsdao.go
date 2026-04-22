@@ -19,8 +19,6 @@ const createSMSes string = `
   msg TEXT NOT NULL
   );`
 
-const smsFile string = "sms.db"
-
 type SMSes struct {
 	db *sql.DB
 }
@@ -55,14 +53,12 @@ type SMSesDAO interface {
 	Update(p *SMS) error
 }
 
-func NewSMSes() SMSesDAO {
-	db, err := sql.Open("sqlite3", smsFile)
-	if err != nil {
-		Logger.Errorf("opening %s %v", smsFile, err)
+func NewSMSes(db *sql.DB) SMSesDAO {
+	if db == nil {
 		return &NullSMSes{}
 	}
 	if _, err := db.Exec(createSMSes); err != nil {
-		Logger.Errorf("creating table %s %v", smsFile, err)
+		Logger.Errorf("creating table sms %v", err)
 		return &NullSMSes{}
 	}
 	return &SMSes{

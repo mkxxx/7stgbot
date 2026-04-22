@@ -211,7 +211,7 @@ func NewMattermostResponse(text string) *MattermostResponse {
 type MattermostRequest struct {
 	ChannelId   string `schema:"channel_id"`   // 7u35jijrnjfsixujqdg9ifmt4o
 	ChannelName string `schema:"channel_name"` // town-square
-	Command     string `schema:"command"`      // /totp_auth
+	Command     string `schema:"command"`      // /7_totp_auth
 	ResponseUrl string `schema:"response_url"` // https://mattermost.7slavka.ru/hooks/commands/nq4n1ha3fbny5krpy9zwty4n4o
 	TeamDomain  string `schema:"team_domain"`  // snt-semislavka
 	TeamId      string `schema:"team_id"`      // 838fra6nsi8tzfgnscwg98679a
@@ -914,12 +914,26 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "wtf", http.StatusBadRequest)
 			return
 		}
-		if req.Command == "/totp_auth" {
+		if req.Command == "/7_totp_auth" {
 			// if !req.systemBotDirectMessage() {encoder.Encode(NewMattermostResponse("напишите это сообщение system-bot"))
 			text := strings.TrimSpace(req.Text)
+			if text == "" {
+				u, err := s.gate.MattermostUsers.Find(req.UserId)
+				if err != nil {
+					Logger.Errorf("db error: %v", err)
+					encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
+					return
+				}
+				if u != nil {
+					encoder.Encode(NewMattermostResponse(fmt.Sprintf(
+						"Ваш подтвержденный номер телефона %s", maskPhone(u.Phone))))
+					return
+				}
+			}
 			i := strings.LastIndex(text, " ")
 			if i < 0 {
-				responseTotpauthCommandFormat(encoder, req)
+				encoder.Encode(NewMattermostResponse(fmt.Sprintf(
+					"формат команды: %s <номер телефона> <код totp>  например: %s 79990010203 123456", req.Command, req.Command)))
 				return
 			}
 			phone := text[:i]
@@ -960,17 +974,36 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 				encoder.Encode(NewMattermostResponse("неверный код TOTP"))
 				return
 			}
-			encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден. Вам доступен функционал авторизованного пользоваеля."))
+			u, err := s.gate.MattermostUsers.Find(req.UserId)
+			if err != nil {
+				Logger.Errorf("db error: %v", err)
+				encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
+				return
+			}
+			if u == nil {
+				err = s.gate.MattermostUsers.Insert(&gate.MattermostUser{UserId: req.UserId, Phone: phone})
+				if err != nil {
+					Logger.Errorf("db error: %v", err)
+					encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
+					return
+				}
+				encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден. Вам доступен функционал авторизованного пользоваеля."))
+				return
+			}
+			if u.Phone == phone {
+				encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден (повторно). Вам доступен функционал авторизованного пользоваеля."))
+				return
+			}
+			u.Phone = phone
+			s.gate.MattermostUsers.Update(u)
+			encoder.Encode(NewMattermostResponse("Ваш номер телефона изменен."))
+			return
 		}
+		Logger.Warnf("unknown mattermost command: %s", req.Command)
 		return
 	}
 	Logger.Debugf("static resource %s", r.URL.Path)
 	s.staticHandler.ServeHTTP(w, r)
-}
-
-func responseTotpauthCommandFormat(encoder *json.Encoder, req MattermostRequest) {
-	encoder.Encode(NewMattermostResponse(fmt.Sprintf(
-		"формат команды: %s <номер телефона> <код totp>  например: %s 79990010203 123456", req.Command, req.Command)))
 }
 
 func QRURL(year string, month string, plotNumber string) string {

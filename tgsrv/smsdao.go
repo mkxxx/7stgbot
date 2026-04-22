@@ -14,8 +14,6 @@ const createSMSes string = `
   msg TEXT NOT NULL
   );`
 
-const smsFile string = "smses.db"
-
 type SMSes struct {
 	db *sql.DB
 }
@@ -28,12 +26,9 @@ type SMS struct {
 	SentAt    int64
 }
 
-func NewSMSes() (*SMSes, error) {
-	db, err := sql.Open("sqlite3", smsFile)
-	if err != nil {
-		return nil, err
-	}
+func NewSMSes(db *sql.DB) (*SMSes, error) {
 	if _, err := db.Exec(createSMSes); err != nil {
+		Logger.Errorf("create smses table error: %v", err)
 		return nil, err
 	}
 	return &SMSes{

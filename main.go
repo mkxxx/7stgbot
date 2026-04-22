@@ -4,6 +4,7 @@ import (
 	"7stgbot/gate"
 	"7stgbot/tgsrv"
 	"bufio"
+	"database/sql"
 	"encoding/csv"
 	"flag"
 	"fmt"
@@ -34,6 +35,7 @@ var (
 	user    string
 	pwd     string
 )
+var db *sql.DB
 
 func main() {
 	flag.StringVar(&logfile, "logfile", "7stgbot.log", "log file")
@@ -81,6 +83,13 @@ func main() {
 	defer logger.Sync()
 
 	log.SetOutput(w)
+
+	var err error
+	const dbName = "gate.db"
+	db, err = sql.Open("sqlite3", dbName)
+	if err != nil {
+		logger.Errorf("open %s error: %v", dbName, err)
+	}
 
 	var emailClient *tgsrv.EmailClient
 	var u, p string
@@ -155,13 +164,14 @@ func main() {
 	g.RateWatcher = &tgsrv.RateWatcher{
 		Duration:         time.Duration(cfg.KeypadHitLimitDurationMinutes) * time.Minute,
 		ThrottleDuration: time.Duration(cfg.KeypadThrottleMinutes) * time.Minute}
-	g.RateWatcher.Init(cfg.KeypadHitLimit)	
+	g.RateWatcher.Init(cfg.KeypadHitLimit)
 	g.PendingCalls = make(chan *gate.Call, 32)
 	g.PendingSMSes = make(chan *gate.SMS, 32)
 	g.SMSSession = make(map[int]*gate.SMS)
-	g.SMSes = gate.NewSMSes()
-	g.KeypadCodes = gate.NewKeypadCodes()
-	g.TOTPPhones = gate.NewTOTPPhones()
+	g.SMSes = gate.NewSMSes(db)
+	g.KeypadCodes = gate.NewKeypadCodes(db)
+	g.TOTPPhones = gate.NewTOTPPhones(db)
+	g.MattermostUsers = gate.NewMattermostUsers(db)
 	g.Stored = make(chan struct{}, 8)
 	g.TelegramNotification = make(chan *tgsrv.Notification, 32)
 	g.NtfyNotification = make(chan *tgsrv.Notification, 32)
@@ -180,7 +190,7 @@ func main() {
 		<-abort
 	} else {
 		err := tgsrv.RunBot(cfg.TgToken, abort, ws, emailClient, cfg.IfTTTKey, cfg.AdminPhone, cfg.AdminEmails,
-			cfg.SMSRateLimiter)
+			cfg.SMSRateLimiter, db)
 		if err != nil {
 			logger.Error(err)
 		}

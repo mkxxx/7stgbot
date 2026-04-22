@@ -1,6 +1,7 @@
 package tgsrv
 
 import (
+	"database/sql"
 	"fmt"
 	"strconv"
 	"strings"
@@ -66,7 +67,7 @@ func (r *Rate) rateNano() time.Duration {
 }
 
 func RunBot(token string, abort chan struct{}, ws *webSrv, emailClient *EmailClient, iftttKey string,
-	adminPhone string, adminEmails []string, SMSRateLimiter []Rate) error {
+	adminPhone string, adminEmails []string, SMSRateLimiter []Rate, db *sql.DB) error {
 
 	Logger.Infof("starting tg bot")
 	b := TGBot{abort: abort, ws: ws, emailClient: emailClient, smsClient: NewSMSClient(iftttKey),
@@ -76,7 +77,7 @@ func RunBot(token string, abort chan struct{}, ws *webSrv, emailClient *EmailCli
 	if err != nil {
 		return err
 	}
-	b.smses, err = NewSMSes()
+	b.smses, err = NewSMSes(db)
 	if err != nil {
 		return err
 	}

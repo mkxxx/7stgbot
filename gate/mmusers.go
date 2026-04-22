@@ -29,7 +29,7 @@ func NewMattermostUsers(db *sql.DB) MattermostUsersDAO {
 	if db == nil {
 		return &NullMattermostUsers{}
 	}
-	if _, err := db.Exec(createTOTP); err != nil {
+	if _, err := db.Exec(createMMUsers); err != nil {
 		Logger.Errorf("creating table mm_users %v", err)
 		return &NullMattermostUsers{}
 	}

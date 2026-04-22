@@ -915,16 +915,62 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if req.Command == "/totp_auth" {
-			if !req.systemBotDirectMessage() {
-				encoder.Encode(NewMattermostResponse("напишите это сообщение system-bot"))
+			// if !req.systemBotDirectMessage() {encoder.Encode(NewMattermostResponse("напишите это сообщение system-bot"))
+			text := strings.TrimSpace(req.Text)
+			i := strings.LastIndex(text, " ")
+			if i < 0 {
+				responseTotpauthCommandFormat(encoder, req)
 				return
 			}
-			encoder.Encode(NewMattermostResponse("OK"))
+			phone := text[:i]
+			code := text[i+1:]
+			replacer := strings.NewReplacer("+", "", "(", "", ")", "", "-", "", " ", "")
+			phone = replacer.Replace(phone)
+			if phone[:1] == "8" {
+				phone = "7" + phone[1:]
+			} else if phone[:1] != "7" {
+				phone = "7" + phone
+			}
+			if len(phone) != 11 {
+				encoder.Encode(NewMattermostResponse("номер телефона не распознан"))
+				return
+			}
+			_, err := strconv.Atoi(phone)
+			if err != nil {
+				encoder.Encode(NewMattermostResponse("номер телефона не распознан"))
+				return
+			}
+			if len(code) != 6 {
+				encoder.Encode(NewMattermostResponse("неверный формат кода TOTP"))
+				return
+			}
+			_, err = strconv.Atoi(code)
+			if err != nil {
+				encoder.Encode(NewMattermostResponse("неверный формат кода TOTP"))
+				return
+			}
+			valid, err := validateTOTPCodeForPhone(phone, code)
+			if err != nil {
+				Logger.Errorf("%s TOTP validation error phone: %s code: %s  %v", r.URL.Path, phone, code, err)
+				encoder.Encode(NewMattermostResponse("неверный код TOTP"))
+				return
+			}
+			if !valid {
+				Logger.Infof("%s TOTP validation is not OK  phone: %s code: %s", r.URL.Path, phone, code)
+				encoder.Encode(NewMattermostResponse("неверный код TOTP"))
+				return
+			}
+			encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден. Вам доступен функционал авторизованного пользоваеля."))
 		}
 		return
 	}
 	Logger.Debugf("static resource %s", r.URL.Path)
 	s.staticHandler.ServeHTTP(w, r)
+}
+
+func responseTotpauthCommandFormat(encoder *json.Encoder, req MattermostRequest) {
+	encoder.Encode(NewMattermostResponse(fmt.Sprintf(
+		"формат команды: %s <номер телефона> <код totp>  например: %s 79990010203 123456", req.Command, req.Command)))
 }
 
 func QRURL(year string, month string, plotNumber string) string {

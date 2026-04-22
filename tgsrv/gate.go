@@ -1162,15 +1162,8 @@ func (g *Gate) findTOTPPhoneByCode(phonePostfix string, totpCode string) string 
 		return ""
 	}
 	for _, p := range totpPhones {
-		secret := totpSecret(p.Phone)
-		secretBase32 := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString([]byte(secret))
-
-		valid, err := totp.ValidateCustom(totpCode, secretBase32, time.Now(), totp.ValidateOpts{
-			Period:    30, // стандарт для Google Authenticator
-			Skew:      1,  // позволяет код из прошлого или следующего 30-секундного интервала
-			Digits:    otp.DigitsSix,
-			Algorithm: otp.AlgorithmSHA1,
-		})
+		phone := p.Phone
+		valid, err := validateTOTPCodeForPhone(phone, totpCode)
 		if err != nil {
 			Logger.Errorf("totp validation error %v", err)
 			continue
@@ -1180,6 +1173,19 @@ func (g *Gate) findTOTPPhoneByCode(phonePostfix string, totpCode string) string 
 		}
 	}
 	return ""
+}
+
+func validateTOTPCodeForPhone(phone string, totpCode string) (bool, error) {
+	secret := totpSecret(phone)
+	secretBase32 := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString([]byte(secret))
+
+	valid, err := totp.ValidateCustom(totpCode, secretBase32, time.Now(), totp.ValidateOpts{
+		Period:    30, // стандарт для Google Authenticator
+		Skew:      1,  // позволяет код из прошлого или следующего 30-секундного интервала
+		Digits:    otp.DigitsSix,
+		Algorithm: otp.AlgorithmSHA1,
+	})
+	return valid, err
 }
 
 func totpSecret(phone string) string {

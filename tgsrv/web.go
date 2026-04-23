@@ -1026,6 +1026,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 				},
 			},
 		})
+		Logger.Debug(json.Marshal(atts))
 		encoder.Encode(atts)
 		return
 	}

@@ -180,55 +180,6 @@ func (t *KeypadCode) timestampSent() string {
 
 var decoder = schema.NewDecoder()
 
-/*
-	"props": {
-	    "test_data": {
-	        "ios": 78,
-	        "server": 948,
-	        "web": 123
-	    }
-	},
-*/
-type MattermostResponse struct {
-	ResponseType   string `json:"response_type"` // "in_channel"
-	Text           string `json:"text"`
-	Username       string `json:"username"` // anjella
-	IconUrl        string `json:"icon_url"` // https://7slavka.ru/images/anjella.png
-	ExtraResponses []struct {
-		Text     string `json:"text"`
-		Username string `json:"username"` // anjella
-	} `json:"company_id"`
-}
-
-func NewMattermostResponse(text string) *MattermostResponse {
-	return &MattermostResponse{
-		ResponseType: "in_channel",
-		Text:         text,
-		Username:     mattermostCommandResponseUsername,
-		IconUrl:      mattermostCommandResponseIconUrl,
-	}
-}
-
-type MattermostRequest struct {
-	ChannelId   string `schema:"channel_id"`   // 7u35jijrnjfsixujqdg9ifmt4o
-	ChannelName string `schema:"channel_name"` // town-square
-	Command     string `schema:"command"`      // /7_totp_auth
-	ResponseUrl string `schema:"response_url"` // https://mattermost.7slavka.ru/hooks/commands/nq4n1ha3fbny5krpy9zwty4n4o
-	TeamDomain  string `schema:"team_domain"`  // snt-semislavka
-	TeamId      string `schema:"team_id"`      // 838fra6nsi8tzfgnscwg98679a
-	Text        string `schema:"text"`
-	Token       string `schema:"token"`
-	TriggerId   string `schema:"trigger_id"` // ZDM2c3o2dzRnM243aWtwM2NiZXRzcHN6NGg6cmRtejlyamF5dHJ0M2c3NGp0ZWY3NW9iZnI6MTc3Njc1NjYxNDk0MzpNRVFDSUdFTHVJNVZZenAveUhkV2ZRMklTYVdiSVcrdnh3ZDh5Zi9yS01aNjZVQjNBaUJxWGZabmdWbDJuWVcxbFFMQURNbGIvWFkxeHNUS1A5bW84MWZBQ3FJbGtnPT0%3D
-	UserId      string `schema:"user_id"`    // rdmz9rjaytrt3g74jtef75obfr
-	UserName    string `schema:"user_name"`  // michael
-}
-
-func (r *MattermostRequest) systemBotDirectMessage() bool {
-	const template = "%s__%s"
-	return r.ChannelName == fmt.Sprintf(template, systemBotId, r.UserId) ||
-		r.ChannelName == fmt.Sprintf(template, r.UserId, systemBotId)
-}
-
 func init() {
 	rand.Seed(time.Now().Unix())
 }
@@ -935,7 +886,15 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			encoder.Encode(NewMattermostActionResponse("произошла ошибка"))
 		} else {
 			Logger.Debugf("%s  %q", r.URL.Path, string(bodyBytes))
-			encoder.Encode(NewMattermostActionResponse("OK"))
+			if mmReq.Context.Action == UIActionOpen {
+				if mmReq.Context.Value {
+					encoder.Encode(NewMattermostActionResponse("✅ шлагбаум открывается..."))
+				} else {
+					encoder.Encode(NewMattermostActionResponse("👍 ресурс шлагбаума не безграниичный"))
+				}
+			} else {
+				encoder.Encode(NewMattermostActionResponse("неизвестная команда"))
+			}
 		}
 		return
 	}
@@ -1048,8 +1007,8 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			Style: UIStylePrimary,
 			Integration: MMUIIntegration{
 				Url: "https://7slavka.ru/gate/mm/action/",
-				Context: MUIContext{
-					Action: "open",
+				Context: MMUIContext{
+					Action: UIActionOpen,
 					Value:  true,
 				},
 			},
@@ -1061,15 +1020,17 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			Style: UIStyleDefault,
 			Integration: MMUIIntegration{
 				Url: "https://7slavka.ru/gate/mm/action/",
-				Context: MUIContext{
-					Action: "open",
+				Context: MMUIContext{
+					Action: UIActionOpen,
 					Value:  false,
 				},
 			},
 		})
+		encoder.Encode(atts)
 		return
 	}
 	Logger.Warnf("unknown mattermost command: %s", req.Command)
+	encoder.Encode(NewMattermostResponse("неизвестная команда"))
 }
 
 func QRURL(year string, month string, plotNumber string) string {

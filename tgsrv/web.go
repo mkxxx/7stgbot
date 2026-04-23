@@ -843,11 +843,12 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		defer r.Body.Close()
 
+		err := r.ParseForm()
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		encoder := json.NewEncoder(w)
 
-		err := r.ParseForm()
 		if err != nil {
 			Logger.Errorf("%s cannot read form %v", r.URL.Path, err)
 			encoder.Encode(NewMattermostResponse("произошла ошибка"))
@@ -1006,7 +1007,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			Type:  UITypeButton,
 			Style: UIStylePrimary,
 			Integration: MMUIIntegration{
-				Url: "https://7slavka.ru/gate/mm/action/",
+				Url: "https://7slavka.ru/gate/mm/action",
 				Context: MMUIContext{
 					Action: UIActionOpen,
 					Value:  true,
@@ -1019,7 +1020,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			Type:  UITypeButton,
 			Style: UIStyleDefault,
 			Integration: MMUIIntegration{
-				Url: "https://7slavka.ru/gate/mm/action/",
+				Url: "https://7slavka.ru/gate/mm/action",
 				Context: MMUIContext{
 					Action: UIActionOpen,
 					Value:  false,

@@ -37,40 +37,41 @@ import (
 )
 
 const (
-	paramNameSum              = "sum"
-	paramNameYear             = "yyyy"
-	paramNameMonth            = "mm"
-	paramNamePrevElectr       = "prev"
-	paramNameCurrElectr       = "curr"
-	paramNameDebt             = "debt"
-	paramNameFio              = "fio"
-	paramNameNumber           = "n"
-	paramNameHash             = "h"
-	paramNamePrevKey          = "prevyyyymmnumber"
-	paramNamePurpose          = "purpose"
-	paramNamePrice            = "price"
-	paramNameCoef             = "coef"
-	qrImgPath                 = "/images/qr.jpg"
-	qreImgPath                = "/images/qre.jpg"
-	qrcImgPath                = "/images/qrc.jpg"
-	qrPath                    = "/docs/qr/"
-	payPath                   = "/docs/оплата/"
-	payElectrPath             = "/docs/оплата-эл/"
-	contactsPath              = "/docs/contacts/"
-	internetPath              = "/docs/internet/"
-	internetElectrCSVPath     = "/docs/electr.csv/"
-	internetDocsPath          = "/docs/"
-	blePath                   = "/ble/"
-	ble2Path                  = "/ble2/"
-	gateOnCallPath            = "/gate/call/"
-	gateOpenedPath            = "/gate/opened/"
-	gateOnSmsPath             = "/gate/sms/"
-	gateKeypadPath            = "/gate/keypad/"
-	logLevelPath              = "/app/log/"
-	gateAutomateCallPath      = "/gate/automate/call/"
-	gateAutomateSMSPath       = "/gate/automate/sms/"
-	gateMattermostCommandPath = "/gate/mmcommand/"
-	totpPath                  = "/totp/"
+	paramNameSum                 = "sum"
+	paramNameYear                = "yyyy"
+	paramNameMonth               = "mm"
+	paramNamePrevElectr          = "prev"
+	paramNameCurrElectr          = "curr"
+	paramNameDebt                = "debt"
+	paramNameFio                 = "fio"
+	paramNameNumber              = "n"
+	paramNameHash                = "h"
+	paramNamePrevKey             = "prevyyyymmnumber"
+	paramNamePurpose             = "purpose"
+	paramNamePrice               = "price"
+	paramNameCoef                = "coef"
+	qrImgPath                    = "/images/qr.jpg"
+	qreImgPath                   = "/images/qre.jpg"
+	qrcImgPath                   = "/images/qrc.jpg"
+	qrPath                       = "/docs/qr/"
+	payPath                      = "/docs/оплата/"
+	payElectrPath                = "/docs/оплата-эл/"
+	contactsPath                 = "/docs/contacts/"
+	internetPath                 = "/docs/internet/"
+	internetElectrCSVPath        = "/docs/electr.csv/"
+	internetDocsPath             = "/docs/"
+	blePath                      = "/ble/"
+	ble2Path                     = "/ble2/"
+	gateOnCallPath               = "/gate/call/"
+	gateOpenedPath               = "/gate/opened/"
+	gateOnSmsPath                = "/gate/sms/"
+	gateKeypadPath               = "/gate/keypad/"
+	logLevelPath                 = "/app/log/"
+	gateAutomateCallPath         = "/gate/automate/call/"
+	gateAutomateSMSPath          = "/gate/automate/sms/"
+	gateMattermostCommandPath    = "/gate/mm/cmd/"
+	gateMattermostControllerPath = "/gate/mm/action/"
+	totpPath                     = "/totp/"
 
 	site = "https://7slavka.ru"
 
@@ -909,101 +910,166 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			encoder.Encode(NewMattermostResponse("произошла ошибка"))
 			return
 		}
+		s.handleMattermostCommand(w, r, req, encoder)
+		return
+	}
+	if r.URL.Path == gateMattermostControllerPath {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Resource not found", http.StatusNotFound)
+			return
+		}
+		defer r.Body.Close()
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+		bodyBytes, err := io.ReadAll(r.Body)
+		var mmReq MattermostActionRequest
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		encoder := json.NewEncoder(w)
+		if err != nil {
+			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+			encoder.Encode(NewMattermostActionResponse("произошла ошибка"))
+		} else if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&mmReq); err != nil {
+			Logger.Errorf("%s cannot parse request body %v  %q", r.URL.Path, err, string(bodyBytes))
+			encoder.Encode(NewMattermostActionResponse("произошла ошибка"))
+		} else {
+			Logger.Debugf("%s  %q", r.URL.Path, string(bodyBytes))
+			encoder.Encode(NewMattermostActionResponse("OK"))
+		}
+		return
+	}
+	Logger.Debugf("static resource %s", r.URL.Path)
+	s.staticHandler.ServeHTTP(w, r)
+}
+
+func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request, req MattermostRequest, encoder *json.Encoder) {
+	mmUser, err := s.gate.MattermostUsers.Find(req.UserId)
+	if err != nil {
+		Logger.Errorf("db error: %v", err)
+		encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
+		return
+	}
+	if req.Command == "/7_totp_auth" {
+		// if !req.systemBotDirectMessage() {encoder.Encode(NewMattermostResponse("напишите это сообщение system-bot"))
 		if req.Token != "pbegqjtqu78w8nx5fw19sk6egc" {
 			Logger.Infof("%s bad token", r.URL.Path)
 			http.Error(w, "wtf", http.StatusBadRequest)
 			return
 		}
-		if req.Command == "/7_totp_auth" {
-			// if !req.systemBotDirectMessage() {encoder.Encode(NewMattermostResponse("напишите это сообщение system-bot"))
-			text := strings.TrimSpace(req.Text)
-			if text == "" {
-				u, err := s.gate.MattermostUsers.Find(req.UserId)
-				if err != nil {
-					Logger.Errorf("db error: %v", err)
-					encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
-					return
-				}
-				if u != nil {
-					encoder.Encode(NewMattermostResponse(fmt.Sprintf(
-						"Ваш подтвержденный номер телефона %s", maskPhone(u.Phone))))
-					return
-				}
-			}
-			i := strings.LastIndex(text, " ")
-			if i < 0 {
+		text := strings.TrimSpace(req.Text)
+		if text == "" {
+			if mmUser != nil {
 				encoder.Encode(NewMattermostResponse(fmt.Sprintf(
-					"формат команды: %s <номер телефона> <код totp>  например: %s 79990010203 123456", req.Command, req.Command)))
+					"Ваш подтвержденный номер телефона %s", maskPhone(mmUser.Phone))))
 				return
 			}
-			phone := text[:i]
-			code := text[i+1:]
-			replacer := strings.NewReplacer("+", "", "(", "", ")", "", "-", "", " ", "")
-			phone = replacer.Replace(phone)
-			if phone[:1] == "8" {
-				phone = "7" + phone[1:]
-			} else if phone[:1] != "7" {
-				phone = "7" + phone
-			}
-			if len(phone) != 11 {
-				encoder.Encode(NewMattermostResponse("номер телефона не распознан"))
-				return
-			}
-			_, err := strconv.Atoi(phone)
-			if err != nil {
-				encoder.Encode(NewMattermostResponse("номер телефона не распознан"))
-				return
-			}
-			if len(code) != 6 {
-				encoder.Encode(NewMattermostResponse("неверный формат кода TOTP"))
-				return
-			}
-			_, err = strconv.Atoi(code)
-			if err != nil {
-				encoder.Encode(NewMattermostResponse("неверный формат кода TOTP"))
-				return
-			}
-			valid, err := validateTOTPCodeForPhone(phone, code)
-			if err != nil {
-				Logger.Errorf("%s TOTP validation error phone: %s code: %s  %v", r.URL.Path, phone, code, err)
-				encoder.Encode(NewMattermostResponse("неверный код TOTP"))
-				return
-			}
-			if !valid {
-				Logger.Infof("%s TOTP validation is not OK  phone: %s code: %s", r.URL.Path, phone, code)
-				encoder.Encode(NewMattermostResponse("неверный код TOTP"))
-				return
-			}
-			u, err := s.gate.MattermostUsers.Find(req.UserId)
+		}
+		i := strings.LastIndex(text, " ")
+		if i < 0 {
+			encoder.Encode(NewMattermostResponse(fmt.Sprintf(
+				"формат команды: %s <номер телефона> <код totp>  например: %s 79990010203 123456", req.Command, req.Command)))
+			return
+		}
+		phone := text[:i]
+		code := text[i+1:]
+		replacer := strings.NewReplacer("+", "", "(", "", ")", "", "-", "", " ", "")
+		phone = replacer.Replace(phone)
+		if phone[:1] == "8" {
+			phone = "7" + phone[1:]
+		} else if phone[:1] != "7" {
+			phone = "7" + phone
+		}
+		if len(phone) != 11 {
+			encoder.Encode(NewMattermostResponse("номер телефона не распознан"))
+			return
+		}
+		_, err := strconv.Atoi(phone)
+		if err != nil {
+			encoder.Encode(NewMattermostResponse("номер телефона не распознан"))
+			return
+		}
+		if len(code) != 6 {
+			encoder.Encode(NewMattermostResponse("неверный формат кода TOTP"))
+			return
+		}
+		_, err = strconv.Atoi(code)
+		if err != nil {
+			encoder.Encode(NewMattermostResponse("неверный формат кода TOTP"))
+			return
+		}
+		valid, err := validateTOTPCodeForPhone(phone, code)
+		if err != nil {
+			Logger.Errorf("%s TOTP validation error phone: %s code: %s  %v", r.URL.Path, phone, code, err)
+			encoder.Encode(NewMattermostResponse("неверный код TOTP"))
+			return
+		}
+		if !valid {
+			Logger.Infof("%s TOTP validation is not OK  phone: %s code: %s", r.URL.Path, phone, code)
+			encoder.Encode(NewMattermostResponse("неверный код TOTP"))
+			return
+		}
+		u, err := s.gate.MattermostUsers.Find(req.UserId)
+		if err != nil {
+			Logger.Errorf("db error: %v", err)
+			encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
+			return
+		}
+		if u == nil {
+			err = s.gate.MattermostUsers.Insert(&gate.MattermostUser{UserId: req.UserId, Phone: phone})
 			if err != nil {
 				Logger.Errorf("db error: %v", err)
 				encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
 				return
 			}
-			if u == nil {
-				err = s.gate.MattermostUsers.Insert(&gate.MattermostUser{UserId: req.UserId, Phone: phone})
-				if err != nil {
-					Logger.Errorf("db error: %v", err)
-					encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
-					return
-				}
-				encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден. Вам доступен функционал авторизованного пользоваеля."))
-				return
-			}
-			if u.Phone == phone {
-				encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден (повторно). Вам доступен функционал авторизованного пользоваеля."))
-				return
-			}
-			u.Phone = phone
-			s.gate.MattermostUsers.Update(u)
-			encoder.Encode(NewMattermostResponse("Ваш номер телефона изменен."))
+			encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден. Вам доступен функционал авторизованного пользоваеля."))
 			return
 		}
-		Logger.Warnf("unknown mattermost command: %s", req.Command)
+		if u.Phone == phone {
+			encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден (повторно). Вам доступен функционал авторизованного пользоваеля."))
+			return
+		}
+		u.Phone = phone
+		s.gate.MattermostUsers.Update(u)
+		encoder.Encode(NewMattermostResponse("Ваш номер телефона изменен."))
 		return
 	}
-	Logger.Debugf("static resource %s", r.URL.Path)
-	s.staticHandler.ServeHTTP(w, r)
+	if req.Command == "/7_open" {
+		if req.Token != "gm9nyssncibhtkrkchdgicd1fe" {
+			Logger.Infof("%s bad token", r.URL.Path)
+			http.Error(w, "wtf", http.StatusBadRequest)
+			return
+		}
+		atts := MattermostUIResponse{Attachments: []*MattermostUIAttachment{{Text: "Открыть шлагбаум?"}}}
+		atts.Attachments[0].addAction(&MattermostUIAction{
+			Id:    "open_yes",
+			Name:  "Да",
+			Type:  UITypeButton,
+			Style: UIStylePrimary,
+			Integration: MMUIIntegration{
+				Url: "https://7slavka.ru/gate/mm/action/",
+				Context: MUIContext{
+					Action: "open",
+					Value:  true,
+				},
+			},
+		})
+		atts.Attachments[0].addAction(&MattermostUIAction{
+			Id:    "open_no",
+			Name:  "Нет",
+			Type:  UITypeButton,
+			Style: UIStyleDefault,
+			Integration: MMUIIntegration{
+				Url: "https://7slavka.ru/gate/mm/action/",
+				Context: MUIContext{
+					Action: "open",
+					Value:  false,
+				},
+			},
+		})
+		return
+	}
+	Logger.Warnf("unknown mattermost command: %s", req.Command)
 }
 
 func QRURL(year string, month string, plotNumber string) string {

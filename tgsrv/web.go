@@ -53,25 +53,25 @@ const (
 	qrImgPath                    = "/images/qr.jpg"
 	qreImgPath                   = "/images/qre.jpg"
 	qrcImgPath                   = "/images/qrc.jpg"
-	qrPath                       = "/docs/qr/"
-	payPath                      = "/docs/оплата/"
-	payElectrPath                = "/docs/оплата-эл/"
-	contactsPath                 = "/docs/contacts/"
-	internetPath                 = "/docs/internet/"
-	internetElectrCSVPath        = "/docs/electr.csv/"
-	internetDocsPath             = "/docs/"
-	blePath                      = "/ble/"
-	ble2Path                     = "/ble2/"
-	gateOnCallPath               = "/gate/call/"
-	gateOpenedPath               = "/gate/opened/"
-	gateOnSmsPath                = "/gate/sms/"
-	gateKeypadPath               = "/gate/keypad/"
-	logLevelPath                 = "/app/log/"
-	gateAutomateCallPath         = "/gate/automate/call/"
-	gateAutomateSMSPath          = "/gate/automate/sms/"
-	gateMattermostCommandPath    = "/gate/mm/cmd/"
-	gateMattermostControllerPath = "/gate/mm/action/"
-	totpPath                     = "/totp/"
+	qrPath                       = "/docs/qr"
+	payPath                      = "/docs/оплата"
+	payElectrPath                = "/docs/оплата-эл"
+	contactsPath                 = "/docs/contacts"
+	internetPath                 = "/docs/internet"
+	internetElectrCSVPath        = "/docs/electr.csv"
+	internetDocsPath             = "/docs"
+	blePath                      = "/ble"
+	ble2Path                     = "/ble2"
+	gateOnCallPath               = "/gate/call"
+	gateOpenedPath               = "/gate/opened"
+	gateOnSmsPath                = "/gate/sms"
+	gateKeypadPath               = "/gate/keypad"
+	logLevelPath                 = "/app/log"
+	gateAutomateCallPath         = "/gate/automate/call"
+	gateAutomateSMSPath          = "/gate/automate/sms"
+	gateMattermostCommandPath    = "/gate/mm/cmd"
+	gateMattermostControllerPath = "/gate/mm/action"
+	totpPath                     = "/totp"
 
 	site = "https://7slavka.ru"
 
@@ -241,10 +241,20 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	go g.sendingSystemNotification(abort)
 	go g.sendingUserNotification(abort)
 
-	http.HandleFunc("/", ws.handle)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", ws.handle)
 
-	ws.httpServer = &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: nil}
+	ws.httpServer = &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: TrimSlashMiddleware(mux)}
 	return ws
+}
+
+func TrimSlashMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			r.URL.Path = strings.TrimSuffix(r.URL.Path, "/")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (ws *webSrv) setRegistry(r *Registry) {
@@ -1007,7 +1017,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			Type:  UITypeButton,
 			Style: UIStylePrimary,
 			Integration: MMUIIntegration{
-				Url: "https://7slavka.ru/gate/mm/action",
+				Url: fmt.Sprintf("%s/gate/mm/action", site),
 				Context: MMUIContext{
 					Action: UIActionOpen,
 					Value:  true,
@@ -1020,7 +1030,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			Type:  UITypeButton,
 			Style: UIStyleDefault,
 			Integration: MMUIIntegration{
-				Url: "https://7slavka.ru/gate/mm/action",
+				Url: fmt.Sprintf("%s/gate/mm/action", site),
 				Context: MMUIContext{
 					Action: UIActionOpen,
 					Value:  false,

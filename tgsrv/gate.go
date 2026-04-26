@@ -581,20 +581,12 @@ func (g *Gate) handlingBLETracking(abort chan struct{}) {
 	const nextDuration = 60 * time.Second
 	ticker := time.NewTicker(firstDuration)
 	var tt []*BLETracking
-	var systemLocation int
 Loop:
 	for {
 		select {
 		case t := <-g.bleTrackings:
 			// ignore if system location is unknown or not from system location
-			if systemLocation != 0 && t.Location != systemLocation {
-				continue
-			}
-			if _, ok := g.BTMacs.BTMacSystem[t.MAC]; ok {
-				if systemLocation == 0 && t.Location != 0 {
-					systemLocation = t.Location
-					Logger.Debugf("BLE: system location = %d", systemLocation)
-				}
+			if t.Location != 100 {
 				continue
 			}
 			if _, ok := g.BTMacs.BTMacIgnore[t.MAC]; ok {
@@ -1127,33 +1119,55 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		}
 		return err
 	}
-	if len(c.Code) != 9 {
-		g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
-		return Err400BadFormat
+	// last 3 digits of phone and 6-digits totp code
+	if len(c.Code) == 9 {
+		totpCode := c.Code[len(c.Code)-6:]
+		phonePostfix := c.Code[:len(c.Code)-6]
+		phone := g.findTOTPPhoneByCode(phonePostfix, totpCode)
+		if phone == "" {
+			return Err403Forbidden
+		}
+		u, ok := g.Phones[phone]
+		if !ok {
+			g.sendSystemNotification(fmt.Sprintf("keypad code %s is valid totp code for %s, but phone is not found in gate register", c.Code, phone))
+			return Err403Forbidden
+		}
+		info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
+		if !g.allowed(phone) {
+			g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
+			return Err403Forbidden
+		}
+		err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code))
+		if err != nil {
+			g.sendSystemNotification(fmt.Sprintf("keypad code %s  %v", info, err))
+		} else {
+			g.sendSystemNotification(fmt.Sprintf("keypad code OK %s", info))
+		}
+		return err
 	}
-	totpCode := c.Code[len(c.Code)-6:]
-	phonePostfix := c.Code[:len(c.Code)-6]
-	phone := g.findTOTPPhoneByCode(phonePostfix, totpCode)
-	if phone == "" {
-		return Err403Forbidden
+	// phone 79990010203 или 89990010203
+	if len(c.Code) == 11 && (strings.HasPrefix(c.Code, "7") || strings.HasPrefix(c.Code, "8")) {
+		phone := "7" + c.Code[1:]
+		u, ok := g.Phones[phone]
+		if !ok {
+			g.sendSystemNotification(fmt.Sprintf("phone %s is not found in gate register", phone))
+			return Err403Forbidden
+		}
+		info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
+		if !g.allowed(phone) {
+			g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
+			return Err403Forbidden
+		}
+		err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code))
+		if err != nil {
+			g.sendSystemNotification(fmt.Sprintf("keypad code %s  %v", info, err))
+		} else {
+			g.sendSystemNotification(fmt.Sprintf("keypad code OK %s", info))
+		}
+		return err
 	}
-	u, ok := g.Phones[phone]
-	if !ok {
-		g.sendSystemNotification(fmt.Sprintf("keypad code %s is valid totp code for %s, but phone is not found in gate register", c.Code, phone))
-		return Err403Forbidden
-	}
-	info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
-	if !g.allowed(phone) {
-		g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
-		return Err403Forbidden
-	}
-	err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code))
-	if err != nil {
-		g.sendSystemNotification(fmt.Sprintf("keypad code %s  %v", info, err))
-	} else {
-		g.sendSystemNotification(fmt.Sprintf("keypad code OK %s", info))
-	}
-	return err
+	g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
+	return Err400BadFormat
 }
 
 func (g *Gate) findTOTPPhoneByCode(phonePostfix string, totpCode string) string {

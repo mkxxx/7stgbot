@@ -3,12 +3,16 @@ esphome:
   friendly_name: esp-dev1
 
 esp32:
-#  board: esp32dev
   board: nodemcu-32s
   framework:
     type: esp-idf
     advanced:
       minimum_chip_revision: "3.1"
+      ignore_efuse_mac_crc: false
+    sdkconfig_options:
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
+      CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH: "y"
+
 
 # Enable logging
 logger:
@@ -25,6 +29,8 @@ wifi:
   ap:
     ssid: "Esp-Dev Fallback Hotspot"
     password: "m9m4JC25zOFp"
+  
+  power_save_mode: LIGHT   # добавить — снизит потребление
 
 web_server:
   auth:
@@ -52,15 +58,21 @@ ota:
     password: "5dd5707dac89d6da48461c66493db01a"
 
 captive_portal:
+
     
 sensor:
   - platform: internal_temperature
     name: "internal_temperature"
-    id: internal_temperature_sensor  # Добавили уникальный ID
-    
+    id: internal_temperature_sensor  
+    on_value_range:
+      - above: 75.0
+        then:
+          - logger.log: "⚠️ Температура чипа превышает 75°C! Возможен троттлинг."
+
   - platform: uptime
     name: "uptime_sensor"
-    id: uptime_sensor_id            # Добавили уникальный ID
+    id: uptime_sensor_id 
+
 
 globals:
   - id: my_value
@@ -79,6 +91,9 @@ globals:
   - id: ble_queue
     type: "std::vector<std::map<std::string, std::string>>"
     restore_value: no
+  - id: current_location
+    type: std::string
+    initial_value: '"1"'
 
 
 substitutions:
@@ -217,7 +232,18 @@ esp32_ble_tracker:
   on_ble_advertise:
     - then:
         - lambda: |-
+            if (id(ble_queue).size() > 40) return;
+
             std::string mac = x.address_str();
+
+            if (mac == "CA:7E:07:37:41:4F" || 
+                mac == "CA:7E:07:37:41:48" || 
+                mac == "CA:7E:07:37:41:4E" || 
+                mac == "E4:AE:E4:50:2A:D5") {
+                
+              id(current_location) = "100";
+              return;
+            }         
             unsigned long now = millis();
 
             if (id(last_call_time).count(mac) && (now - id(last_call_time)[mac] < id(throttle_seconds) * 1000)) {
@@ -229,7 +255,7 @@ esp32_ble_tracker:
             device["mac"] = mac;
             device["rssi"] = std::to_string(x.get_rssi());
             device["name"] = x.get_name();
-            device["location"] = "1";
+            device["location"] = id(current_location);
             auto ibeacon = x.get_ibeacon();
             if (ibeacon.has_value()) {
               device["uuid"] = ibeacon->get_uuid().to_string();

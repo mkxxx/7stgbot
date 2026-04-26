@@ -892,20 +892,41 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
 			encoder.Encode(NewMattermostActionResponse("произошла ошибка"))
-		} else if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&mmReq); err != nil {
+			return
+		}
+		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&mmReq); err != nil {
 			Logger.Errorf("%s cannot parse request body %v  %q", r.URL.Path, err, string(bodyBytes))
 			encoder.Encode(NewMattermostActionResponse("произошла ошибка"))
-		} else {
-			Logger.Debugf("%s  %q", r.URL.Path, string(bodyBytes))
-			if mmReq.Context.Action == UIActionOpen {
-				if mmReq.Context.Value {
-					encoder.Encode(NewMattermostActionResponse("✅ шлагбаум открывается..."))
-				} else {
-					encoder.Encode(NewMattermostActionResponse("👍 ресурс шлагбаума не безграниичный"))
-				}
-			} else {
-				encoder.Encode(NewMattermostActionResponse("неизвестная команда"))
+			return
+		}
+		Logger.Debugf("%s  %q", r.URL.Path, string(bodyBytes))
+		if mmReq.Context.Action == UIActionOpen {
+			if !mmReq.Context.Value {
+				encoder.Encode(NewMattermostActionResponse("👍 ресурс шлагбаума не безграниичный"))
+				return
 			}
+			mmUser, err := s.gate.MattermostUsers.Find(mmReq.UserId)
+			if err != nil {
+				Logger.Errorf("error finding user %s: %v", mmReq.UserId, err)
+				encoder.Encode(NewMattermostActionResponse("произошла ошибка"))
+				return
+			}
+			phone := mmUser.Phone
+			u, ok := s.gate.Phones[phone]
+			if !ok {
+				s.gate.sendSystemNotification(fmt.Sprintf("mattermost: phone %s is not found in gate register", phone))
+				encoder.Encode(NewMattermostActionResponse(fmt.Sprintf("%s не найден в реестре. Отправить заявку можно так: /7_ask прошу внести в реестр шлагбаума уч. <номер участка> <ФИО>. Например: /7_gate прошу внести в реестр шлагбаума уч. 123 Иванов Иван Иванович", phone)))
+				return
+			}
+			info := fmt.Sprintf("%s %s %s", phone, u.Firstname, u.Lastname)
+			if !s.gate.allowed(phone) {
+				s.gate.sendSystemNotification(fmt.Sprintf("mattermost: user restricted %s", info))
+				encoder.Encode(NewMattermostActionResponse("нет доступа к шлагбауму"))
+				return
+			}
+			encoder.Encode(NewMattermostActionResponse("✅ шлагбаум открывается..."))
+		} else {
+			encoder.Encode(NewMattermostActionResponse("неизвестная команда"))
 		}
 		return
 	}

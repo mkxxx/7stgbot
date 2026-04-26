@@ -76,6 +76,10 @@ globals:
   - id: throttle_seconds
     type: int
     initial_value: "30" # Не чаще 1 раза в минуту для одного MAC
+  - id: ble_queue
+    type: "std::vector<std::map<std::string, std::string>>"
+    restore_value: no
+
 
 substitutions:
   relay_pin: "GPIO32"
@@ -173,43 +177,141 @@ interval:
             else ++it;
           }
 
+  - interval: 4s
+    then:
+      - lambda: |-
+          if (id(ble_queue).empty()) return;
+
+          auto current_batch = id(ble_queue);
+          id(ble_queue).clear();
+
+          std::string json_payload = "[";
+          for (size_t i = 0; i < current_batch.size(); i++) {
+            json_payload += "{";
+            bool first = true;
+            for (auto const& [key, val] : current_batch[i]) {
+              if (!first) json_payload += ",";
+              
+              json_payload += "\"" + key + "\":";
+              
+              // Проверяем, является ли поле числовым
+              if (key == "rssi" || key == "time" || key == "location" || key == "company_id") {
+                // Если значение пустое (например, time не определен), пишем null или 0
+                json_payload += (val.empty() ? "0" : val);
+              } else {
+                // Для всех остальных (mac, uuid, name) — в кавычках
+                json_payload += "\"" + val + "\"";
+              }
+              first = false;
+            }
+            json_payload += "}";
+            if (i < current_batch.size() - 1) json_payload += ",";
+          }
+          json_payload += "]";
+
+          id(send_batch_script).execute(json_payload);
+
+
+
 esp32_ble_tracker:
   on_ble_advertise:
     - then:
         - lambda: |-
-            // 1. Быстрая фильтрация по MAC (без создания строк лишний раз)
             std::string mac = x.address_str();
             unsigned long now = millis();
 
-            // Проверка интервала (throttling)
             if (id(last_call_time).count(mac) && (now - id(last_call_time)[mac] < id(throttle_seconds) * 1000)) {
               return; 
             }
-
-            // 2. Если прошли фильтр, обновляем время
             id(last_call_time)[mac] = now;
 
-            // 3. Извлекаем данные только если прошли фильтр по времени
-            int rssi = x.get_rssi();
-            std::string name = x.get_name();
-            std::string uuid = "";
-            uint16_t company_id = 0;
-
+            std::map<std::string, std::string> device;          
+            device["mac"] = mac;
+            device["rssi"] = std::to_string(x.get_rssi());
+            device["name"] = x.get_name();
+            device["location"] = "1";
             auto ibeacon = x.get_ibeacon();
             if (ibeacon.has_value()) {
-              uuid = ibeacon->get_uuid().to_string();
+              device["uuid"] = ibeacon->get_uuid().to_string();
+            }
+            // Извлечение Company ID (Manufacturer Data)
+            auto m_datas = x.get_manufacturer_datas();
+            if (!m_datas.empty() && m_datas[0].data.size() >= 2) {
+              // В ESPHome data — это std::vector<uint8_t>
+              uint16_t cid = (m_datas[0].data[1] << 8) | m_datas[0].data[0];
+              device["company_id"] = std::to_string(cid);
+            } else {
+              device["company_id"] = "0";
+            }
+            if (id(sntp_time).now().is_valid()) {
+              device["time"] = std::to_string(id(sntp_time).now().timestamp);
             }
 
-            auto m_data = x.get_manufacturer_datas();
-            if (!m_data.empty() && m_data[0].data.size() >= 2) {
-              company_id = (m_data[0].data[1] << 8) | m_data[0].data[0];
-            }
-
-            // Вызываем скрипт
-            id(report_device_script).execute(mac, rssi, name, uuid, company_id);
-
+            id(ble_queue).push_back(device);
 
 script:
+  - id: beep_short
+    mode: restart
+    then:
+      - output.set_level: { id: buzzer_pin, level: 100% }
+      - delay: 50ms
+      - output.set_level: { id: buzzer_pin, level: 0% }
+
+  # 1. Успех (200 OK) — Короткий приятный пик
+  - id: sound_success
+    mode: restart
+    then:
+      - delay: 100ms
+      - output.set_level: { id: buzzer_pin, level: 100% }
+      - delay: 100ms
+      - output.set_level: { id: buzzer_pin, level: 0% }
+
+  # 2. Доступ запрещен (403 Forbidden / Неверный код) — Один длинный гудок
+  - id: sound_forbidden
+    mode: restart
+    then:
+      - delay: 100ms
+      - output.set_level: { id: buzzer_pin, level: 100% }
+      - delay: 1000ms
+      - output.set_level: { id: buzzer_pin, level: 0% }
+
+  # 3. Мораторий/Перебор (429 Too Many Requests) — Три быстрых тревожных пика
+  - id: sound_too_many_requests
+    mode: restart
+    then:
+      - repeat:
+          count: 3
+          then:
+            - delay: 100ms
+            - output.set_level: { id: buzzer_pin, level: 100% }
+            - delay: 1000ms
+            - output.set_level: { id: buzzer_pin, level: 0% }
+            - delay: 400ms
+
+  # 4. Неизвестная ошибка (500, 404, нет сети)
+  - id: sound_error
+    mode: restart
+    then:
+      - repeat:
+          count: 4
+          then:
+            - delay: 100ms
+            - output.set_level: { id: buzzer_pin, level: 100% }
+            - delay: 200ms
+            - output.set_level: { id: buzzer_pin, level: 0% }
+
+    # 5. Неверный формат (400 Bad Request) — 3 быстрых пика
+  - id: sound_bad_format
+    mode: restart
+    then:
+      - repeat:
+          count: 3
+          then:
+            - delay: 100ms
+            - output.set_level: { id: buzzer_pin, level: 100% }
+            - delay: 100ms
+            - output.set_level: { id: buzzer_pin, level: 0% }
+
   - id: report_device_script
     mode: single # или parallel, но с max_parallel: 1
     parameters:
@@ -246,3 +348,98 @@ script:
                 }
           on_error:
             - logger.log: "Ошибка сети при отправке"
+
+  - id: send_batch_script
+    parameters:
+      payload: string
+    then:
+      - http_request.post:
+          url: !secret url_ble2
+          request_headers:
+            Content-Type: application/json
+          body: !lambda |-
+            return payload;
+          on_response:
+            - lambda: |-
+                ESP_LOGD("batch_http", "Batch sent. Status: %d", response->status_code);
+          
+
+matrix_keypad:
+  id: my_keypad
+  rows:
+    - pin: GPIO13 # 1 (key 7 side)
+    - pin: GPIO21 # 2  Заменили 12 на 32 # ЗАМЕНИЛИ 32 на 21, чтобы не конфликтовать с реле
+    - pin: GPIO14 # 3
+    - pin: GPIO27 # 4
+  columns:
+    - pin: GPIO26 # 5
+    - pin: GPIO25 # 6
+    - pin: GPIO33 # 7
+  keys: "123456789*0#"
+
+  on_key:
+    then:
+      - script.execute: beep_short # Пищим при каждом нажатии
+      - logger.log:
+          format: "Нажата клавиша: %c"
+          args: ["x"]
+
+key_collector:
+  - id: pin_code_reader
+    source_id: my_keypad
+    min_length: 1
+    max_length: 16
+    clear_keys: "*"
+    end_keys: "#"
+
+    # Это событие срабатывает при каждом нажатии клавиши (включая цифры)
+    on_progress:
+      - logger.log:
+          format: "Ввод: %s (длина: %d)"
+          args: ["x.c_str()", "x.length()"]
+
+    # Срабатывает ТОЛЬКО если нажата '#' и введено от 1 до 16 символов
+    on_result:
+      then:
+        - logger.log:
+            format: "Отправка POST: %s"
+            args: ["x.c_str()"]
+        - output.set_level: { id: buzzer_pin, level: 0% }
+        - http_request.post:
+            url: !secret url_keypad
+            request_headers:
+              Content-Type: application/json
+            json: !lambda |-
+              root["code"] = x; // x здесь это std::string
+              root["time"] = (int)id(sntp_time).now().timestamp; // число
+            on_response:
+              then:
+                - lambda: |-
+                    // Явно указываем, что получаем статус как целое число
+                    int status_val = response->status_code;
+                    if (status_val == 200) {
+                      id(sound_success).execute(); 
+                      ESP_LOGI("keypad", "Доступ разрешен (200)");
+                    } else if (status_val == 400) {
+                      id(sound_bad_format).execute();
+                      ESP_LOGW("keypad", "Неверный формат (400)");
+                    } else if (status_val == 403) {
+                      id(sound_forbidden).execute();
+                      ESP_LOGW("keypad", "Доступ отклонен (403)");
+                    } else if (status_val == 429) {
+                      id(sound_too_many_requests).execute();
+                      ESP_LOGE("keypad", "Мораторий (429)");
+                    } else {
+                      id(sound_error).execute();
+                      ESP_LOGE("keypad", "Статус: %d", status_val);
+                    }
+
+    # Срабатывает если нажата '#' НО введено меньше 1 символов
+    on_timeout:
+      then:
+        - logger.log: "Ошибка: Мало цифр"
+
+output:
+  - platform: ledc # Используем ledc для плавности, но можно и gpio
+    pin: GPIO18
+    id: buzzer_pin

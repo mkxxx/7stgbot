@@ -18,8 +18,8 @@ logger:
     http_request: DEBUG
 
 wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
+  ssid: !secret ws_user_38
+  password: !secret ws_pw_38
 
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:

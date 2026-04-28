@@ -1,6 +1,7 @@
 package tgsrv
 
 import (
+	cfg "7stgbot/config"
 	"database/sql"
 	"fmt"
 	"strconv"
@@ -44,30 +45,13 @@ type TGBot struct {
 	users          *Users
 	smses          *SMSes
 	smsClient      *SMSClient
-	SMSRateLimiter []Rate
+	SMSRateLimiter []cfg.Rate
 	adminEmails    []string
 	adminPhone     string
 }
 
-type Rate struct {
-	Ticker time.Duration
-	Cnt    int
-}
-
-type ByRate []Rate
-
-func (r ByRate) Len() int      { return len(r) }
-func (r ByRate) Swap(i, j int) { r[i], r[j] = r[j], r[i] }
-func (r ByRate) Less(i, j int) bool {
-	return r[i].rateNano() < r[j].rateNano()
-}
-
-func (r *Rate) rateNano() time.Duration {
-	return time.Duration(int(r.Ticker.Nanoseconds()) / r.Cnt)
-}
-
 func RunBot(token string, abort chan struct{}, ws *webSrv, emailClient *EmailClient, iftttKey string,
-	adminPhone string, adminEmails []string, SMSRateLimiter []Rate, db *sql.DB) error {
+	adminPhone string, adminEmails []string, SMSRateLimiter []cfg.Rate, db *sql.DB) error {
 
 	Logger.Infof("starting tg bot")
 	b := TGBot{abort: abort, ws: ws, emailClient: emailClient, smsClient: NewSMSClient(iftttKey),

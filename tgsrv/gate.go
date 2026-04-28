@@ -1,6 +1,7 @@
 package tgsrv
 
 import (
+	"7stgbot/config"
 	"7stgbot/gate"
 	"bytes"
 	"cmp"
@@ -64,7 +65,6 @@ type Gate struct {
 	bleTimes               map[string]time.Time
 	GateOpenNumber         string
 	GateInfoNumber         string
-	BTMacs                 BTMacs
 	palEsTimeGroups        *PalEsTimeGroups
 	BLEPeriodSec           time.Duration
 	RateWatcher            *RateWatcher
@@ -88,14 +88,6 @@ type Notification struct {
 	msg    string
 	system bool
 	user   bool
-}
-
-type BTMacs struct {
-	BLEAutoOpenLagMin int64
-	BTMacSystem       map[string]string
-	BTMacIgnore       map[string]string
-	BTMacAutoOpenGate map[string]string
-	BTMacNames        map[string]string
 }
 
 type PalesLoginResp struct {
@@ -325,6 +317,44 @@ func (g *PalEsTimeGroup) contains(t time.Time) bool {
 	return d.contains(localTime)
 }
 
+func NewOpenSchedule(p map[string]int) *OpenSchedule {
+	if len(p) == 0 {
+		return NewOpenSchedule(map[string]int{"00:00": 55500000})
+	}
+	time := make([]string, 0, 4)
+	for k := range p {
+		time = append(time, k)
+	}
+	slices.Sort(time)
+	n := len(time)
+	minutes := make([]int, n)
+	for i, t := range time {
+		minutes[i] = p[t]
+	}
+	return &OpenSchedule{time: time, minutes: minutes}
+}
+
+type OpenSchedule struct {
+	time    []string
+	minutes []int
+}
+
+func (s *OpenSchedule) period(p time.Time) int {
+	time := p.In(Location).Format("15:04")
+	if len(time) < 5 {
+		time = "0" + time
+	}
+	for i, t := range s.time {
+		if time < t {
+			if i == 0 {
+				break
+			}
+			return s.minutes[i-1]
+		}
+	}
+	return s.minutes[len(s.minutes)-1]
+}
+
 func (g *Gate) handlingCalls(abort chan struct{}) {
 	var gateTime time.Time
 Loop:
@@ -356,7 +386,7 @@ Loop:
 					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok, but call is overdue %d s  %s", call.timestamp(), elapsed/time.Second, name))
 					continue
 				}
-				err := g.sendOpenCommandToGate(phone)
+				err := g.sendOpenCommandToGate(phone, time.Now())
 				if err != nil {
 					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok, %v  %s", call.timestamp(), name, err))
 				} else {
@@ -543,7 +573,7 @@ func (g *Gate) sendNotification(msg string, system, user bool) {
 	}
 }
 
-func (g *Gate) sendOpenCommandToGate(text string) error {
+func (g *Gate) sendOpenCommandToGate(text string, now time.Time) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -555,7 +585,6 @@ func (g *Gate) sendOpenCommandToGate(text string) error {
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(g.User, g.Password)
 
-	now := time.Now()
 	g.lastOpenCommandTime.Store(now.Unix())
 
 	client := &http.Client{}
@@ -574,7 +603,7 @@ func (g *Gate) sendOpenCommandToGate(text string) error {
 	return err
 }
 
-func (g *Gate) handlingBLETracking(abort chan struct{}) {
+func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config) {
 	var firstWaitIsOver <-chan time.Time
 	var nextWaitIsOver <-chan time.Time
 	const firstDuration = 3 * time.Second
@@ -589,11 +618,11 @@ Loop:
 			if t.Location != 100 {
 				continue
 			}
-			if _, ok := g.BTMacs.BTMacIgnore[t.MAC]; ok {
+			if _, ok := cfg.BTMacIgnore[t.MAC]; ok {
 				continue
 			}
-			g.checkAndOpenOnBT(t)
-			if _, ok := g.BTMacs.BTMacNames[t.MAC]; ok {
+			g.checkAndOpenOnBT(t, cfg)
+			if _, ok := cfg.BTMacNames[t.MAC]; ok {
 				tt = append(tt, t)
 			}
 			if firstWaitIsOver == nil && nextWaitIsOver == nil {
@@ -605,7 +634,7 @@ Loop:
 			ticker.Reset(nextDuration)
 			firstWaitIsOver = nil
 			nextWaitIsOver = ticker.C
-			g.sendToTelegramMsg(tt)
+			g.sendToTelegramMsg(tt, cfg)
 			tt = tt[:0]
 
 		case <-nextWaitIsOver:
@@ -613,7 +642,7 @@ Loop:
 				nextWaitIsOver = nil
 				continue
 			}
-			g.sendToTelegramMsg(tt)
+			g.sendToTelegramMsg(tt, cfg)
 			tt = tt[:0]
 
 		case t := <-g.openedEvets:
@@ -627,6 +656,49 @@ Loop:
 			g.updateLastOpenedTime(now)
 			Logger.Infof("gate opened %s", t.timestampSent())
 			g.sendSystemNotification(fmt.Sprintf("gate opened %s", t.timestampSent()))
+
+		case cfg = <-cfgSub:
+
+		case <-abort:
+			break Loop
+		}
+	}
+}
+
+func (g *Gate) openBySchedule(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config) {
+	sch := NewOpenSchedule(cfg.OpenSchedule)
+	ticker := time.NewTicker(time.Minute)
+	reset := false
+Loop:
+	for {
+		select {
+		case <-ticker.C:
+			now := time.Now()
+			minutes := sch.period(time.Now())
+			lt := time.Unix(0, g.lastOpenedTime.Load())
+			remaining := time.Duration(minutes)*time.Minute - now.Sub(lt)
+			if remaining >= time.Minute {
+				continue
+			}
+			if remaining >= 5*time.Second {
+				ticker.Reset(remaining)
+				reset = true
+				continue
+			}
+			// assert: remaining < 5*time.Second
+			err := g.sendOpenCommandToGate("timer", now)
+			if err != nil {
+				g.sendSystemNotification(fmt.Sprintf("open by timer error: %v", err))
+			} else {
+				g.sendSystemNotification("opened by timer")
+			}
+			if reset {
+				ticker.Reset(time.Minute)
+				reset = false
+			}
+
+		case cfg = <-cfgSub:
+			sch = NewOpenSchedule(cfg.OpenSchedule)
 
 		case <-abort:
 			break Loop
@@ -707,8 +779,8 @@ Loop:
 
 }
 
-func (g *Gate) checkAndOpenOnBT(bt *BLETracking) {
-	phone, ok := g.BTMacs.BTMacAutoOpenGate[bt.MAC]
+func (g *Gate) checkAndOpenOnBT(bt *BLETracking, cfg *config.Config) {
+	phone, ok := cfg.BTMacAutoOpenGate[bt.MAC]
 	if !ok {
 		return
 	}
@@ -720,7 +792,7 @@ func (g *Gate) checkAndOpenOnBT(bt *BLETracking) {
 		return
 	}
 	// open gate and telegram message lag
-	if time.Since(g.lastBLEOpenCommandTime[bt.MAC]) < time.Duration(g.BTMacs.BLEAutoOpenLagMin)*time.Minute {
+	if time.Since(g.lastBLEOpenCommandTime[bt.MAC]) < time.Duration(cfg.BLEAutoOpenLagMin)*time.Minute {
 		return
 	}
 	g.lastBLEOpenCommandTime[bt.MAC] = time.Now()
@@ -735,7 +807,7 @@ func (g *Gate) checkAndOpenOnBT(bt *BLETracking) {
 		g.sendSystemNotification(fmt.Sprintf("%s BLE restricted %s", bt.timestamp(), u.name()))
 		return
 	}
-	err := g.sendOpenCommandToGate(fmt.Sprintf("%s %s", bt.MAC, phone))
+	err := g.sendOpenCommandToGate(fmt.Sprintf("%s %s", bt.MAC, phone), time.Now())
 	if err != nil {
 		g.sendSystemNotification(fmt.Sprintf("%s BLE:%s ok, %v  %s", bt.timestamp(), bt.MAC, u.name(), err))
 	} else {
@@ -743,13 +815,13 @@ func (g *Gate) checkAndOpenOnBT(bt *BLETracking) {
 	}
 }
 
-func (g *Gate) sendToTelegramMsg(tt []*BLETracking) {
+func (g *Gate) sendToTelegramMsg(tt []*BLETracking, cfg *config.Config) {
 	if len(tt) == 0 {
 		return
 	}
 	var msg strings.Builder
 	for _, t := range tt {
-		mac := g.BTMacs.BTMacNames[t.MAC]
+		mac := cfg.BTMacNames[t.MAC]
 		if len(mac) == 0 {
 			mac = t.MAC
 		}
@@ -1107,7 +1179,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			g.KeypadCodes.Update(code)
 		}
 		if g.KeypadReleased {
-			err = g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", code.Code))
+			err = g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", code.Code), time.Now())
 		}
 		if err != nil {
 			g.sendSystemNotification(fmt.Sprintf("keypad code OK %s, open command error %v", code.Code, err))
@@ -1137,7 +1209,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
 			return Err403Forbidden
 		}
-		err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code))
+		err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code), time.Now())
 		if err != nil {
 			g.sendSystemNotification(fmt.Sprintf("keypad code %s  %v", info, err))
 		} else {
@@ -1158,7 +1230,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
 			return Err403Forbidden
 		}
-		err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code))
+		err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code), time.Now())
 		if err != nil {
 			g.sendSystemNotification(fmt.Sprintf("keypad code %s  %v", info, err))
 		} else {

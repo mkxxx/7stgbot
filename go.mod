@@ -21,6 +21,7 @@ require (
 require (
 	github.com/AnthonyHewins/gotfy v0.0.11 // indirect
 	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
+	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/goccy/go-json v0.10.4 // indirect
 	github.com/gorilla/schema v1.4.1 // indirect
 	github.com/pquerna/otp v1.5.0 // indirect

@@ -29,7 +29,14 @@ BLEAutoOpenLagMin = 3
 "10:E9:53:FB:E9:AE" = "невидимка"
 `
 
-	var result BTMacs
+	type Config struct {
+		BLEAutoOpenLagMin int64
+		BTMacSystem       map[string]string
+		BTMacIgnore       map[string]string
+		BTMacAutoOpenGate map[string]string
+		BTMacNames        map[string]string
+	}
+	var result Config
 	_, err := toml.Decode(tomlData, &result)
 	if err != nil {
 		t.Fatalf("Ошибка парсинга TOML: %v", err)
@@ -251,6 +258,59 @@ func TestRateWatcher(t *testing.T) {
 		got := w.hit(tt.time)
 		if tt.want != got {
 			t.Errorf("%d: got %v, want %v", i, got, tt.want)
+		}
+	}
+}
+
+type TestConfig struct {
+	OpenSchedule map[string]int // "09:00"=10\n"10:30"=5\n"22:00"=15   "hh:mm"=number_of_minutes
+}
+
+func TestOpenSchedule(t *testing.T) {
+	tomlData := `
+[OpenSchedule]
+"08:30" = 10
+"10:00" = 5
+"21:00" = 10
+"23:00" = 15
+`
+
+	var cfg TestConfig
+	_, err := toml.Decode(tomlData, &cfg)
+	if err != nil {
+		t.Fatalf("Ошибка парсинга TOML: %v", err)
+	}
+	loc, _ := time.LoadLocation("Europe/Moscow")
+	type test struct {
+		date time.Time
+		want int
+	}
+	tests := []test{
+		{time.Date(2026, time.April, 27, 0, 0, 0, 0, loc), 15},
+		{time.Date(2026, time.April, 27, 8, 29, 0, 0, loc), 15},
+		{time.Date(2026, time.April, 27, 8, 30, 0, 0, loc), 10},
+		{time.Date(2026, time.April, 27, 9, 59, 0, 0, loc), 10},
+		{time.Date(2026, time.April, 27, 10, 0, 0, 0, loc), 5},
+		{time.Date(2026, time.April, 27, 21, 0, 0, 0, loc), 10},
+		{time.Date(2026, time.April, 27, 23, 0, 0, 0, loc), 15},
+		{time.Date(2026, time.April, 27, 23, 59, 0, 0, loc), 15},
+	}
+	{
+		sch := NewOpenSchedule(cfg.OpenSchedule)
+		for _, tt := range tests {
+			got := sch.period(tt.date)
+			if got != tt.want {
+				t.Errorf("%s  got %v, want %v", tt.date.Format("15:04"), got, tt.want)
+			}
+		}
+	}
+	{
+		sch := NewOpenSchedule(nil)
+		for _, tt := range tests {
+			got := sch.period(tt.date)
+			if got != 55500000 {
+				t.Errorf("%s  got %v, want %v", tt.date.Format("15:04"), got, tt.want)
+			}
 		}
 	}
 }

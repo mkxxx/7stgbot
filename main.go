@@ -1,6 +1,7 @@
 package main
 
 import (
+	config "7stgbot/config"
 	"7stgbot/gate"
 	"7stgbot/tgsrv"
 	"bufio"
@@ -21,6 +22,7 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 
 	"github.com/BurntSushi/toml"
+	"github.com/fsnotify/fsnotify"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -116,7 +118,8 @@ func main() {
 		}
 	}()
 
-	var cfg Config
+	var cfg config.Config
+	cfgSub := &config.ConfigSubscription{}
 	cfgPath := filepath.Join(cfgDir, "config.toml")
 	if _, err := toml.DecodeFile(cfgPath, &cfg); err != nil {
 		logger.Errorf("error parsing toml config by path %q: %v", cfgPath, err)
@@ -129,9 +132,9 @@ func main() {
 			logger.Errorf("error parsing config RateLimiterCfg, bad duration %s, %v", k, err)
 			return
 		}
-		cfg.SMSRateLimiter = append(cfg.SMSRateLimiter, tgsrv.Rate{Ticker: d, Cnt: v})
+		cfg.SMSRateLimiter = append(cfg.SMSRateLimiter, config.Rate{Ticker: d, Cnt: v})
 	}
-	sort.Sort(tgsrv.ByRate(cfg.SMSRateLimiter))
+	sort.Sort(config.ByRate(cfg.SMSRateLimiter))
 
 	pinger := tgsrv.StartPinger(abort, cfg.DiscordAlertChannelURL)
 
@@ -177,14 +180,48 @@ func main() {
 	g.NtfyNotification = make(chan *tgsrv.Notification, 32)
 	g.KeypadCodesRequests = make(chan *tgsrv.PhoneSms, 32)
 
-	fname := filepath.Join(cfgDir, "bt-macs.toml")
-	if _, err := toml.DecodeFile(fname, &g.BTMacs); err != nil {
-		logger.Errorf("error parsing  %q: %v", fname, err)
-	}
 	g.CfgDir = cfgDir
+
 	g.Init()
 
-	ws := tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfgDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger, &g)
+	ws := tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfgDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger, &g, &cfg, cfgSub)
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		logger.Errorf("fsnotify error: %v", err)
+	}
+	defer watcher.Close()
+
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				if event.Op&fsnotify.Write == fsnotify.Write {
+					var cfg config.Config
+					if _, err := toml.DecodeFile(cfgPath, &cfg); err != nil {
+						logger.Errorf("error parsing %q  fix error or next app start will fail: %v", cfgPath, err)
+						continue
+					}
+					logger.Infof("%q is reloaded", cfgPath)
+					for _, l := range cfgSub.Subscribers {
+						l <- &cfg
+					}
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				logger.Errorf("fsnotify %s error: %v", cfgPath, err)
+			}
+		}
+	}()
+	err = watcher.Add(cfgPath)
+	if err != nil {
+		logger.Errorf("fsnotify add %s error: %v", cfgPath, err)
+	}
 
 	if noTGBot {
 		<-abort
@@ -196,40 +233,6 @@ func main() {
 		}
 		<-abort
 	}
-}
-
-type Config struct {
-	Port                          int
-	StaticDir                     string
-	TgToken                       string
-	Price                         map[string]float64
-	Coef                          map[string]float64
-	QR                            map[string]string
-	DiscordAlertChannelURL        string
-	IfTTTKey                      string
-	AdminEmails                   []string
-	AdminPhone                    string
-	SMSRateLimiterCfg             map[string]int
-	SMSRateLimiter                []tgsrv.Rate
-	GateUrl                       string
-	TelegramUrl                   string
-	TelegramChatId                string
-	TelegramTimeoutSec            int
-	ProxyUrl                      string
-	GateUser                      string
-	GatePwd                       string
-	PalesPortalUser               string
-	PalesPortalPwd                string
-	BleWatchLocation              int
-	GateOpenNumber                string
-	GateInfoNumber                string
-	BLEPeriodSec                  int64
-	KeypadHitLimit                int
-	KeypadHitLimitDurationMinutes int64
-	KeypadThrottleMinutes         int64
-	KeypadReleased                bool
-	NtfyURL                       string
-	NtfyToken                     string
 }
 
 func stdinCredentials() (string, string) {

@@ -1,6 +1,7 @@
 package tgsrv
 
 import (
+	"7stgbot/config"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -36,7 +37,7 @@ func (b *TGBot) smsSenderLoop() {
 	smsSenderLoopRates(b, b.SMSRateLimiter, make(chan struct{}))
 }
 
-func smsSenderLoopRates(b SMSSendingLoop, rates []Rate, done chan struct{}) {
+func smsSenderLoopRates(b SMSSendingLoop, rates []config.Rate, done chan struct{}) {
 	tickers := make([]*time.Ticker, 0, 5)
 	limits := make([]int, 5)
 	ratesC := make([]<-chan time.Time, 5)

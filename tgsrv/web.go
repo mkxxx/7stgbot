@@ -1,6 +1,7 @@
 package tgsrv
 
 import (
+	"7stgbot/config"
 	"7stgbot/gate"
 	"bytes"
 	"context"
@@ -185,9 +186,10 @@ func init() {
 }
 
 func StartWebServer(port int, staticDir, dir string, QRElements map[string]string, price map[string]float64,
-	coef map[string]float64, abort chan struct{}, pinger *pingMonitor, g *Gate) *webSrv {
+	coef map[string]float64, abort chan struct{}, pinger *pingMonitor, g *Gate,
+	cfg *config.Config, cfgSub *config.ConfigSubscription) *webSrv {
 
-	webServer := newWebServer(port, staticDir, dir, QRElements, price, coef, pinger, abort, g)
+	webServer := newWebServer(port, staticDir, dir, QRElements, price, coef, pinger, abort, g, cfg, cfgSub)
 	webServer.start(port)
 	srv := webServer.httpServer
 	go func() {
@@ -199,7 +201,7 @@ func StartWebServer(port int, staticDir, dir string, QRElements map[string]strin
 
 func newWebServer(port int, staticDir string, dir string, QRElements map[string]string,
 	price map[string]float64, coef map[string]float64, pinger *pingMonitor, abort chan struct{},
-	g *Gate) *webSrv {
+	g *Gate, cfg *config.Config, cfgSub *config.ConfigSubscription) *webSrv {
 
 	ws := new(webSrv)
 	(&ws.priceHist).fromMap(price)
@@ -235,11 +237,12 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	go g.palesLoginAndLoadLoop(abort)
 	go g.handlingCalls(abort)
 	go g.handlingSmses(abort)
-	go g.handlingBLETracking(abort)
+	go g.handlingBLETracking(abort, cfg, cfgSub.Subscribe())
 	go g.readingSMSesForSend(abort)
 	go g.handlingKeypadRequests(abort)
 	go g.sendingSystemNotification(abort)
 	go g.sendingUserNotification(abort)
+	go g.openBySchedule(abort, cfg, cfgSub.Subscribe())
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", ws.handle)

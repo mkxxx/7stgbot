@@ -1,6 +1,7 @@
 package tgsrv
 
 import (
+	"7stgbot/config"
 	"testing"
 	"time"
 )
@@ -43,7 +44,7 @@ func (b *SMSSendingLoopImpl) sendSMS(phone string, sms string) bool {
 
 func TestSmsSenderLoopRates(t *testing.T) {
 	{
-		rates := []Rate{
+		rates := []config.Rate{
 			{time.Millisecond, 1},
 			{time.Second, 10},
 		}
@@ -51,7 +52,7 @@ func TestSmsSenderLoopRates(t *testing.T) {
 		testSmsSenderLoopRates(t, rates, want)
 	}
 	{
-		rates := []Rate{
+		rates := []config.Rate{
 			{time.Millisecond, 1},
 			{time.Millisecond * 200, 10},
 		}
@@ -59,7 +60,7 @@ func TestSmsSenderLoopRates(t *testing.T) {
 		testSmsSenderLoopRates(t, rates, want)
 	}
 	{
-		rates := []Rate{
+		rates := []config.Rate{
 			{time.Millisecond, 1},
 			{time.Millisecond * 367, 10},
 		}
@@ -67,7 +68,7 @@ func TestSmsSenderLoopRates(t *testing.T) {
 		testSmsSenderLoopRates(t, rates, want)
 	}
 	{
-		rates := []Rate{
+		rates := []config.Rate{
 			{time.Millisecond, 1},
 			{time.Millisecond * 100, 2},
 			{time.Second, 10},
@@ -77,7 +78,7 @@ func TestSmsSenderLoopRates(t *testing.T) {
 	}
 }
 
-func testSmsSenderLoopRates(t *testing.T, rates []Rate, want int) {
+func testSmsSenderLoopRates(t *testing.T, rates []config.Rate, want int) {
 	abort := make(chan struct{})
 	loop := &SMSSendingLoopImpl{abort: abort}
 	loop.smses = loop

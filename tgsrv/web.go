@@ -234,7 +234,9 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 		c.Stop()
 	}()
 
-	go g.palesLoginAndLoadLoop(abort)
+	topicEvents := make(chan string, 1)
+
+	go g.palesLoginAndLoadLoop(abort, topicEvents)
 	go g.handlingCalls(abort)
 	go g.handlingSmses(abort)
 	go g.handlingBLETracking(abort, cfg, cfgSub.Subscribe())
@@ -243,6 +245,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	go g.sendingSystemNotification(abort)
 	go g.sendingUserNotification(abort)
 	go g.openBySchedule(abort, cfg, cfgSub.Subscribe())
+	go g.listenPalESMQTT(abort, topicEvents)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", ws.handle)
@@ -1064,6 +1067,22 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		data, _ := json.Marshal(atts)
 		Logger.Debug(string(data))
 		encoder.Encode(atts)
+		return
+	}
+	if req.Command == "/7_timer" {
+		if req.Token != "mfpcfn4br7b37ngd1fhnkxq7wa" {
+			Logger.Infof("%s bad token", r.URL.Path)
+			http.Error(w, "wtf", http.StatusBadRequest)
+			return
+		}
+		return
+	}
+	if req.Command == "/7_open_minutes" {
+		if req.Token != "a97r7xopgtd48j653b8d9ru9yw" {
+			Logger.Infof("%s bad token", r.URL.Path)
+			http.Error(w, "wtf", http.StatusBadRequest)
+			return
+		}
 		return
 	}
 	Logger.Warnf("unknown mattermost command: %s", req.Command)

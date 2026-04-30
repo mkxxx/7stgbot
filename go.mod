@@ -24,6 +24,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/goccy/go-json v0.10.4 // indirect
 	github.com/gorilla/schema v1.4.1 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/pquerna/otp v1.5.0 // indirect
 	github.com/richardlehane/mscfb v1.0.6 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect

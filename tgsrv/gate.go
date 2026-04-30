@@ -55,7 +55,7 @@ type Gate struct {
 	PalesPortalUser        string
 	PalesPortalPwd         string
 	PalesTokenFilename     string
-	PalesPortalUserToken   string
+	PalESPortalUserToken   atomic.Value
 	CfgDir                 string
 	palesLastLog           *PalesLogUser
 	lastOpenedNotification time.Time
@@ -851,7 +851,7 @@ func (g *Gate) sendToTelegramMsg(tt []*BLETracking, cfg *config.Config) {
 	g.sendSystemNotification(msg.String())
 }
 
-func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}) {
+func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}, topicEvents <-chan string) {
 	g.login(false)
 	{
 		st := g.loadPalesTimeGroups()
@@ -863,7 +863,7 @@ func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}) {
 	g.loadPalesUsers()
 
 	g.palesLastLog.Tm = time.Now().Unix()
-	g.loadPalesLogs(20 * time.Second)
+	g.loadPalESLogs(20 * time.Second)
 
 	minuteLoginTicker := time.NewTicker(time.Minute)
 	minuteLogsTicker := time.NewTicker(time.Minute)
@@ -875,10 +875,13 @@ Loop:
 		case <-minuteLoginTicker.C:
 			g.login(false)
 		case <-minuteLogsTicker.C:
-			st := g.loadPalesLogs(20 * time.Second)
-			if st == http.StatusUnauthorized {
-				g.login(true)
-				g.loadPalesLogs(20 * time.Second)
+			g.loadPalESLogsOrLogin()
+		case topic := <-topicEvents:
+			if topic == "MQTT_ERROR" {
+				continue
+			}
+			if strings.HasSuffix(topic, "/log") {
+				g.loadPalESLogsOrLogin()
 			}
 		case <-thirtyMinuteTicker.C:
 			g.loadPalesUsers()
@@ -890,11 +893,18 @@ Loop:
 	}
 }
 
+func (g *Gate) loadPalESLogsOrLogin() {
+	st := g.loadPalESLogs(20 * time.Second)
+	if st == http.StatusUnauthorized {
+		g.login(true)
+		g.loadPalESLogs(20 * time.Second)
+	}
+}
+
 func (g *Gate) login(force bool) {
 	if force {
-		g.PalesPortalUserToken = ""
-	}
-	if len(g.PalesPortalUserToken) != 0 {
+		g.PalESPortalUserToken.Store("")
+	} else if len(g.PalESPortalUserToken.Load().(string)) != 0 {
 		return
 	}
 	type loginForm struct {
@@ -936,7 +946,7 @@ func (g *Gate) login(force bool) {
 		return
 	}
 	Logger.Infof("pal-es login %s", result.Msg)
-	g.PalesPortalUserToken = result.User.Token
+	g.PalESPortalUserToken.Store(result.User.Token)
 
 	err = os.WriteFile(g.PalesTokenFilename, []byte(result.User.Token), 0644)
 	if err != nil {
@@ -944,8 +954,9 @@ func (g *Gate) login(force bool) {
 	}
 }
 
-func (g *Gate) loadPalesLogs(timeout time.Duration) int {
-	if len(g.PalesPortalUserToken) == 0 {
+func (g *Gate) loadPalESLogs(timeout time.Duration) int {
+	token := g.PalESPortalUserToken.Load().(string)
+	if len(token) == 0 {
 		return 0
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -959,7 +970,7 @@ func (g *Gate) loadPalesLogs(timeout time.Duration) int {
 		Logger.Errorf("%v", err)
 		return -1
 	}
-	req.Header.Add("x-access-token", g.PalesPortalUserToken)
+	req.Header.Add("x-access-token", token)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -1021,7 +1032,8 @@ func (g *Gate) loadPalesTimeGroups() int {
 		tg.init()
 		g.palEsTimeGroups = &tg
 	}
-	if len(g.PalesPortalUserToken) == 0 {
+	token := g.PalESPortalUserToken.Load().(string)
+	if len(token) == 0 {
 		return 0
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1033,7 +1045,7 @@ func (g *Gate) loadPalesTimeGroups() int {
 		Logger.Errorf("%v", err)
 		return -1
 	}
-	req.Header.Add("x-access-token", g.PalesPortalUserToken)
+	req.Header.Add("x-access-token", token)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -1060,7 +1072,8 @@ func (g *Gate) loadPalesTimeGroups() int {
 }
 
 func (g *Gate) loadPalesUsers() int {
-	if len(g.PalesPortalUserToken) == 0 {
+	token := g.PalESPortalUserToken.Load().(string)
+	if len(token) == 0 {
 		return 0
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1073,7 +1086,7 @@ func (g *Gate) loadPalesUsers() int {
 		Logger.Errorf("%v", err)
 		return -1
 	}
-	req.Header.Add("x-access-token", g.PalesPortalUserToken)
+	req.Header.Add("x-access-token", token)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -1149,7 +1162,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 	}
 	n := len(c.Code)
 	if n <= 5 && strings.HasPrefix(c.Code, "0") {
-		if c.Code == "0000" {
+		if c.Code == "000" {
 			g.sendUserNotification(fmt.Sprintf(`неизвесный гость ввел код %s "я приехал"`, c.Code))
 			return nil
 		}

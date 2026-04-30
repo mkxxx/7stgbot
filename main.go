@@ -156,7 +156,7 @@ func main() {
 	g.PalesTokenFilename = filepath.Join(cfgDir, "t.txt")
 	readLines(g.PalesTokenFilename, func(s string, i int) {
 		if i == 0 {
-			g.PalesPortalUserToken = s
+			g.PalESPortalUserToken.Store(s)
 		}
 	})
 	g.GateOpenNumber = cfg.GateOpenNumber

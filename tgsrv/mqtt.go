@@ -123,8 +123,10 @@ func (g *Gate) connectAndReadPalESMQTT(token string, abort chan struct{}, topicE
 		}
 		topic, data := parsePublish(message)
 		if topic != "" {
-			Logger.Infof("mqtt read: %s", topic, hex.EncodeToString(data))
+			msg := fmt.Sprintf("mqtt read: %s %s", topic, hex.EncodeToString(data))
+			Logger.Info(msg)
 			topicEvents <- topic
+			g.sendSystemNotification(msg)
 		} else {
 			Logger.Infof("mqtt read: %s", resHex)
 		}

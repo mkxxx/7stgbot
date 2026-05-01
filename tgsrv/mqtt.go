@@ -89,7 +89,7 @@ func (g *Gate) connectAndReadPalESMQTT(token string, abort chan struct{}, topicE
 	}
 	_, message, err := conn.ReadMessage()
 	if err != nil {
-		Logger.Errorf("mqtt read error:", err)
+		Logger.Errorf("mqtt read error: %v", err)
 		return
 	}
 	resHex := hex.EncodeToString(message)
@@ -114,7 +114,7 @@ func (g *Gate) connectAndReadPalESMQTT(token string, abort chan struct{}, topicE
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			Logger.Errorf("mqtt read error:", err)
+			Logger.Errorf("mqtt read error: %v", err)
 			return
 		}
 		resHex := hex.EncodeToString(message)

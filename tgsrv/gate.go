@@ -665,7 +665,7 @@ Loop:
 	}
 }
 
-func (g *Gate) openBySchedule(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config) {
+func (g *Gate) openBySchedule(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config, schedule <-chan map[string]int) {
 	sch := NewOpenSchedule(cfg.OpenSchedule)
 	ticker := time.NewTicker(time.Minute)
 	reset := false
@@ -699,6 +699,9 @@ Loop:
 
 		case cfg = <-cfgSub:
 			sch = NewOpenSchedule(cfg.OpenSchedule)
+
+		case s := <-schedule:
+			sch = NewOpenSchedule(s)
 
 		case <-abort:
 			break Loop

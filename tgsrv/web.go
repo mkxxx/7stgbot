@@ -235,6 +235,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	}()
 
 	topicEvents := make(chan string, 1)
+	ws.schedule = make(chan map[string]int, 1)
 
 	go g.palesLoginAndLoadLoop(abort, topicEvents)
 	go g.handlingCalls(abort)
@@ -244,7 +245,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	go g.handlingKeypadRequests(abort)
 	go g.sendingSystemNotification(abort)
 	go g.sendingUserNotification(abort)
-	go g.openBySchedule(abort, cfg, cfgSub.Subscribe())
+	go g.openBySchedule(abort, cfg, cfgSub.Subscribe(), ws.schedule)
 	go g.listenPalESMQTT(abort, topicEvents)
 
 	mux := http.NewServeMux()
@@ -340,6 +341,7 @@ type webSrv struct {
 	registry      atomic.Value
 	gate          *Gate
 	abort         chan struct{}
+	schedule      chan map[string]int
 }
 
 func (s *webSrv) start(port int) {
@@ -1075,6 +1077,17 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			http.Error(w, "wtf", http.StatusBadRequest)
 			return
 		}
+		text := strings.TrimSpace(req.Text)
+		if text == "" {
+			return
+		}
+		var sch map[string]int
+		err = json.Unmarshal([]byte("{"+text+"}"), &sch)
+		if err != nil {
+			encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
+			return
+		}
+		s.schedule <- sch
 		return
 	}
 	if req.Command == "/7_open_minutes" {

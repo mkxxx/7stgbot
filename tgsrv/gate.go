@@ -854,7 +854,7 @@ func (g *Gate) sendToTelegramMsg(tt []*BLETracking, cfg *config.Config) {
 	g.sendSystemNotification(msg.String())
 }
 
-func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}, topicEvents <-chan string) {
+func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}, topicEvents <-chan string, cfg *config.Config, cfgSub chan *config.Config) {
 	g.login(false)
 	{
 		st := g.loadPalesTimeGroups()
@@ -869,7 +869,8 @@ func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}, topicEvents <-chan str
 	g.loadPalESLogs(20 * time.Second)
 
 	minuteLoginTicker := time.NewTicker(time.Minute)
-	minuteLogsTicker := time.NewTicker(time.Minute)
+	logsTikerMinutes := cfg.LogsTikerMinutes
+	logsTicker := time.NewTicker(time.Duration(logsTikerMinutes) * time.Minute)
 	thirtyMinuteTicker := time.NewTicker(30 * time.Minute)
 	dailyTicker := time.NewTicker(24 * time.Hour)
 Loop:
@@ -877,7 +878,7 @@ Loop:
 		select {
 		case <-minuteLoginTicker.C:
 			g.login(false)
-		case <-minuteLogsTicker.C:
+		case <-logsTicker.C:
 			g.loadPalESLogsOrLogin()
 		case topic := <-topicEvents:
 			if topic == "MQTT_ERROR" {
@@ -890,6 +891,13 @@ Loop:
 			g.loadPalesUsers()
 		case <-dailyTicker.C:
 			g.loadPalesTimeGroups()
+		case cfg = <-cfgSub:
+			if logsTikerMinutes == cfg.LogsTikerMinutes {
+				continue
+			}
+			logsTikerMinutes = cfg.LogsTikerMinutes
+			logsTicker.Reset(time.Duration(logsTikerMinutes) * time.Minute)
+
 		case <-abort:
 			break Loop
 		}
@@ -1001,15 +1009,17 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 	slices.SortFunc(result.Log.List, func(a, b *PalesLogUser) int {
 		return cmp.Compare(a.Tm, b.Tm)
 	})
+	n := 0
 	for _, l := range result.Log.List {
 		if g.palesLastLog.Tm > l.Tm {
 			continue
 		}
-		if l.Approved {
-			g.updateLastOpenedTime(time.Unix(l.Tm, 0))
-		}
 		if g.palesLastLog.UserId == l.UserId && g.palesLastLog.Tm == l.Tm && g.palesLastLog.Type == l.Type {
 			continue
+		}
+		n++
+		if l.Approved {
+			g.updateLastOpenedTime(time.Unix(l.Tm, 0))
 		}
 		var approved string
 		if !l.Approved {
@@ -1022,9 +1032,11 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 		msg.WriteString(fmt.Sprintf("%s %s %s %s %s%s %s \n", l.timestamp(), l.typeName(), l.UserId, sn,
 			l.Firstname, l.Lastname, approved))
 	}
-	g.palesLastLog = result.Log.List[len(result.Log.List)-1]
-	Logger.Infof("received %d pal-es log records", len(result.Log.List))
-	g.sendSystemNotification(msg.String())
+	if n > 0 {
+		g.palesLastLog = result.Log.List[len(result.Log.List)-1]
+		Logger.Infof("received %d pal-es log records", len(result.Log.List))
+		g.sendSystemNotification(msg.String())
+	}
 	return resp.StatusCode
 }
 

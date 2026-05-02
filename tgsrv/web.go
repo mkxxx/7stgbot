@@ -237,7 +237,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	topicEvents := make(chan string, 1)
 	ws.schedule = make(chan map[string]int, 1)
 
-	go g.palesLoginAndLoadLoop(abort, topicEvents)
+	go g.palesLoginAndLoadLoop(abort, topicEvents, cfg, cfgSub.Subscribe())
 	go g.handlingCalls(abort)
 	go g.handlingSmses(abort)
 	go g.handlingBLETracking(abort, cfg, cfgSub.Subscribe())

@@ -97,7 +97,7 @@ type PalesLoginResp struct {
 	}
 }
 
-type PalesLog struct {
+type PalESLog struct {
 	Msg string
 	Log struct {
 		Count int
@@ -965,10 +965,10 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET",
-		fmt.Sprintf("https://portal.pal-es.com/api1/device/4G600211776/log?skip=0&limit=20&filter=&startDate=%d&endDate=&approved=&reasons=&rly=&type=",
-			g.palesLastLog.Tm), nil)
-
+	url := "https://portal.pal-es.com/api1/device/4G600211776/log?skip=0&limit=10&filter=&startDate=%s&endDate=&approved=&reasons=&rly=&type="
+	//url = fmt.Sprintf(url, strconv.Itoa(int(g.palesLastLog.Tm)))
+	url = fmt.Sprintf(url, "")
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		Logger.Errorf("%v", err)
 		return -1
@@ -987,7 +987,7 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 		return resp.StatusCode
 	}
 	Logger.Debugf("pal-es log http %d", resp.StatusCode)
-	var result PalesLog
+	var result PalESLog
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	if err != nil {
 		Logger.Errorf("error unmarshalling pal-es log http response: %v", err)
@@ -998,13 +998,12 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 		return 0
 	}
 	var msg strings.Builder
-	maxLog := result.Log.List[0]
 	slices.SortFunc(result.Log.List, func(a, b *PalesLogUser) int {
 		return cmp.Compare(a.Tm, b.Tm)
 	})
 	for _, l := range result.Log.List {
-		if l.Tm > maxLog.Tm {
-			maxLog = l
+		if g.palesLastLog.Tm > l.Tm {
+			continue
 		}
 		if l.Approved {
 			g.updateLastOpenedTime(time.Unix(l.Tm, 0))
@@ -1023,7 +1022,7 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 		msg.WriteString(fmt.Sprintf("%s %s %s %s %s%s %s \n", l.timestamp(), l.typeName(), l.UserId, sn,
 			l.Firstname, l.Lastname, approved))
 	}
-	g.palesLastLog = maxLog
+	g.palesLastLog = result.Log.List[len(result.Log.List)-1]
 	Logger.Infof("received %d pal-es log records", len(result.Log.List))
 	g.sendSystemNotification(msg.String())
 	return resp.StatusCode

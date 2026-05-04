@@ -192,6 +192,8 @@ func main() {
 	}
 	defer watcher.Close()
 
+	var timerCh <-chan time.Time
+
 	go func() {
 		for {
 			select {
@@ -200,22 +202,24 @@ func main() {
 					return
 				}
 				if event.Op&fsnotify.Write == fsnotify.Write {
-					time.Sleep(time.Second)
-					cfg := new(config.Config)
-					if _, err := toml.DecodeFile(cfgPath, cfg); err != nil {
-						logger.Errorf("error parsing %q  fix error or next app start will fail: %v", cfgPath, err)
-						continue
-					}
-					logger.Infof("%q is reloaded", cfgPath)
-					for _, l := range cfgSub.Subscribers {
-						l <- cfg
-					}
+					timerCh = time.NewTimer(time.Second).C
 				}
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return
 				}
 				logger.Errorf("fsnotify %s error: %v", cfgPath, err)
+
+			case <-timerCh:
+				cfg := new(config.Config)
+				if _, err := toml.DecodeFile(cfgPath, cfg); err != nil {
+					logger.Errorf("error parsing %q  fix error or next app start will fail: %v", cfgPath, err)
+					continue
+				}
+				logger.Infof("%q is reloaded", cfgPath)
+				for _, l := range cfgSub.Subscribers {
+					l <- cfg
+				}
 			}
 		}
 	}()

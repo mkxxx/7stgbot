@@ -200,14 +200,15 @@ func main() {
 					return
 				}
 				if event.Op&fsnotify.Write == fsnotify.Write {
-					var cfg config.Config
-					if _, err := toml.DecodeFile(cfgPath, &cfg); err != nil {
+					time.Sleep(time.Second)
+					cfg := new(config.Config)
+					if _, err := toml.DecodeFile(cfgPath, cfg); err != nil {
 						logger.Errorf("error parsing %q  fix error or next app start will fail: %v", cfgPath, err)
 						continue
 					}
 					logger.Infof("%q is reloaded", cfgPath)
 					for _, l := range cfgSub.Subscribers {
-						l <- &cfg
+						l <- cfg
 					}
 				}
 			case err, ok := <-watcher.Errors:

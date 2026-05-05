@@ -176,12 +176,8 @@ type PalesUser struct {
 type ESPHomeRelayResp struct {
 	NameID string `json:"name_id"`
 	ID     string
-	Value  string
+	Value  bool
 	State  string
-}
-
-func (r *ESPHomeRelayResp) ValueBool() bool {
-	return r.Value == "true"
 }
 
 func PalesUserFromCsv(row []string, cols map[string]int) *PalesUser {
@@ -698,7 +694,7 @@ Loop:
 				Logger.Errorf("error unmarshalling relay state %q: %v", g.Cfg.GateRelayGetUrl, err)
 				continue
 			}
-			if result.ValueBool() != inOpenedState {
+			if result.Value != inOpenedState {
 				Logger.Warnf("relay state out of sync  %q", g.Cfg.GateRelayGetUrl)
 				now := time.Now()
 				if inOpenedState {

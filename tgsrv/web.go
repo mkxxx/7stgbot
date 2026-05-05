@@ -1108,6 +1108,15 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		s.gate.keepOpenGate()
 		return
 	}
+	if req.Command == "/7_close" {
+		if req.Token != "5c6nsgpkpj837fmd5o63pxopge" {
+			Logger.Infof("%s bad token", r.URL.Path)
+			http.Error(w, "wtf", http.StatusBadRequest)
+			return
+		}
+		s.gate.closeGate()
+		return
+	}
 	Logger.Warnf("unknown mattermost command: %s", req.Command)
 	encoder.Encode(NewMattermostResponse("неизвестная команда"))
 }

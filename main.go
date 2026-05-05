@@ -139,6 +139,7 @@ func main() {
 	pinger := tgsrv.StartPinger(abort, cfg.DiscordAlertChannelURL)
 
 	var g tgsrv.Gate
+	g.Cfg = &cfg
 	g.TelegramUrl = cfg.TelegramUrl
 	g.TelegramChatId = cfg.TelegramChatId
 	g.TelegramTimeoutSec = cfg.TelegramTimeoutSec

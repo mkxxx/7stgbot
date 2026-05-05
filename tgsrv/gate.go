@@ -56,7 +56,7 @@ type GateCommandAndText struct {
 type Gate struct {
 	Phones                 map[string]*PalesUser
 	RestrictedPhones       map[string]bool
-	cfg                    config.Config
+	Cfg                    *config.Config
 	TelegramUrl            string
 	TelegramChatId         string
 	TelegramTimeoutSec     int
@@ -674,7 +674,7 @@ Loop:
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 
-			req, err := http.NewRequestWithContext(ctx, "GET", g.cfg.GateRelayGetUrl, nil)
+			req, err := http.NewRequestWithContext(ctx, "GET", g.Cfg.GateRelayGetUrl, nil)
 			if err != nil {
 				Logger.Errorf("%v", err)
 				continue
@@ -684,22 +684,22 @@ Loop:
 			client := &http.Client{}
 			resp, err := client.Do(req)
 			if err != nil {
-				Logger.Errorf("GET %q error: %v", g.cfg.GateRelayGetUrl, err)
+				Logger.Errorf("GET %q error: %v", g.Cfg.GateRelayGetUrl, err)
 				continue
 			}
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusOK {
-				Logger.Errorf("GET %q response: %d", g.cfg.GateRelayGetUrl, resp.StatusCode)
+				Logger.Errorf("GET %q response: %d", g.Cfg.GateRelayGetUrl, resp.StatusCode)
 				continue
 			}
 			var result ESPHomeRelayResp
 			err = json.NewDecoder(resp.Body).Decode(&result)
 			if err != nil {
-				Logger.Errorf("error unmarshalling relay state %q: %v", g.cfg.GateRelayGetUrl, err)
+				Logger.Errorf("error unmarshalling relay state %q: %v", g.Cfg.GateRelayGetUrl, err)
 				continue
 			}
 			if result.ValueBool() != inOpenedState {
-				Logger.Warnf("relay state out of sync  %q", g.cfg.GateRelayGetUrl)
+				Logger.Warnf("relay state out of sync  %q", g.Cfg.GateRelayGetUrl)
 				now := time.Now()
 				if inOpenedState {
 					g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, KeepOpen)
@@ -721,15 +721,16 @@ func (g *Gate) sendCommandToGate(text string, now time.Time, cmd GateCommand) er
 	gurl := ""
 	switch cmd {
 	case Open:
-		gurl = g.cfg.GateRelayOnOffUrl
+		gurl = g.Cfg.GateRelayOnOffUrl
 	case KeepOpen:
-		gurl = g.cfg.GateRelayOnUrl
+		gurl = g.Cfg.GateRelayOnUrl
 	case Close:
-		gurl = g.cfg.GateRelayOffUrl
+		gurl = g.Cfg.GateRelayOffUrl
 	}
 	gurl = fmt.Sprintf(gurl, url.QueryEscape(text))
 	req, err := http.NewRequestWithContext(ctx, "POST", gurl, strings.NewReader(""))
 	if err != nil {
+		Logger.Errorf("%q: %v", gurl, err)
 		return err
 	}
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")

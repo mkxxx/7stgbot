@@ -139,7 +139,6 @@ func main() {
 	pinger := tgsrv.StartPinger(abort, cfg.DiscordAlertChannelURL)
 
 	var g tgsrv.Gate
-	g.GateUrl = cfg.GateUrl
 	g.TelegramUrl = cfg.TelegramUrl
 	g.TelegramChatId = cfg.TelegramChatId
 	g.TelegramTimeoutSec = cfg.TelegramTimeoutSec
@@ -175,8 +174,10 @@ func main() {
 	g.KeypadCodes = gate.NewKeypadCodes(db)
 	g.TOTPPhones = gate.NewTOTPPhones(db)
 	g.MattermostUsers = gate.NewMattermostUsers(db)
+	g.Settings = gate.NewSettings(db)
 	g.Stored = make(chan struct{}, 8)
 	g.TelegramNotification = make(chan *tgsrv.Notification, 32)
+	g.GateCommands = make(chan *tgsrv.GateCommandAndText, 4)
 	g.NtfyNotification = make(chan *tgsrv.Notification, 32)
 	g.KeypadCodesRequests = make(chan *tgsrv.PhoneSms, 32)
 

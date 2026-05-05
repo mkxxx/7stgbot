@@ -127,6 +127,29 @@ text:
         - switch.turn_on: relay_1
         - delay: 1s
         - switch.turn_off: relay_1
+  - platform: template
+    name: "Relay_Turn_On"
+    id: relay_turn_on
+    mode: text
+    optimistic: true
+    on_value:
+      then:
+        - logger.log:
+            format: "%s received"
+            args: ["x.c_str()"]
+        - switch.turn_on: relay_1
+  - platform: template
+    name: "Relay_Turn_Off"
+    id: relay_turn_off
+    mode: text
+    optimistic: true
+    on_value:
+      then:
+        - logger.log:
+            format: "%s received"
+            args: ["x.c_str()"]
+        - switch.turn_off: relay_1
+
 
 wireguard:
   id: wg0

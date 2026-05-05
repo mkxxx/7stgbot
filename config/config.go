@@ -17,7 +17,10 @@ type Config struct {
 	AdminPhone                    string
 	SMSRateLimiterCfg             map[string]int
 	SMSRateLimiter                []Rate
-	GateUrl                       string
+	GateRelayOnOffUrl             string
+	GateRelayOnUrl                string
+	GateRelayOffUrl               string
+	GateRelayGetUrl               string
 	TelegramUrl                   string
 	TelegramChatId                string
 	TelegramTimeoutSec            int

@@ -247,6 +247,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	go g.sendingUserNotification(abort)
 	go g.openBySchedule(abort, cfg, cfgSub.Subscribe(), ws.schedule)
 	go g.listenPalESMQTT(abort, topicEvents)
+	go g.handlingGateState(abort)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", ws.handle)
@@ -1096,6 +1097,15 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			http.Error(w, "wtf", http.StatusBadRequest)
 			return
 		}
+		return
+	}
+	if req.Command == "/7_keep_open" {
+		if req.Token != "abmqoykj1iynmkw91ned5nr6uh" {
+			Logger.Infof("%s bad token", r.URL.Path)
+			http.Error(w, "wtf", http.StatusBadRequest)
+			return
+		}
+		s.gate.keepOpenGate()
 		return
 	}
 	Logger.Warnf("unknown mattermost command: %s", req.Command)

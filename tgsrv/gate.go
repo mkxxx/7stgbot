@@ -38,10 +38,25 @@ import (
 	"github.com/pquerna/otp/totp"
 )
 
+const gateStateKey = "gate.inOpenedState"
+
+type GateCommand int
+
+const (
+	Open GateCommand = iota
+	KeepOpen
+	Close
+)
+
+type GateCommandAndText struct {
+	command GateCommand
+	text    string
+}
+
 type Gate struct {
 	Phones                 map[string]*PalesUser
 	RestrictedPhones       map[string]bool
-	GateUrl                string
+	cfg                    config.Config
 	TelegramUrl            string
 	TelegramChatId         string
 	TelegramTimeoutSec     int
@@ -75,9 +90,11 @@ type Gate struct {
 	KeypadCodes            gate.KeypadCodesDAO
 	TOTPPhones             gate.TOTPPhonesDAO
 	MattermostUsers        gate.MattermostUsersDAO
+	Settings               gate.SettingsDAO
 	SMSSession             map[int]*gate.SMS
 	Stored                 chan struct{}
 	TelegramNotification   chan *Notification
+	GateCommands           chan *GateCommandAndText
 	NtfyNotification       chan *Notification
 	KeypadReleased         bool
 	NtfyURL                string
@@ -154,6 +171,17 @@ type PalesUser struct {
 		ConfirmNotification bool
 		RetrySeconds        int `json:"retry"`
 	}
+}
+
+type ESPHomeRelayResp struct {
+	NameID string `json:"name_id"`
+	ID     string
+	Value  string
+	State  string
+}
+
+func (r *ESPHomeRelayResp) ValueBool() bool {
+	return r.Value == "true"
 }
 
 func PalesUserFromCsv(row []string, cols map[string]int) *PalesUser {
@@ -386,12 +414,8 @@ Loop:
 					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok, but call is overdue %d s  %s", call.timestamp(), elapsed/time.Second, name))
 					continue
 				}
-				err := g.sendOpenCommandToGate(phone, time.Now())
-				if err != nil {
-					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok, %v  %s", call.timestamp(), name, err))
-				} else {
-					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok  %s", call.timestamp(), name))
-				}
+				g.openGate(phone)
+				g.sendSystemNotification(fmt.Sprintf("%s dial2 ok  %s", call.timestamp(), name))
 				continue
 			}
 			if call.CalledNumber == g.GateInfoNumber {
@@ -573,12 +597,138 @@ func (g *Gate) sendNotification(msg string, system, user bool) {
 	}
 }
 
-func (g *Gate) sendOpenCommandToGate(text string, now time.Time) error {
+func (g *Gate) openGate(text string) {
+	g.GateCommands <- &GateCommandAndText{command: Open, text: text}
+}
+
+func (g *Gate) keepOpenGate() {
+	text := time.Now().In(Location).Format("2006-01-02 15:04:05")
+	g.GateCommands <- &GateCommandAndText{command: KeepOpen, text: text}
+}
+
+func (g *Gate) closeGate() {
+	text := time.Now().In(Location).Format("2006-01-02 15:04:05")
+	g.GateCommands <- &GateCommandAndText{command: Close, text: text}
+}
+
+/*
+GET /switch/Main%20Relay -> {"name_id":"switch/Main Relay","id":"switch-main_relay","value":true,"state":"ON"} | ..."value":false,"state":"OFF"}
+direct: POST /switch/Main%20Relay/turn_on
+direct: POST /switch/Main%20Relay/turn_off
+indirect: POST /text/Relay_Turn_On/set?value=text
+indirect: POST /text/Relay_Turn_Off/set?value=text
+*/
+func (g *Gate) handlingGateState(abort <-chan struct{}) {
+	inOpenedState := false
+	s, err := g.Settings.Find(gateStateKey)
+	if err != nil {
+		Logger.Errorf("read setting %q error: %v", gateStateKey, err)
+	} else {
+		inOpenedState = s.ValueBool(false)
+	}
+	ticker := time.NewTicker(time.Minute)
+Loop:
+	for {
+		select {
+		case cmd := <-g.GateCommands:
+			now := time.Now()
+			switch cmd.command {
+			case Open:
+				if inOpenedState {
+					Logger.Infof("ignoring open command in opened state for: %q", cmd.text)
+					continue
+				}
+				g.sendCommandToGate(cmd.text, now, cmd.command)
+				g.updateLastOpenedTime(now)
+
+			case KeepOpen:
+				if inOpenedState {
+					Logger.Infof("ignoring keep open command in opened state for: %q", cmd.text)
+					continue
+				}
+				inOpenedState = true
+				s := gate.Setting{Key: gateStateKey}
+				s.SetBool(true)
+				err := g.Settings.Update(&s)
+				if err != nil {
+					Logger.Errorf("error saving to db %q: %v", s.Key, err)
+				}
+				g.sendCommandToGate(cmd.text, now, cmd.command)
+
+			case Close:
+				if !inOpenedState {
+					Logger.Infof("ignoring close command in normal state for: %q", cmd.text)
+					continue
+				}
+				inOpenedState = false
+				s := gate.Setting{Key: gateStateKey}
+				s.SetBool(false)
+				err := g.Settings.Update(&s)
+				if err != nil {
+					Logger.Errorf("error saving to db %q: %v", s.Key, err)
+				}
+				g.sendCommandToGate(cmd.text, now, cmd.command)
+			}
+
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+
+			req, err := http.NewRequestWithContext(ctx, "GET", g.cfg.GateRelayGetUrl, nil)
+			if err != nil {
+				Logger.Errorf("%v", err)
+				continue
+			}
+			req.SetBasicAuth(g.User, g.Password)
+
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			if err != nil {
+				Logger.Errorf("GET %q error: %v", g.cfg.GateRelayGetUrl, err)
+				continue
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				Logger.Errorf("GET %q response: %d", g.cfg.GateRelayGetUrl, resp.StatusCode)
+				continue
+			}
+			var result ESPHomeRelayResp
+			err = json.NewDecoder(resp.Body).Decode(&result)
+			if err != nil {
+				Logger.Errorf("error unmarshalling relay state %q: %v", g.cfg.GateRelayGetUrl, err)
+				continue
+			}
+			if result.ValueBool() != inOpenedState {
+				Logger.Warnf("relay state out of sync  %q", g.cfg.GateRelayGetUrl)
+				now := time.Now()
+				if inOpenedState {
+					g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, KeepOpen)
+				} else {
+					g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, Close)
+				}
+			}
+
+		case <-abort:
+			break Loop
+		}
+	}
+}
+
+func (g *Gate) sendCommandToGate(text string, now time.Time, cmd GateCommand) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	url := fmt.Sprintf(g.GateUrl, url.QueryEscape(text))
-	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(""))
+	gurl := ""
+	switch cmd {
+	case Open:
+		gurl = g.cfg.GateRelayOnOffUrl
+	case KeepOpen:
+		gurl = g.cfg.GateRelayOnUrl
+	case Close:
+		gurl = g.cfg.GateRelayOffUrl
+	}
+	gurl = fmt.Sprintf(gurl, url.QueryEscape(text))
+	req, err := http.NewRequestWithContext(ctx, "POST", gurl, strings.NewReader(""))
 	if err != nil {
 		return err
 	}
@@ -590,15 +740,14 @@ func (g *Gate) sendOpenCommandToGate(text string, now time.Time) error {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		Logger.Errorf("error calling gate %q: %v", url, err)
+		Logger.Errorf("error calling gate %q: %v", gurl, err)
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		Logger.Errorf("error calling gate %q: %d", url, resp.StatusCode)
+		Logger.Errorf("error calling gate %q: %d", gurl, resp.StatusCode)
 		return fmt.Errorf("http %d", resp.StatusCode)
 	}
-	g.updateLastOpenedTime(now)
 	Logger.Debugf("%q http %d", text, resp.StatusCode)
 	return err
 }
@@ -686,12 +835,9 @@ Loop:
 				continue
 			}
 			// assert: remaining < 5*time.Second
-			err := g.sendOpenCommandToGate("timer", now)
-			if err != nil {
-				g.sendSystemNotification(fmt.Sprintf("open by timer error: %v", err))
-			} else {
-				g.sendSystemNotification("opened by timer")
-			}
+			g.openGate("timer")
+			g.sendSystemNotification("opened by timer")
+
 			if reset {
 				ticker.Reset(time.Minute)
 				reset = false
@@ -810,12 +956,8 @@ func (g *Gate) checkAndOpenOnBT(bt *BLETracking, cfg *config.Config) {
 		g.sendSystemNotification(fmt.Sprintf("%s BLE restricted %s", bt.timestamp(), u.name()))
 		return
 	}
-	err := g.sendOpenCommandToGate(fmt.Sprintf("%s %s", bt.MAC, phone), time.Now())
-	if err != nil {
-		g.sendSystemNotification(fmt.Sprintf("%s BLE:%s ok, %v  %s", bt.timestamp(), bt.MAC, u.name(), err))
-	} else {
-		g.sendSystemNotification(fmt.Sprintf("%s BLE:%s ok  %s", bt.timestamp(), bt.MAC, u.name()))
-	}
+	g.openGate(fmt.Sprintf("%s %s", bt.MAC, phone))
+	g.sendSystemNotification(fmt.Sprintf("%s BLE:%s ok  %s", bt.timestamp(), bt.MAC, u.name()))
 }
 
 func (g *Gate) sendToTelegramMsg(tt []*BLETracking, cfg *config.Config) {
@@ -1206,17 +1348,13 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			g.KeypadCodes.Update(code)
 		}
 		if g.KeypadReleased {
-			err = g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", code.Code), time.Now())
+			g.openGate(fmt.Sprintf("keypad %s", code.Code))
 		}
-		if err != nil {
-			g.sendSystemNotification(fmt.Sprintf("keypad code OK %s, open command error %v", code.Code, err))
-		} else {
-			g.sendSystemNotification(fmt.Sprintf("keypad code OK %s, sent open command", code.Code))
-			if code.Temporal() {
-				g.sendUserNotification(fmt.Sprintf("гость %s успешно ввел код", maskPhone(code.RequesterPhone)))
-			}
+		g.sendSystemNotification(fmt.Sprintf("keypad code OK %s, sent open command", code.Code))
+		if code.Temporal() {
+			g.sendUserNotification(fmt.Sprintf("гость %s успешно ввел код", maskPhone(code.RequesterPhone)))
 		}
-		return err
+		return nil
 	}
 	// last 3 digits of phone and 6-digits totp code
 	if len(c.Code) == 9 {
@@ -1236,13 +1374,9 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
 			return Err403Forbidden
 		}
-		err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code), time.Now())
-		if err != nil {
-			g.sendSystemNotification(fmt.Sprintf("keypad code %s  %v", info, err))
-		} else {
-			g.sendSystemNotification(fmt.Sprintf("keypad code OK %s", info))
-		}
-		return err
+		g.openGate(fmt.Sprintf("keypad %s", c.Code))
+		g.sendSystemNotification(fmt.Sprintf("keypad code OK %s", info))
+		return nil
 	}
 	// phone 79990010203 или 89990010203
 	if len(c.Code) == 11 && (strings.HasPrefix(c.Code, "7") || strings.HasPrefix(c.Code, "8")) {
@@ -1257,13 +1391,9 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
 			return Err403Forbidden
 		}
-		err := g.sendOpenCommandToGate(fmt.Sprintf("keypad %s", c.Code), time.Now())
-		if err != nil {
-			g.sendSystemNotification(fmt.Sprintf("keypad code %s  %v", info, err))
-		} else {
-			g.sendSystemNotification(fmt.Sprintf("keypad code OK %s", info))
-		}
-		return err
+		g.openGate(fmt.Sprintf("keypad %s", c.Code))
+		g.sendSystemNotification(fmt.Sprintf("keypad code OK %s", info))
+		return nil
 	}
 	g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
 	return Err400BadFormat

@@ -1119,11 +1119,15 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		go func() {
 			wait := time.Duration(n) * time.Minute
 			time.Sleep(wait)
-			if time.Since(time.Unix(0, s.gate.lastOpenedTime.Load())) > wait {
+			closedTime := time.Since(time.Unix(0, s.gate.lastOpenedTime.Load()))
+			if closedTime > wait {
 				s.gate.openGate("/7_open_minutes")
+				s.gate.sendSystemNotification(fmt.Sprintf(
+					"opened by /7_open_minutes. previously opened %s ago",
+					time.Duration(closedTime.Seconds())*time.Second))
 			}
 		}()
-		encoder.Encode(NewMattermostResponse("✅"))
+		encoder.Encode(NewMattermostResponse(fmt.Sprintf("opening after %d minutes", n)))
 		return
 	}
 	if req.Command == "/7_keep_open" {
@@ -1133,7 +1137,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		s.gate.keepOpenGate()
-		encoder.Encode(NewMattermostResponse("✅"))
+		encoder.Encode(NewMattermostResponse("gate state changed to opened"))
 		return
 	}
 	if req.Command == "/7_close" {
@@ -1143,7 +1147,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		s.gate.closeGate()
-		encoder.Encode(NewMattermostResponse("✅"))
+		encoder.Encode(NewMattermostResponse("gate state changed to normal"))
 		return
 	}
 	Logger.Warnf("unknown mattermost command: %s", req.Command)

@@ -1103,7 +1103,8 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		}
 		return
 	}
-	if req.Command == "/7_open_minutes" {
+	if req.Command == "/7_open_after_m" {
+		command := req.Command
 		if req.Token != "a97r7xopgtd48j653b8d9ru9yw" {
 			Logger.Infof("%s bad token", r.URL.Path)
 			http.Error(w, "wtf", http.StatusBadRequest)
@@ -1122,12 +1123,15 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		go func() {
 			wait := time.Duration(n) * time.Minute
 			time.Sleep(wait)
-			closedTime := time.Since(time.Unix(0, s.gate.lastOpenedTime.Load()))
+			lastTime := s.gate.lastOpenedTime.Load()
+			closedTime := time.Since(time.Unix(0, lastTime))
 			if closedTime > wait {
-				s.gate.openGate("/7_open_minutes")
-				s.gate.sendSystemNotification(fmt.Sprintf(
-					"opened by /7_open_minutes. previously opened %s ago",
-					time.Duration(closedTime.Seconds())*time.Second))
+				s.gate.openGate(command)
+				agoStr := "unknown"
+				if lastTime != 0 {
+					agoStr = (time.Duration(closedTime.Seconds()) * time.Second).String()
+				}
+				s.gate.sendSystemNotification(fmt.Sprintf("opened by %s. previously opened %s ago", command, agoStr))
 			}
 		}()
 		encoder.Encode(NewMattermostResponse(fmt.Sprintf(

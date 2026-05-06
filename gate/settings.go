@@ -20,11 +20,11 @@ type Setting struct {
 	value string
 }
 
-func (s *Setting) Value() string {
+func (s *Setting) ValueString() string {
 	return s.value
 }
 
-func (s *Setting) Set(p string) {
+func (s *Setting) SetString(p string) {
 	s.value = p
 }
 
@@ -65,15 +65,17 @@ func NewSettings(db *sql.DB) SettingsDAO {
 func (s *Settings) Update(p *Setting) error {
 	_, err := s.db.Exec("INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
 		p.Key, p.value)
+
 	if err != nil {
-		return err
+		Logger.Errorf("db upsert settings (%q,%q) error: %v", p.Key, p.value, err)
 	}
-	return nil
+	return err
 }
 
 func (s *Settings) Find(key string) (*Setting, error) {
 	rows, err := s.db.Query("SELECT key, value FROM settings WHERE key = ?", key)
 	if err != nil {
+		Logger.Errorf("db select from settings %q error: %v", key, err)
 		return nil, err
 	}
 	defer rows.Close()

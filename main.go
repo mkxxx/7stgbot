@@ -139,16 +139,7 @@ func main() {
 	pinger := tgsrv.StartPinger(abort, cfg.DiscordAlertChannelURL)
 
 	var g tgsrv.Gate
-	g.Cfg = &cfg
-	g.TelegramUrl = cfg.TelegramUrl
-	g.TelegramChatId = cfg.TelegramChatId
-	g.TelegramTimeoutSec = cfg.TelegramTimeoutSec
-	g.ProxyUrl = cfg.ProxyUrl
-	g.User = cfg.GateUser
-	g.Password = cfg.GatePwd
-	g.PalesPortalUser = cfg.PalesPortalUser
-	g.PalesPortalPwd = cfg.PalesPortalPwd
-	g.KeypadReleased = cfg.KeypadReleased
+	g.CfgDir = cfgDir
 	g.Phones = make(map[string]*tgsrv.PalesUser)
 	readCsv(filepath.Join(cfgDir, "pales_users.csv"), palgateUserFunc(g.Phones))
 	g.RestrictedPhones = make(map[string]bool)
@@ -159,32 +150,7 @@ func main() {
 			g.PalESPortalUserToken.Store(s)
 		}
 	})
-	g.GateOpenNumber = cfg.GateOpenNumber
-	g.GateInfoNumber = cfg.GateInfoNumber
-	g.NtfyURL = cfg.NtfyURL
-	g.NtfyToken = cfg.NtfyToken
-	g.BLEPeriodSec = time.Duration(cfg.BLEPeriodSec)
-	g.RateWatcher = &tgsrv.RateWatcher{
-		Duration:         time.Duration(cfg.KeypadHitLimitDurationMinutes) * time.Minute,
-		ThrottleDuration: time.Duration(cfg.KeypadThrottleMinutes) * time.Minute}
-	g.RateWatcher.Init(cfg.KeypadHitLimit)
-	g.PendingCalls = make(chan *gate.Call, 32)
-	g.PendingSMSes = make(chan *gate.SMS, 32)
-	g.SMSSession = make(map[int]*gate.SMS)
-	g.SMSes = gate.NewSMSes(db)
-	g.KeypadCodes = gate.NewKeypadCodes(db)
-	g.TOTPPhones = gate.NewTOTPPhones(db)
-	g.MattermostUsers = gate.NewMattermostUsers(db)
-	g.Settings = gate.NewSettings(db)
-	g.Stored = make(chan struct{}, 8)
-	g.TelegramNotification = make(chan *tgsrv.Notification, 32)
-	g.GateCommands = make(chan *tgsrv.GateCommandAndText, 4)
-	g.NtfyNotification = make(chan *tgsrv.Notification, 32)
-	g.KeypadCodesRequests = make(chan *tgsrv.PhoneSms, 32)
-
-	g.CfgDir = cfgDir
-
-	g.Init()
+	g.Init(&cfg, db)
 
 	ws := tgsrv.StartWebServer(cfg.Port, cfg.StaticDir, cfgDir, cfg.QR, cfg.Price, cfg.Coef, abort, pinger, &g, &cfg, cfgSub)
 

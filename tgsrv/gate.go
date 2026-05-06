@@ -10,6 +10,7 @@ import (
 	"crypto/cipher"
 	crand "crypto/rand"
 	"crypto/sha1"
+	"database/sql"
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/binary"
@@ -38,7 +39,10 @@ import (
 	"github.com/pquerna/otp/totp"
 )
 
-const gateStateKey = "gate.inOpenedState"
+const (
+	gateStateKey      = "gate.inOpenedState"
+	lastOpenedTimeKey = "gate.lastOpenedTime"
+)
 
 type GateCommand int
 
@@ -232,7 +236,39 @@ func (u *PalesLogUser) typeName() string {
 	return fmt.Sprintf("unknown %d", u.Type)
 }
 
-func (g *Gate) Init() {
+func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
+	g.Cfg = cfg
+	g.TelegramUrl = cfg.TelegramUrl
+	g.TelegramChatId = cfg.TelegramChatId
+	g.TelegramTimeoutSec = cfg.TelegramTimeoutSec
+	g.ProxyUrl = cfg.ProxyUrl
+	g.User = cfg.GateUser
+	g.Password = cfg.GatePwd
+	g.PalesPortalUser = cfg.PalesPortalUser
+	g.PalesPortalPwd = cfg.PalesPortalPwd
+	g.KeypadReleased = cfg.KeypadReleased
+	g.GateOpenNumber = cfg.GateOpenNumber
+	g.GateInfoNumber = cfg.GateInfoNumber
+	g.NtfyURL = cfg.NtfyURL
+	g.NtfyToken = cfg.NtfyToken
+	g.BLEPeriodSec = time.Duration(cfg.BLEPeriodSec)
+	g.RateWatcher = &RateWatcher{
+		Duration:         time.Duration(cfg.KeypadHitLimitDurationMinutes) * time.Minute,
+		ThrottleDuration: time.Duration(cfg.KeypadThrottleMinutes) * time.Minute}
+	g.RateWatcher.Init(cfg.KeypadHitLimit)
+	g.PendingCalls = make(chan *gate.Call, 32)
+	g.PendingSMSes = make(chan *gate.SMS, 32)
+	g.SMSSession = make(map[int]*gate.SMS)
+	g.SMSes = gate.NewSMSes(db)
+	g.KeypadCodes = gate.NewKeypadCodes(db)
+	g.TOTPPhones = gate.NewTOTPPhones(db)
+	g.MattermostUsers = gate.NewMattermostUsers(db)
+	g.Settings = gate.NewSettings(db)
+	g.Stored = make(chan struct{}, 8)
+	g.TelegramNotification = make(chan *Notification, 32)
+	g.GateCommands = make(chan *GateCommandAndText, 4)
+	g.NtfyNotification = make(chan *Notification, 32)
+	g.KeypadCodesRequests = make(chan *PhoneSms, 32)
 	g.phoneCalls = make(chan *PhoneCall)
 	g.phoneSmses = make(chan *PhoneSms)
 	g.bleTrackings = make(chan *BLETracking, 8)
@@ -242,6 +278,20 @@ func (g *Gate) Init() {
 	g.palesLastLog = &PalesLogUser{}
 	g.lastOpenCommandTime = atomic.Int64{}
 	g.lastOpenedTime = atomic.Int64{}
+	s, err := g.Settings.Find(lastOpenedTimeKey)
+	if err != nil {
+		g.lastOpenedTime.Store(time.Now().Unix())
+	} else if s.ValueString() == "" {
+		g.lastOpenedTime.Store(time.Now().Unix())
+	} else {
+		n, err := strconv.Atoi(s.ValueString())
+		if err != nil {
+			Logger.Errorf("setting %q value error: %v", lastOpenedTimeKey, err)
+		} else {
+			g.lastOpenedTime.Store(int64(n))
+		}
+	}
+
 }
 
 type PalEsTimeGroups struct {
@@ -815,14 +865,21 @@ func (g *Gate) openBySchedule(abort chan struct{}, cfg *config.Config, cfgSub ch
 	sch := NewOpenSchedule(cfg.OpenSchedule)
 	ticker := time.NewTicker(time.Minute)
 	reset := false
+	lastOpenedTimeNano := g.lastOpenedTime.Load()
 Loop:
 	for {
 		select {
 		case <-ticker.C:
 			now := time.Now()
 			minutes := sch.period(time.Now())
-			lt := time.Unix(0, g.lastOpenedTime.Load())
-			remaining := time.Duration(minutes)*time.Minute - now.Sub(lt)
+			lot := time.Unix(0, g.lastOpenedTime.Load())
+			if lot.UnixNano() != lastOpenedTimeNano {
+				lastOpenedTimeNano = lot.UnixNano()
+				s := gate.Setting{Key: lastOpenedTimeKey}
+				s.SetString(strconv.Itoa(int(lastOpenedTimeNano)))
+				g.Settings.Update(&s)
+			}
+			remaining := time.Duration(minutes)*time.Minute - now.Sub(lot)
 			if remaining >= time.Minute {
 				continue
 			}
@@ -1306,7 +1363,7 @@ var (
 )
 
 func (g *Gate) keypadCode(c KeypadCode) error {
-	Logger.Infof("keypad code %s  %s", c.Code, c.timestampSent())
+	Logger.Infof("entered keypad code %s  %s", c.Code, c.timestampSent())
 	t := time.Unix(c.Time, 0)
 	if !g.RateWatcher.hit(t) {
 		g.sendSystemNotification(fmt.Sprintf("keypad code %s TOO MANY REQUESTS %s ", c.Code, c.timestampSent()))
@@ -1353,6 +1410,22 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		}
 		return nil
 	}
+	if len(c.Code) >= 9 && len(c.Code) <= 11 {
+		if phone, ok := g.Cfg.MaskedPhones[c.Code]; ok {
+			if u, ok := g.Phones[phone]; ok {
+				info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
+				if g.allowed(phone) {
+					g.openGate(fmt.Sprintf("keypad %s", c.Code))
+					g.sendSystemNotification(fmt.Sprintf("keypad code OK %s", info))
+					return nil
+				} else {
+					Logger.Warnf("masked phone is not allowed by register %s", phone)
+				}
+			} else {
+				Logger.Warnf("masked phone is not found in gate register %s", phone)
+			}
+		}
+	}
 	// last 3 digits of phone and 6-digits totp code
 	if len(c.Code) == 9 {
 		totpCode := c.Code[len(c.Code)-6:]
@@ -1378,6 +1451,12 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 	// phone 79990010203 или 89990010203
 	if len(c.Code) == 11 && (strings.HasPrefix(c.Code, "7") || strings.HasPrefix(c.Code, "8")) {
 		phone := "7" + c.Code[1:]
+		for _, v := range g.Cfg.MaskedPhones {
+			if phone == v {
+				g.sendSystemNotification(fmt.Sprintf("SOMEONE TRIED ENTER MASKED PHONE %s", phone))
+				return nil
+			}
+		}
 		u, ok := g.Phones[phone]
 		if !ok {
 			g.sendSystemNotification(fmt.Sprintf("phone %s is not found in gate register", phone))

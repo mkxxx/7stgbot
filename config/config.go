@@ -45,6 +45,7 @@ type Config struct {
 	BTMacIgnore                   map[string]string
 	BTMacAutoOpenGate             map[string]string
 	BTMacNames                    map[string]string
+	MaskedPhones                  map[string]string
 	LogsTikerMinutes              int64
 }
 

@@ -1079,24 +1079,27 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		text := strings.TrimSpace(req.Text)
-		if text == "" {
-			return
-		}
 		var sch map[string]int
-		var err error
-		if strings.Contains(text, ":") {
-			err = json.Unmarshal([]byte("{"+text+"}"), &sch)
-		} else {
-			sch = make(map[string]int)
-			var n int
-			n, err = strconv.Atoi(text)
-			sch["00:00"] = n
-		}
-		if err != nil {
-			encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
+		if text != "" {
+			var err error
+			if strings.Contains(text, ":") {
+				err = json.Unmarshal([]byte("{"+text+"}"), &sch)
+			} else {
+				sch = make(map[string]int)
+				var n int
+				n, err = strconv.Atoi(text)
+				sch["00:00"] = n
+			}
+			if err != nil {
+				encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
+			} else {
+				s.schedule <- sch
+				bytes, _ := json.Marshal(sch)
+				encoder.Encode(NewMattermostResponse(fmt.Sprintf("%s schedule is set", strings.Trim(string(bytes), "{}"))))
+			}
 		} else {
 			s.schedule <- sch
-			encoder.Encode(NewMattermostResponse("✅"))
+			encoder.Encode(NewMattermostResponse("schedule is canceled"))
 		}
 		return
 	}
@@ -1127,7 +1130,9 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 					time.Duration(closedTime.Seconds())*time.Second))
 			}
 		}()
-		encoder.Encode(NewMattermostResponse(fmt.Sprintf("opening after %d minutes", n)))
+		encoder.Encode(NewMattermostResponse(fmt.Sprintf(
+			"opening after %d minutes at %s", n,
+			time.Now().Add(time.Duration(n)*time.Minute).In(Location).Format("15:04:05"))))
 		return
 	}
 	if req.Command == "/7_keep_open" {

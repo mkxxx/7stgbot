@@ -1083,12 +1083,21 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		var sch map[string]int
-		err = json.Unmarshal([]byte("{"+text+"}"), &sch)
+		var err error
+		if strings.Contains(text, ":") {
+			err = json.Unmarshal([]byte("{"+text+"}"), &sch)
+		} else {
+			sch = make(map[string]int)
+			var n int
+			n, err = strconv.Atoi(text)
+			sch["00:00"] = n
+		}
 		if err != nil {
 			encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
-			return
+		} else {
+			s.schedule <- sch
+			encoder.Encode(NewMattermostResponse("✅"))
 		}
-		s.schedule <- sch
 		return
 	}
 	if req.Command == "/7_open_minutes" {
@@ -1097,6 +1106,24 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			http.Error(w, "wtf", http.StatusBadRequest)
 			return
 		}
+		text := strings.TrimSpace(req.Text)
+		if text == "" {
+			encoder.Encode(NewMattermostResponse("n of minutes expected"))
+			return
+		}
+		n, err := strconv.Atoi(text)
+		if err != nil {
+			encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
+			return
+		}
+		go func() {
+			wait := time.Duration(n) * time.Minute
+			time.Sleep(wait)
+			if time.Since(time.Unix(0, s.gate.lastOpenedTime.Load())) > wait {
+				s.gate.openGate("/7_open_minutes")
+			}
+		}()
+		encoder.Encode(NewMattermostResponse("✅"))
 		return
 	}
 	if req.Command == "/7_keep_open" {
@@ -1106,6 +1133,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		s.gate.keepOpenGate()
+		encoder.Encode(NewMattermostResponse("✅"))
 		return
 	}
 	if req.Command == "/7_close" {
@@ -1115,6 +1143,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		s.gate.closeGate()
+		encoder.Encode(NewMattermostResponse("✅"))
 		return
 	}
 	Logger.Warnf("unknown mattermost command: %s", req.Command)

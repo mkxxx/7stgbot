@@ -664,7 +664,7 @@ direct: POST /switch/Main%20Relay/turn_off
 indirect: POST /text/Relay_Turn_On/set?value=text
 indirect: POST /text/Relay_Turn_Off/set?value=text
 */
-func (g *Gate) handlingGateState(abort <-chan struct{}) {
+func (g *Gate) handlingGateState(abort <-chan struct{}, cfg *config.Config, cfgSub chan *config.Config, schedule <-chan map[string]int) {
 	inOpenedState := false
 	s, err := g.Settings.Find(gateStateKey)
 	if err != nil {
@@ -672,7 +672,11 @@ func (g *Gate) handlingGateState(abort <-chan struct{}) {
 	} else {
 		inOpenedState = s.ValueBool(false)
 	}
+	sch := NewOpenSchedule(cfg.OpenSchedule)
 	ticker := time.NewTicker(time.Minute)
+	reset := false
+	lastOpenedTimeNano := g.lastOpenedTime.Load()
+
 Loop:
 	for {
 		select {
@@ -717,45 +721,89 @@ Loop:
 			}
 
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-
-			req, err := http.NewRequestWithContext(ctx, "GET", g.Cfg.GateRelayGetUrl, nil)
-			if err != nil {
-				Logger.Errorf("%v", err)
-				continue
+			if reset {
+				ticker.Reset(time.Minute)
+				reset = false
 			}
-			req.SetBasicAuth(g.User, g.Password)
-
-			client := &http.Client{}
-			resp, err := client.Do(req)
-			if err != nil {
-				Logger.Errorf("GET %q error: %v", g.Cfg.GateRelayGetUrl, err)
-				continue
+			now := time.Now()
+			var lot time.Time
+			if inOpenedState {
+				lot = now
+			} else {
+				lot = time.Unix(0, g.lastOpenedTime.Load())
 			}
-			defer resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				Logger.Errorf("GET %q response: %d", g.Cfg.GateRelayGetUrl, resp.StatusCode)
-				continue
+			if lot.UnixNano() != lastOpenedTimeNano { // lot changed from prev tick
+				lastOpenedTimeNano = lot.UnixNano()
+				s := gate.Setting{Key: lastOpenedTimeKey}
+				s.SetString(strconv.Itoa(int(lastOpenedTimeNano)))
+				g.Settings.Update(&s)
 			}
-			var result ESPHomeRelayResp
-			err = json.NewDecoder(resp.Body).Decode(&result)
-			if err != nil {
-				Logger.Errorf("error unmarshalling relay state %q: %v", g.Cfg.GateRelayGetUrl, err)
-				continue
-			}
-			if result.Value != inOpenedState {
-				Logger.Warnf("relay state out of sync  %q", g.Cfg.GateRelayGetUrl)
-				now := time.Now()
-				if inOpenedState {
-					g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, KeepOpen)
-				} else {
-					g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, Close)
+			if !inOpenedState {
+				minutes := sch.period(time.Now())
+				remaining := time.Duration(minutes)*time.Minute - now.Sub(lot)
+				if remaining < time.Minute {
+					if remaining >= 5*time.Second {
+						ticker.Reset(remaining)
+						reset = true
+					} else {
+						// assert: remaining < 5*time.Second
+						g.openGate("timer")
+						g.sendSystemNotification("opened by timer")
+					}
 				}
 			}
+			g.syncGateRelayState(inOpenedState)
+
+		case cfg = <-cfgSub:
+			sch = NewOpenSchedule(cfg.OpenSchedule)
+
+		case s := <-schedule:
+			if len(s) == 0 {
+				s = cfg.OpenSchedule
+			}
+			sch = NewOpenSchedule(s)
 
 		case <-abort:
 			break Loop
+		}
+	}
+}
+
+func (g *Gate) syncGateRelayState(inOpenedState bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", g.Cfg.GateRelayGetUrl, nil)
+	if err != nil {
+		Logger.Errorf("%v", err)
+		return
+	}
+	req.SetBasicAuth(g.User, g.Password)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		Logger.Errorf("GET %q error: %v", g.Cfg.GateRelayGetUrl, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		Logger.Errorf("GET %q response: %d", g.Cfg.GateRelayGetUrl, resp.StatusCode)
+		return
+	}
+	var result ESPHomeRelayResp
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		Logger.Errorf("error unmarshalling relay state %q: %v", g.Cfg.GateRelayGetUrl, err)
+		return
+	}
+	if result.Value != inOpenedState {
+		Logger.Warnf("relay state out of sync  %q", g.Cfg.GateRelayGetUrl)
+		now := time.Now()
+		if inOpenedState {
+			g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, KeepOpen)
+		} else {
+			g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, Close)
 		}
 	}
 }
@@ -854,54 +902,6 @@ Loop:
 			g.sendSystemNotification(fmt.Sprintf("gate opened %s", t.timestampSent()))
 
 		case cfg = <-cfgSub:
-
-		case <-abort:
-			break Loop
-		}
-	}
-}
-
-func (g *Gate) openBySchedule(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config, schedule <-chan map[string]int) {
-	sch := NewOpenSchedule(cfg.OpenSchedule)
-	ticker := time.NewTicker(time.Minute)
-	reset := false
-	lastOpenedTimeNano := g.lastOpenedTime.Load()
-Loop:
-	for {
-		select {
-		case <-ticker.C:
-			now := time.Now()
-			minutes := sch.period(time.Now())
-			lot := time.Unix(0, g.lastOpenedTime.Load())
-			if lot.UnixNano() != lastOpenedTimeNano {
-				lastOpenedTimeNano = lot.UnixNano()
-				s := gate.Setting{Key: lastOpenedTimeKey}
-				s.SetString(strconv.Itoa(int(lastOpenedTimeNano)))
-				g.Settings.Update(&s)
-			}
-			remaining := time.Duration(minutes)*time.Minute - now.Sub(lot)
-			if remaining >= time.Minute {
-				continue
-			}
-			if remaining >= 5*time.Second {
-				ticker.Reset(remaining)
-				reset = true
-				continue
-			}
-			// assert: remaining < 5*time.Second
-			g.openGate("timer")
-			g.sendSystemNotification("opened by timer")
-
-			if reset {
-				ticker.Reset(time.Minute)
-				reset = false
-			}
-
-		case cfg = <-cfgSub:
-			sch = NewOpenSchedule(cfg.OpenSchedule)
-
-		case s := <-schedule:
-			sch = NewOpenSchedule(s)
 
 		case <-abort:
 			break Loop

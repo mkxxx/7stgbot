@@ -245,9 +245,8 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	go g.handlingKeypadRequests(abort)
 	go g.sendingSystemNotification(abort)
 	go g.sendingUserNotification(abort)
-	go g.openBySchedule(abort, cfg, cfgSub.Subscribe(), ws.schedule)
 	go g.listenPalESMQTT(abort, topicEvents)
-	go g.handlingGateState(abort)
+	go g.handlingGateState(abort, cfg, cfgSub.Subscribe(), ws.schedule)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", ws.handle)

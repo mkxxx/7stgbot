@@ -113,6 +113,30 @@ func (t *BLETracking) timestamp() string {
 	return time.Unix(t.Time, 0).In(Location).Format("2006-01-02 15:04:05")
 }
 
+func (t *BLETracking) String() string {
+	var sb strings.Builder
+	sb.WriteString("BT-MAC ")
+	sb.WriteString(t.MAC)
+	if t.Name != "" {
+		sb.WriteString(" \"")
+		sb.WriteString(t.Name)
+		sb.WriteString("\"")
+	}
+	if t.UUID != "" {
+		sb.WriteString(" ")
+		sb.WriteString(t.UUID)
+	}
+	if t.CompanyId != 0 {
+		sb.WriteString(" Company: ")
+		sb.WriteString(strconv.Itoa(t.CompanyId))
+	}
+	sb.WriteString(" RSSI: ")
+	sb.WriteString(strconv.Itoa(t.RSSI))
+	sb.WriteString(" ")
+	sb.WriteString(t.timestamp())
+	return sb.String()
+}
+
 type PhoneCall struct {
 	Phone        string
 	UnixTime     float64 `json:"time"`

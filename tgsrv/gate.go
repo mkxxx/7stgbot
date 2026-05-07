@@ -873,6 +873,7 @@ Loop:
 				ticker.Reset(firstDuration)
 				firstWaitIsOver = ticker.C
 			}
+			g.sendSystemNotification(t.String())
 
 		case <-firstWaitIsOver:
 			ticker.Reset(nextDuration)

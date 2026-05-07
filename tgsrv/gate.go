@@ -847,13 +847,43 @@ func (g *Gate) sendCommandToGate(text string, now time.Time, cmd GateCommand) er
 	return err
 }
 
+type BLETrackingAggregator struct {
+	g        *Gate
+	tt       []*BLETracking
+	lastSent time.Time
+}
+
+func (a *BLETrackingAggregator) sendSystemNotification(t *BLETracking) {
+	if t != nil {
+		a.tt = append(a.tt, t)
+	}
+	if len(a.tt) == 0 {
+		return
+	}
+	if time.Since(a.lastSent) < 29*time.Second {
+		return
+	}
+	var sb strings.Builder
+	for i, t := range a.tt {
+		if i != 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(t.String())
+	}
+	a.lastSent = time.Now()
+	a.tt = a.tt[:0]
+	a.g.sendSystemNotification(sb.String())
+}
+
 func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config) {
 	var firstWaitIsOver <-chan time.Time
 	var nextWaitIsOver <-chan time.Time
 	const firstDuration = 3 * time.Second
 	const nextDuration = 60 * time.Second
 	ticker := time.NewTicker(firstDuration)
+	each30Second := time.NewTicker(30 * time.Second)
 	var tt []*BLETracking
+	aggr := BLETrackingAggregator{g: g}
 Loop:
 	for {
 		select {
@@ -873,7 +903,10 @@ Loop:
 				ticker.Reset(firstDuration)
 				firstWaitIsOver = ticker.C
 			}
-			g.sendSystemNotification(t.String())
+			aggr.sendSystemNotification(t)
+
+		case <-each30Second.C:
+			aggr.sendSystemNotification(nil)
 
 		case <-firstWaitIsOver:
 			ticker.Reset(nextDuration)

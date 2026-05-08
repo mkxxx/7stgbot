@@ -129,7 +129,7 @@ type PalesLogUser struct {
 	UserId   string
 	Sn       string
 	Approved bool
-	Type     int
+	Type     int // see typeName()
 	Tm       int64
 	/*
 	   22 - Duplicated remote
@@ -191,6 +191,15 @@ func (u *PalesLogUser) Phone() string {
 		return "7" + u.UserId
 	case 9:
 		return "79" + u.UserId
+	case 0:
+		switch len(u.Sn) {
+		case 11:
+			return u.Sn
+		case 10:
+			return "7" + u.Sn
+		case 9:
+			return "79" + u.Sn
+		}
 	}
 	return u.UserId
 }

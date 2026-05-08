@@ -1297,6 +1297,13 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 		}
 		msg.WriteString(fmt.Sprintf("%s %s %s %s %s%s %s \n", l.timestamp(), l.typeName(), l.UserId, sn,
 			l.Firstname, l.Lastname, approved))
+
+		bb, err := json.Marshal(l)
+		if err != nil {
+			Logger.Debugf("%v", err)
+		} else {
+			Logger.Debug(string(bb))
+		}
 	}
 	if n == 0 {
 		return resp.StatusCode

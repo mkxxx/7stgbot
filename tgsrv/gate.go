@@ -100,7 +100,6 @@ type Gate struct {
 	TelegramNotification   chan *Notification
 	GateCommands           chan *GateCommandAndText
 	NtfyNotification       chan *Notification
-	KeypadReleased         bool
 	NtfyURL                string
 	NtfyToken              string
 }
@@ -132,10 +131,68 @@ type PalesLogUser struct {
 	Approved bool
 	Type     int
 	Tm       int64
-	// 12: Time group restriction – date not allowed
+	/*
+	   22 - Duplicated remote
+	   16 - Latch active
+	   12 - Time group restriction – date not allowed
+
+	   1 - Not in list (Nearby Only for dials too)
+	   3 - No response
+	   4 - User smartphone internet problem
+	   61 - Bluetooth repeated id
+	*/
 	Reason    int
 	Firstname string
 	Lastname  string
+}
+
+func (l *PalesLogUser) Time() time.Time {
+	return time.Unix(l.Tm, 0)
+}
+
+func (u *PalesLogUser) timestamp() string {
+	return time.Unix(u.Tm, 0).In(Location).Format("2006-01-02 15:04:05")
+}
+
+func (u *PalesLogUser) typeName() string {
+	switch u.Type {
+	case 1:
+		return "dial"
+	case 100:
+		return "inet"
+	case 108:
+		return "bt-auto"
+	case 2:
+		return "remote"
+	case 8:
+		return "bluetooth"
+	}
+	return fmt.Sprintf("unknown %d", u.Type)
+}
+
+func (u *PalesLogUser) isRemote() bool {
+	return u.Type == 2
+}
+
+func (u *PalesLogUser) isWeakReason() bool {
+	switch u.Reason {
+	case 1, 3, 4, 61:
+		return true
+	}
+	return false
+}
+
+func (u *PalesLogUser) Phone() string {
+	if u.isRemote() {
+		return u.UserId
+	}
+	switch len(u.UserId) {
+	case 10:
+		return "7" + u.UserId
+	case 9:
+		return "79" + u.UserId
+	}
+	return u.UserId
 }
 
 type PalesUsers struct {
@@ -177,6 +234,16 @@ type PalesUser struct {
 	}
 }
 
+func (u *PalesUser) name() string {
+	return fmt.Sprintf("%s %s %s", u.Id, u.Firstname, u.Lastname)
+}
+
+func (u *PalesUser) hasPlotNumber(n string) bool {
+	pattern := `(?i)(^|[^a-zа-я0-9])` + regexp.QuoteMeta(n) + `([^a-zа-я0-9]|$)`
+	re := regexp.MustCompile(pattern)
+	return re.MatchString(u.Firstname + " " + u.Lastname)
+}
+
 type ESPHomeRelayResp struct {
 	NameID string `json:"name_id"`
 	ID     string
@@ -206,36 +273,6 @@ func PalesUserFromCsv(row []string, cols map[string]int) *PalesUser {
 	return u
 }
 
-func (u *PalesUser) name() string {
-	return fmt.Sprintf("%s %s %s", u.Id, u.Firstname, u.Lastname)
-}
-
-func (u *PalesUser) hasPlotNumber(n string) bool {
-	pattern := `(?i)(^|[^a-zа-я0-9])` + regexp.QuoteMeta(n) + `([^a-zа-я0-9]|$)`
-	re := regexp.MustCompile(pattern)
-	return re.MatchString(u.Firstname + " " + u.Lastname)
-}
-
-func (u *PalesLogUser) timestamp() string {
-	return time.Unix(u.Tm, 0).In(Location).Format("2006-01-02 15:04:05")
-}
-
-func (u *PalesLogUser) typeName() string {
-	switch u.Type {
-	case 1:
-		return "dial"
-	case 100:
-		return "inet"
-	case 108:
-		return "bt-auto"
-	case 2:
-		return "remote"
-	case 8:
-		return "bluetooth"
-	}
-	return fmt.Sprintf("unknown %d", u.Type)
-}
-
 func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
 	g.Cfg = cfg
 	g.TelegramUrl = cfg.TelegramUrl
@@ -246,7 +283,6 @@ func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
 	g.Password = cfg.GatePwd
 	g.PalesPortalUser = cfg.PalesPortalUser
 	g.PalesPortalPwd = cfg.PalesPortalPwd
-	g.KeypadReleased = cfg.KeypadReleased
 	g.GateOpenNumber = cfg.GateOpenNumber
 	g.GateInfoNumber = cfg.GateInfoNumber
 	g.NtfyURL = cfg.NtfyURL
@@ -461,7 +497,7 @@ Loop:
 					continue
 				}
 				g.openGate(phone)
-				g.sendSystemNotification(fmt.Sprintf("%s dial2 ok  %s", call.timestamp(), name))
+				g.sendSystemNotification(fmt.Sprintf("OPENED %s dial2  %s", call.timestamp(), name))
 				continue
 			}
 			if call.CalledNumber == g.GateInfoNumber {
@@ -748,7 +784,7 @@ Loop:
 					} else {
 						// assert: remaining < 5*time.Second
 						g.openGate("timer")
-						g.sendSystemNotification("opened by timer")
+						g.sendSystemNotification("OPENED by timer")
 					}
 				}
 			}
@@ -1045,7 +1081,7 @@ func (g *Gate) checkAndOpenOnBT(bt *BLETracking, cfg *config.Config) {
 		return
 	}
 	g.openGate(fmt.Sprintf("%s %s", bt.MAC, phone))
-	g.sendSystemNotification(fmt.Sprintf("%s BLE:%s ok  %s", bt.timestamp(), bt.MAC, u.name()))
+	g.sendSystemNotification(fmt.Sprintf("OPENED by BLE: %s (%s)  %s", bt.MAC, bt.timestamp(), u.name()))
 }
 
 func (g *Gate) sendToTelegramMsg(tt []*BLETracking, cfg *config.Config) {
@@ -1249,7 +1285,7 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 		}
 		n++
 		if l.Approved {
-			g.updateLastOpenedTime(time.Unix(l.Tm, 0))
+			g.updateLastOpenedTime(l.Time())
 		}
 		var approved string
 		if !l.Approved {
@@ -1262,10 +1298,24 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 		msg.WriteString(fmt.Sprintf("%s %s %s %s %s%s %s \n", l.timestamp(), l.typeName(), l.UserId, sn,
 			l.Firstname, l.Lastname, approved))
 	}
-	if n > 0 {
-		g.palesLastLog = result.Log.List[len(result.Log.List)-1]
-		Logger.Infof("received %d pal-es log records", len(result.Log.List))
-		g.sendSystemNotification(msg.String())
+	if n == 0 {
+		return resp.StatusCode
+
+	}
+	g.palesLastLog = result.Log.List[len(result.Log.List)-1]
+	Logger.Infof("received %d pal-es log records", len(result.Log.List))
+	g.sendSystemNotification(msg.String())
+	l := g.palesLastLog
+	if l.Approved || l.isRemote() || !l.isWeakReason() ||
+		time.Since(l.Time()) > 3*time.Minute ||
+		time.Since(time.Unix(0, g.lastOpenedTime.Load())) < time.Minute {
+
+		return resp.StatusCode
+	}
+	phone := l.Phone()
+	if g.allowed(phone) {
+		g.openGate(phone)
+		g.sendSystemNotification(fmt.Sprintf("OPENED by received log %s", phone))
 	}
 	return resp.StatusCode
 }
@@ -1435,10 +1485,8 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			code.EndTimeMilli = time.Now().Add(time.Duration(code.TTLMinutes) * time.Minute).UnixMilli()
 			g.KeypadCodes.Update(code)
 		}
-		if g.KeypadReleased {
-			g.openGate(fmt.Sprintf("keypad %s", code.Code))
-		}
-		g.sendSystemNotification(fmt.Sprintf("keypad code OK %s, sent open command", code.Code))
+		g.openGate(fmt.Sprintf("keypad %s", code.Code))
+		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s", code.Code))
 		if code.Temporal() {
 			g.sendUserNotification(fmt.Sprintf("гость %s успешно ввел код", maskPhone(code.RequesterPhone)))
 		}
@@ -1450,13 +1498,13 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 				info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
 				if g.allowed(phone) {
 					g.openGate(fmt.Sprintf("keypad %s", c.Code))
-					g.sendSystemNotification(fmt.Sprintf("keypad code OK %s", info))
+					g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s", info))
 					return nil
 				} else {
-					Logger.Warnf("masked phone is not allowed by register %s", phone)
+					Logger.Warnf("keypad code !OK %s . masked phone is not allowed by register", phone)
 				}
 			} else {
-				Logger.Warnf("masked phone is not found in gate register %s", phone)
+				Logger.Warnf("keypad code !OK %s . masked phone is not found in gate register", phone)
 			}
 		}
 	}
@@ -1479,7 +1527,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			return Err403Forbidden
 		}
 		g.openGate(fmt.Sprintf("keypad %s", c.Code))
-		g.sendSystemNotification(fmt.Sprintf("keypad code OK %s", info))
+		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s", info))
 		return nil
 	}
 	// phone 79990010203 или 89990010203
@@ -1493,7 +1541,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		}
 		u, ok := g.Phones[phone]
 		if !ok {
-			g.sendSystemNotification(fmt.Sprintf("phone %s is not found in gate register", phone))
+			g.sendSystemNotification(fmt.Sprintf("keypad code !OK %s . phone is not found in gate register", phone))
 			return Err403Forbidden
 		}
 		info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
@@ -1502,7 +1550,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			return Err403Forbidden
 		}
 		g.openGate(fmt.Sprintf("keypad %s", c.Code))
-		g.sendSystemNotification(fmt.Sprintf("keypad code OK %s", info))
+		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s", info))
 		return nil
 	}
 	g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))

@@ -936,17 +936,12 @@ func (a *BLETrackingWatchDog) watchAndOpen(t *BLETracking, prolongedPresence tim
 	if _, ok := a.g.Cfg.BTMacAutoOpenGate[t.MAC]; ok {
 		return
 	}
-	if a.startTime.IsZero() {
-		a.startTime = t.AsTime()
-		a.lastTime = a.startTime
-		return
-	}
 	lag := t.AsTime().Sub(a.lastTime)
 	if lag <= 0 {
 		return
 	}
 	if lag > time.Minute {
-		a.startTime = time.Time{}
+		a.startTime = t.AsTime()
 		a.lastTime = a.startTime
 		return
 	}
@@ -966,9 +961,6 @@ func (a *BLETrackingWatchDog) watchAndOpen(t *BLETracking, prolongedPresence tim
 			return
 		}
 	}
-	a.startTime = time.Time{}
-	a.lastTime = a.startTime
-
 	a.g.openGate("BLE timer", "OPENED by BLE timer")
 }
 

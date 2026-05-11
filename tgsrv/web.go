@@ -113,6 +113,10 @@ func (t *BLETracking) timestamp() string {
 	return time.Unix(t.Time, 0).In(Location).Format("2006-01-02 15:04:05")
 }
 
+func (t *BLETracking) AsTime() time.Time {
+	return time.Unix(t.Time, 0)
+}
+
 func (t *BLETracking) String() string {
 	var sb strings.Builder
 	sb.WriteString("BT-MAC ")
@@ -260,11 +264,12 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 
 	topicEvents := make(chan string, 1)
 	ws.schedule = make(chan map[string]int, 1)
+	ws.bleSchedule = make(chan map[string]int, 1)
 
 	go g.palesLoginAndLoadLoop(abort, topicEvents, cfg, cfgSub.Subscribe())
 	go g.handlingCalls(abort)
 	go g.handlingSmses(abort)
-	go g.handlingBLETracking(abort, cfg, cfgSub.Subscribe())
+	go g.handlingBLETracking(abort, cfg, cfgSub.Subscribe(), ws.bleSchedule)
 	go g.readingSMSesForSend(abort)
 	go g.handlingKeypadRequests(abort)
 	go g.sendingSystemNotification(abort)
@@ -366,6 +371,7 @@ type webSrv struct {
 	gate          *Gate
 	abort         chan struct{}
 	schedule      chan map[string]int
+	bleSchedule   chan map[string]int
 }
 
 func (s *webSrv) start(port int) {
@@ -1126,6 +1132,37 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		}
 		return
 	}
+	if req.Command == "/7_ble_timer" {
+		if req.Token != "xuxaxzxrttdttpyau5aw7zz3th" {
+			Logger.Infof("%s bad token", r.URL.Path)
+			http.Error(w, "wtf", http.StatusBadRequest)
+			return
+		}
+		text := strings.TrimSpace(req.Text)
+		var sch map[string]int
+		if text != "" {
+			var err error
+			if strings.Contains(text, ":") {
+				err = json.Unmarshal([]byte("{"+text+"}"), &sch)
+			} else {
+				sch = make(map[string]int)
+				var n int
+				n, err = strconv.Atoi(text)
+				sch["00:00"] = n
+			}
+			if err != nil {
+				encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
+			} else {
+				s.bleSchedule <- sch
+				bytes, _ := json.Marshal(sch)
+				encoder.Encode(NewMattermostResponse(fmt.Sprintf("%s schedule is set", strings.Trim(string(bytes), "{}"))))
+			}
+		} else {
+			s.bleSchedule <- sch
+			encoder.Encode(NewMattermostResponse("schedule is canceled"))
+		}
+		return
+	}
 	if req.Command == "/7_open_after_m" {
 		command := req.Command
 		if req.Token != "a97r7xopgtd48j653b8d9ru9yw" {
@@ -1149,7 +1186,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			lastTime := s.gate.lastOpenedTime.Load()
 			closedTime := time.Since(time.Unix(0, lastTime))
 			if closedTime > wait {
-				s.gate.openGate(command)
+				s.gate.openGate(command, "")
 				agoStr := "unknown"
 				if lastTime != 0 {
 					agoStr = (time.Duration(closedTime.Seconds()) * time.Second).String()

@@ -53,8 +53,9 @@ const (
 )
 
 type GateCommandAndText struct {
-	command GateCommand
-	text    string
+	command            GateCommand
+	text               string
+	systemNotification string
 }
 
 type Gate struct {
@@ -505,7 +506,7 @@ Loop:
 					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok, but call is overdue %d s  %s", call.timestamp(), elapsed/time.Second, name))
 					continue
 				}
-				g.openGate(phone)
+				g.openGate(phone, "")
 				g.sendSystemNotification(fmt.Sprintf("OPENED %s dial2  %s", call.timestamp(), name))
 				continue
 			}
@@ -688,8 +689,8 @@ func (g *Gate) sendNotification(msg string, system, user bool) {
 	}
 }
 
-func (g *Gate) openGate(text string) {
-	g.GateCommands <- &GateCommandAndText{command: Open, text: text}
+func (g *Gate) openGate(text, systemNotification string) {
+	g.GateCommands <- &GateCommandAndText{command: Open, text: text, systemNotification: systemNotification}
 }
 
 func (g *Gate) keepOpenGate() {
@@ -730,11 +731,16 @@ Loop:
 			switch cmd.command {
 			case Open:
 				if inOpenedState {
-					Logger.Infof("ignoring open command in opened state for: %q", cmd.text)
+					if cmd.systemNotification == "" {
+						Logger.Infof("ignoring open command in opened state for: %q", cmd.text)
+					}
 					continue
 				}
 				g.sendCommandToGate(cmd.text, now, cmd.command)
 				g.updateLastOpenedTime(now)
+				if cmd.systemNotification != "" {
+					g.sendSystemNotification(cmd.systemNotification)
+				}
 
 			case KeepOpen:
 				if inOpenedState {
@@ -792,7 +798,7 @@ Loop:
 						reset = true
 					} else {
 						// assert: remaining < 5*time.Second
-						g.openGate("timer")
+						g.openGate("timer", "")
 						g.sendSystemNotification("OPENED by timer")
 					}
 				}
@@ -920,7 +926,53 @@ func (a *BLETrackingAggregator) sendSystemNotification(t *BLETracking) {
 	a.g.sendSystemNotification(sb.String())
 }
 
-func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config) {
+type BLETrackingWatchDog struct {
+	g         *Gate
+	startTime time.Time
+	lastTime  time.Time
+}
+
+func (a *BLETrackingWatchDog) watchAndOpen(t *BLETracking, prolongedPresence time.Duration) {
+	if _, ok := a.g.Cfg.BTMacAutoOpenGate[t.MAC]; ok {
+		return
+	}
+	if a.startTime.IsZero() {
+		a.startTime = t.AsTime()
+		a.lastTime = a.startTime
+		return
+	}
+	lag := t.AsTime().Sub(a.lastTime)
+	if lag <= 0 {
+		return
+	}
+	if lag > time.Minute {
+		a.startTime = time.Time{}
+		a.lastTime = a.startTime
+		return
+	}
+	a.lastTime = t.AsTime()
+	duration := a.lastTime.Sub(a.startTime)
+	if duration < prolongedPresence {
+		return
+	}
+	reStartTime := time.Unix(0, a.g.lastOpenedTime.Load()).Add(time.Minute)
+	if a.startTime.Sub(reStartTime) < 0 {
+		a.startTime = reStartTime
+		if a.lastTime.Sub(a.startTime) < 0 {
+			a.lastTime = a.startTime
+		}
+		duration := a.lastTime.Sub(a.startTime)
+		if duration < prolongedPresence {
+			return
+		}
+	}
+	a.startTime = time.Time{}
+	a.lastTime = a.startTime
+
+	a.g.openGate("BLE timer", "OPENED by BLE timer")
+}
+
+func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config, bleSchedule <-chan map[string]int) {
 	var firstWaitIsOver <-chan time.Time
 	var nextWaitIsOver <-chan time.Time
 	const firstDuration = 3 * time.Second
@@ -929,6 +981,8 @@ func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgS
 	each30Second := time.NewTicker(30 * time.Second)
 	var tt []*BLETracking
 	aggr := BLETrackingAggregator{g: g}
+	watchDog := BLETrackingWatchDog{g: g}
+	sch := NewOpenSchedule(nil)
 Loop:
 	for {
 		select {
@@ -949,9 +1003,13 @@ Loop:
 				firstWaitIsOver = ticker.C
 			}
 			aggr.sendSystemNotification(t)
+			watchDog.watchAndOpen(t, time.Duration(sch.period(time.Now()))*time.Minute)
 
 		case <-each30Second.C:
 			aggr.sendSystemNotification(nil)
+
+		case s := <-bleSchedule:
+			sch = NewOpenSchedule(s)
 
 		case <-firstWaitIsOver:
 			ticker.Reset(nextDuration)
@@ -1089,7 +1147,7 @@ func (g *Gate) checkAndOpenOnBT(bt *BLETracking, cfg *config.Config) {
 		g.sendSystemNotification(fmt.Sprintf("%s BLE restricted %s", bt.timestamp(), u.name()))
 		return
 	}
-	g.openGate(fmt.Sprintf("%s %s", bt.MAC, phone))
+	g.openGate(fmt.Sprintf("%s %s", bt.MAC, phone), "")
 	g.sendSystemNotification(fmt.Sprintf("OPENED by BLE: %s (%s)  %s", bt.MAC, bt.timestamp(), u.name()))
 }
 
@@ -1330,7 +1388,7 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 	}
 	phone := l.Phone()
 	if g.allowed(phone) {
-		g.openGate(phone)
+		g.openGate(phone, "")
 		g.sendSystemNotification(fmt.Sprintf("OPENED by received log %s", phone))
 	}
 	return resp.StatusCode
@@ -1501,7 +1559,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			code.EndTimeMilli = time.Now().Add(time.Duration(code.TTLMinutes) * time.Minute).UnixMilli()
 			g.KeypadCodes.Update(code)
 		}
-		g.openGate(fmt.Sprintf("keypad %s", code.Code))
+		g.openGate(fmt.Sprintf("keypad %s", code.Code), "")
 		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s", code.Code))
 		if code.Temporal() {
 			g.sendUserNotification(fmt.Sprintf("гость %s успешно ввел код", maskPhone(code.RequesterPhone)))
@@ -1513,7 +1571,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			if u, ok := g.Phones[phone]; ok {
 				info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
 				if g.allowed(phone) {
-					g.openGate(fmt.Sprintf("keypad %s", c.Code))
+					g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
 					g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s", info))
 					return nil
 				} else {
@@ -1542,7 +1600,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
 			return Err403Forbidden
 		}
-		g.openGate(fmt.Sprintf("keypad %s", c.Code))
+		g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
 		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s", info))
 		return nil
 	}
@@ -1565,7 +1623,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
 			return Err403Forbidden
 		}
-		g.openGate(fmt.Sprintf("keypad %s", c.Code))
+		g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
 		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s", info))
 		return nil
 	}

@@ -1155,11 +1155,11 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 			} else {
 				s.bleSchedule <- sch
 				bytes, _ := json.Marshal(sch)
-				encoder.Encode(NewMattermostResponse(fmt.Sprintf("%s schedule is set", strings.Trim(string(bytes), "{}"))))
+				encoder.Encode(NewMattermostResponse(fmt.Sprintf("%s BLE schedule is set", strings.Trim(string(bytes), "{}"))))
 			}
 		} else {
 			s.bleSchedule <- sch
-			encoder.Encode(NewMattermostResponse("schedule is canceled"))
+			encoder.Encode(NewMattermostResponse("BLE schedule is canceled"))
 		}
 		return
 	}

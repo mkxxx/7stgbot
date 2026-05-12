@@ -42,6 +42,8 @@ import (
 const (
 	gateStateKey      = "gate.inOpenedState"
 	lastOpenedTimeKey = "gate.lastOpenedTime"
+	scheduleKey       = "gate.schedule"
+	bleScheduleKey    = "gate.bleSchedule"
 )
 
 type GateCommand int
@@ -712,13 +714,31 @@ indirect: POST /text/Relay_Turn_Off/set?value=text
 */
 func (g *Gate) handlingGateState(abort <-chan struct{}, cfg *config.Config, cfgSub chan *config.Config, schedule <-chan map[string]int) {
 	inOpenedState := false
-	s, err := g.Settings.Find(gateStateKey)
-	if err != nil {
-		Logger.Errorf("read setting %q error: %v", gateStateKey, err)
-	} else {
-		inOpenedState = s.ValueBool(false)
+	{
+		s, err := g.Settings.Find(gateStateKey)
+		if err != nil {
+			Logger.Errorf("read setting %q error: %v", gateStateKey, err)
+		} else {
+			inOpenedState = s.ValueBool(false)
+		}
 	}
 	sch := NewOpenSchedule(cfg.OpenSchedule)
+	nonCfgSch := false
+	{
+		s, err := g.Settings.Find(scheduleKey)
+		if err != nil {
+			Logger.Errorf("read setting %q error: %v", scheduleKey, err)
+		} else if s.ValueString() != "" {
+			var m map[string]int
+			err := json.Unmarshal([]byte(s.ValueString()), &m)
+			if err != nil {
+				Logger.Errorf("unmarshalling %q %q error: %v", scheduleKey, s.ValueString(), err)
+			} else {
+				sch = NewOpenSchedule(m)
+				nonCfgSch = true
+			}
+		}
+	}
 	ticker := time.NewTicker(time.Minute)
 	reset := false
 	lastOpenedTimeNano := g.lastOpenedTime.Load()
@@ -806,13 +826,25 @@ Loop:
 			g.syncGateRelayState(inOpenedState)
 
 		case cfg = <-cfgSub:
-			sch = NewOpenSchedule(cfg.OpenSchedule)
-
-		case s := <-schedule:
-			if len(s) == 0 {
-				s = cfg.OpenSchedule
+			if !nonCfgSch {
+				sch = NewOpenSchedule(cfg.OpenSchedule)
 			}
-			sch = NewOpenSchedule(s)
+
+		case m := <-schedule:
+			s := gate.Setting{Key: scheduleKey}
+			if len(m) != 0 {
+				bytes, _ := json.Marshal(m)
+				s.SetString(string(bytes))
+			}
+			err := g.Settings.Update(&s)
+			if err != nil {
+				Logger.Errorf("error saving to db %q: %v", s.Key, err)
+			}
+			nonCfgSch = len(m) != 0
+			if len(m) == 0 {
+				m = cfg.OpenSchedule
+			}
+			sch = NewOpenSchedule(m)
 
 		case <-abort:
 			break Loop
@@ -936,6 +968,9 @@ func (a *BLETrackingWatchDog) watchAndOpen(t *BLETracking, prolongedPresence tim
 	if _, ok := a.g.Cfg.BTMacAutoOpenGate[t.MAC]; ok {
 		return
 	}
+	if s, ok := a.g.Cfg.BTMacNames[t.MAC]; ok && strings.HasPrefix(s, "Ritsa:") {
+		return
+	}
 	lag := t.AsTime().Sub(a.lastTime)
 	if lag <= 0 {
 		return
@@ -975,6 +1010,18 @@ func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgS
 	aggr := BLETrackingAggregator{g: g}
 	watchDog := BLETrackingWatchDog{g: g}
 	sch := NewOpenSchedule(nil)
+	s, err := g.Settings.Find(bleScheduleKey)
+	if err != nil {
+		Logger.Errorf("read setting %q error: %v", bleScheduleKey, err)
+	} else if s.ValueString() != "" {
+		var m map[string]int
+		err := json.Unmarshal([]byte(s.ValueString()), &m)
+		if err != nil {
+			Logger.Errorf("unmarshalling %q %q error: %v", bleScheduleKey, s.ValueString(), err)
+		} else {
+			sch = NewOpenSchedule(m)
+		}
+	}
 Loop:
 	for {
 		select {
@@ -1000,8 +1047,17 @@ Loop:
 		case <-each30Second.C:
 			aggr.sendSystemNotification(nil)
 
-		case s := <-bleSchedule:
-			sch = NewOpenSchedule(s)
+		case m := <-bleSchedule:
+			sch = NewOpenSchedule(m)
+			s := gate.Setting{Key: bleScheduleKey}
+			if len(m) != 0 {
+				bytes, _ := json.Marshal(m)
+				s.SetString(string(bytes))
+			}
+			err := g.Settings.Update(&s)
+			if err != nil {
+				Logger.Errorf("error saving to db %q: %v", s.Key, err)
+			}
 
 		case <-firstWaitIsOver:
 			ticker.Reset(nextDuration)

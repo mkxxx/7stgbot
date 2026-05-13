@@ -28,7 +28,6 @@ import (
 
 	"github.com/gocarina/gocsv"
 	"github.com/robfig/cron/v3"
-	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
 	"github.com/gorilla/schema"
@@ -61,7 +60,6 @@ const (
 	internetPath                 = "/docs/internet"
 	internetElectrCSVPath        = "/docs/electr.csv"
 	internetDocsPath             = "/docs"
-	blePath                      = "/ble"
 	ble2Path                     = "/ble2"
 	gateOnCallPath               = "/gate/call"
 	gateOpenedPath               = "/gate/opened"
@@ -591,37 +589,6 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		s.serveTemplate(w, r, Bool(false), func(s string) string {
 			return strings.Replace(s, "<script ", "{{end}}\n <script ", 1)
 		})
-		return
-	}
-	if r.URL.Path == blePath {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Resource not found", http.StatusNotFound)
-			return
-		}
-		defer r.Body.Close()
-		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-
-		bodyBytes, err := io.ReadAll(r.Body)
-		if err != nil {
-			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
-			http.Error(w, "cannot read request body", http.StatusInternalServerError)
-			return
-		}
-		var bleTracking BLETracking
-		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&bleTracking); err != nil {
-			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if Logger.Level().Enabled(zap.DebugLevel) {
-			Logger.Debugf("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d   %s",
-				bleTracking.MAC, bleTracking.RSSI, bleTracking.Name, bleTracking.Location, string(bodyBytes))
-		} else {
-			Logger.Infof("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d",
-				bleTracking.MAC, bleTracking.RSSI, bleTracking.Name, bleTracking.Location)
-		}
-		s.gate.bleTrackings <- &bleTracking
-		w.WriteHeader(http.StatusOK)
 		return
 	}
 	if r.URL.Path == ble2Path {

@@ -36,7 +36,7 @@ type Config struct {
 	KeypadHitLimit                int
 	KeypadHitLimitDurationMinutes int64
 	KeypadThrottleMinutes         int64
-	KeypadReleased                bool  // remove
+	KeypadReleased                bool // remove
 	NtfyURL                       string
 	NtfyToken                     string
 	OpenSchedule                  map[string]int // "09:00"=10\n"10:30"=5\n"22:00"=15   "hh:mm"=number_of_minutes
@@ -45,6 +45,7 @@ type Config struct {
 	BTMacIgnore                   map[string]string
 	BTMacAutoOpenGate             map[string]string
 	BTMacNames                    map[string]string
+	WiFiMACAutoOpenGate           map[string]string
 	MaskedPhones                  map[string]string
 	LogsTikerMinutes              int64
 }

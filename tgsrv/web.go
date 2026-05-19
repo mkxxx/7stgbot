@@ -274,6 +274,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	go g.sendingUserNotification(abort)
 	go g.listenPalESMQTT(abort, topicEvents)
 	go g.handlingGateState(abort, cfg, cfgSub.Subscribe(), ws.schedule)
+	go g.startSyslogListener(abort)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", ws.handle)

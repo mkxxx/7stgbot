@@ -73,6 +73,7 @@ type Gate struct {
 	phoneCalls             chan *PhoneCall
 	phoneSmses             chan *PhoneSms
 	bleTrackings           chan *BLETracking
+	wifiClients            chan *NetworkClientInfo
 	openedEvets            chan OpenTime
 	PalesPortalUser        string
 	PalesPortalPwd         string
@@ -319,6 +320,7 @@ func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
 	g.phoneCalls = make(chan *PhoneCall)
 	g.phoneSmses = make(chan *PhoneSms)
 	g.bleTrackings = make(chan *BLETracking, 8)
+	g.wifiClients = make(chan *NetworkClientInfo, 8)
 	g.openedEvets = make(chan OpenTime, 8)
 	g.bleTimes = make(map[string]time.Time)
 	g.palesLastLog = &PalesLogUser{}
@@ -1086,6 +1088,23 @@ Loop:
 			aggr.sendSystemNotification(t)
 			bleTimer.openAfterPeriodOfActivity(t, time.Duration(sch.period(time.Now()))*time.Minute)
 
+		case c := <-g.wifiClients:
+			g.sendSystemNotification(fmt.Sprintf("WiFi: %s %s %s (%s)", c.MAC, c.IP, c.Hostname, c.Timestamp))
+			phone, ok := cfg.WiFiMACAutoOpenGate[c.MAC]
+			if !ok {
+				continue
+			}
+			u, ok := g.Phones[phone]
+			if !ok {
+				continue
+			}
+			if !g.allowed(phone) {
+				g.sendSystemNotification(fmt.Sprintf("WiFi restricted %s", u.name()))
+				continue
+			}
+			g.openGate(fmt.Sprintf("WiFi %s %s", c.MAC, phone), "")
+			g.sendSystemNotification(fmt.Sprintf("OPENED by WiFi: %s (%s)  %s", c.MAC, c.Timestamp, u.name()))
+
 		case <-each30Second.C:
 			aggr.sendSystemNotification(nil)
 
@@ -1662,9 +1681,16 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s", info))
 		return nil
 	}
-	// phone 79990010203 или 89990010203
-	if len(c.Code) == 11 && (strings.HasPrefix(c.Code, "7") || strings.HasPrefix(c.Code, "8")) {
-		phone := "7" + c.Code[1:]
+	// phone 79990010203 или 89990010203 или 9990010203
+	if len(c.Code) == 11 && (strings.HasPrefix(c.Code, "7") || strings.HasPrefix(c.Code, "8")) ||
+		len(c.Code) == 10 && strings.HasPrefix(c.Code, "9") {
+
+		phone := ""
+		if len(c.Code) == 11 {
+			phone = "7" + c.Code[1:]
+		} else {
+			phone = "7" + c.Code
+		}
 		for _, v := range g.Cfg.MaskedPhones {
 			if phone == v {
 				g.sendSystemNotification(fmt.Sprintf("SOMEONE TRIED ENTER MASKED PHONE %s", phone))

@@ -50,8 +50,8 @@ type GateCommand int
 
 const (
 	Open GateCommand = iota
-	KeepOpen
-	Close
+	KeepOpenBegin
+	KeepOpenEnd
 )
 
 type GateCommandAndText struct {
@@ -697,12 +697,12 @@ func (g *Gate) openGate(text, systemNotification string) {
 
 func (g *Gate) keepOpenGate() {
 	text := time.Now().In(Location).Format("2006-01-02 15:04:05")
-	g.GateCommands <- &GateCommandAndText{command: KeepOpen, text: text}
+	g.GateCommands <- &GateCommandAndText{command: KeepOpenBegin, text: text}
 }
 
-func (g *Gate) closeGate() {
+func (g *Gate) endKeepOpenGate() {
 	text := time.Now().In(Location).Format("2006-01-02 15:04:05")
-	g.GateCommands <- &GateCommandAndText{command: Close, text: text}
+	g.GateCommands <- &GateCommandAndText{command: KeepOpenEnd, text: text}
 }
 
 /*
@@ -762,7 +762,7 @@ Loop:
 					g.sendSystemNotification(cmd.systemNotification)
 				}
 
-			case KeepOpen:
+			case KeepOpenBegin:
 				if inOpenedState {
 					Logger.Infof("ignoring keep open command in opened state for: %q", cmd.text)
 					continue
@@ -776,7 +776,7 @@ Loop:
 				}
 				g.sendCommandToGate(cmd.text, now, cmd.command)
 
-			case Close:
+			case KeepOpenEnd:
 				if !inOpenedState {
 					Logger.Infof("ignoring close command in normal state for: %q", cmd.text)
 					continue
@@ -884,9 +884,9 @@ func (g *Gate) syncGateRelayState(inOpenedState bool) {
 		Logger.Warnf("relay state out of sync  %q", g.Cfg.GateRelayGetUrl)
 		now := time.Now()
 		if inOpenedState {
-			g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, KeepOpen)
+			g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, KeepOpenBegin)
 		} else {
-			g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, Close)
+			g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, KeepOpenEnd)
 		}
 	}
 }
@@ -899,9 +899,9 @@ func (g *Gate) sendCommandToGate(text string, now time.Time, cmd GateCommand) er
 	switch cmd {
 	case Open:
 		gurl = g.Cfg.GateRelayOnOffUrl
-	case KeepOpen:
+	case KeepOpenBegin:
 		gurl = g.Cfg.GateRelayOnUrl
-	case Close:
+	case KeepOpenEnd:
 		gurl = g.Cfg.GateRelayOffUrl
 	}
 	gurl = fmt.Sprintf(gurl, url.QueryEscape(text))
@@ -952,6 +952,10 @@ func (a *BLETrackingAggregator) sendSystemNotification(t *BLETracking) {
 			sb.WriteString("\n")
 		}
 		sb.WriteString(t.String())
+		if s, ok := a.g.Cfg.BTMacNames[t.MAC]; ok {
+			sb.WriteString(" ")
+			sb.WriteString(s)
+		}
 	}
 	a.lastSent = time.Now()
 	a.tt = a.tt[:0]
@@ -1431,15 +1435,18 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 		if l.Approved {
 			g.updateLastOpenedTime(l.Time())
 		}
+		var opened string
 		var approved string
-		if !l.Approved {
+		if l.Approved {
+			opened = "OPENED "
+		} else {
 			approved = fmt.Sprintf("!OK %d", l.Reason)
 		}
 		sn := ""
 		if !strings.HasSuffix(l.UserId, l.Sn) {
 			sn = l.Sn
 		}
-		msg.WriteString(fmt.Sprintf("%s %s %s %s %s%s %s \n", l.timestamp(), l.typeName(), l.UserId, sn,
+		msg.WriteString(fmt.Sprintf("%s %s %s %s %s %s%s %s \n", opened, l.timestamp(), l.typeName(), l.UserId, sn,
 			l.Firstname, l.Lastname, approved))
 
 		bb, err := json.Marshal(l)

@@ -1177,13 +1177,13 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		encoder.Encode(NewMattermostResponse("gate state changed to opened"))
 		return
 	}
-	if req.Command == "/7_close" {
+	if req.Command == "/7_keep_open_end" {
 		if req.Token != "5c6nsgpkpj837fmd5o63pxopge" {
 			Logger.Infof("%s bad token", r.URL.Path)
 			http.Error(w, "wtf", http.StatusBadRequest)
 			return
 		}
-		s.gate.closeGate()
+		s.gate.endKeepOpenGate()
 		encoder.Encode(NewMattermostResponse("gate state changed to normal"))
 		return
 	}

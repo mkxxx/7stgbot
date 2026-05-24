@@ -819,7 +819,7 @@ Loop:
 					} else {
 						// assert: remaining < 5*time.Second
 						g.openGate("timer", "")
-						g.sendSystemNotification("OPENED by timer")
+						g.sendSystemNotification(fmt.Sprintf("OPENED by timer %s", time.Now().In(Location).Format("15:04:05")))
 					}
 				}
 			}
@@ -1471,11 +1471,28 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 		return resp.StatusCode
 	}
 	phone := l.Phone()
+	// {"UserId":"","Sn":"","Approved":false,"Type":100,"Tm":1779650919,"Reason":3,"Firstname":"Михаил","Lastname":""}
+	if phone == "" {
+		phone = g.findPhoneByName(l.Firstname, l.Lastname)
+	}
 	if g.allowed(phone) {
 		g.openGate(phone, "")
 		g.sendSystemNotification(fmt.Sprintf("OPENED by received log %s", phone))
 	}
 	return resp.StatusCode
+}
+
+func (g *Gate) findPhoneByName(firstname, lastname string) string {
+	phone := ""
+	for p, u := range g.Phones {
+		if u.Firstname == firstname && u.Lastname == lastname {
+			if phone != "" {
+				return ""
+			}
+			phone = p
+		}
+	}
+	return phone
 }
 
 func (g *Gate) loadPalesTimeGroups() int {
@@ -1644,7 +1661,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			g.KeypadCodes.Update(code)
 		}
 		g.openGate(fmt.Sprintf("keypad %s", code.Code), "")
-		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s", code.Code))
+		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", code.Code, time.Now().In(Location).Format("15:04:05")))
 		if code.Temporal() {
 			g.sendUserNotification(fmt.Sprintf("гость %s успешно ввел код", maskPhone(code.RequesterPhone)))
 		}
@@ -1656,7 +1673,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 				info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
 				if g.allowed(phone) {
 					g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
-					g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s", info))
+					g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", info, time.Now().In(Location).Format("15:04:05")))
 					return nil
 				} else {
 					Logger.Warnf("keypad code !OK %s . masked phone is not allowed by register", phone)
@@ -1685,7 +1702,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			return Err403Forbidden
 		}
 		g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
-		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s", info))
+		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", info, time.Now().In(Location).Format("15:04:05")))
 		return nil
 	}
 	// phone 79990010203 или 89990010203 или 9990010203
@@ -1715,7 +1732,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			return Err403Forbidden
 		}
 		g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
-		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s", info))
+		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", info, time.Now().In(Location).Format("15:04:05")))
 		return nil
 	}
 	g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))

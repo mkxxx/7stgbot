@@ -56,7 +56,7 @@ func (g *Gate) connectAndReadPalESMQTT(token string, abort chan struct{}, topicE
 	}
 	conn, _, err := dialer.Dial(URL, header)
 	if err != nil {
-		Logger.Errorf("dial %s error:", URL, err)
+		Logger.Errorf("dial %s error: %v", URL, err)
 		topicEvents <- MQTT_ERROR
 		return
 	}

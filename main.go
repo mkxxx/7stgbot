@@ -140,7 +140,7 @@ func main() {
 
 	var g tgsrv.Gate
 	g.CfgDir = cfgDir
-	g.Phones = make(map[string]*tgsrv.PalesUser)
+	g.Phones = make(map[string]*tgsrv.PalESUser)
 	readCsv(filepath.Join(cfgDir, "pales_users.csv"), palgateUserFunc(g.Phones))
 	g.RestrictedPhones = make(map[string]bool)
 	readLines(filepath.Join(cfgDir, "gate-phones-restricted.txt"), func(s string, _ int) { g.RestrictedPhones[s] = true })
@@ -272,7 +272,7 @@ func readCsv(filePath string, f func([]string, map[string]int)) {
 	}
 }
 
-func palgateUserFunc(m map[string]*tgsrv.PalesUser) func([]string, map[string]int) {
+func palgateUserFunc(m map[string]*tgsrv.PalESUser) func([]string, map[string]int) {
 	return func(row []string, cols map[string]int) {
 		u := tgsrv.PalesUserFromCsv(row, cols)
 		m[row[cols["Phone number"]]] = u

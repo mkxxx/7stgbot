@@ -183,7 +183,7 @@ func TestPalEsEmptyTimeGroups(t *testing.T) {
 }
 
 func TestPalesUser(t *testing.T) {
-	u := PalesUser{Firstname: "Михаил", Lastname: "105"}
+	u := PalESUser{Firstname: "Михаил", Lastname: "105"}
 	if !u.hasPlotNumber("105") {
 		t.Errorf("got \"%s %s\" not has 105", u.Firstname, u.Lastname)
 	}
@@ -274,7 +274,6 @@ func TestOpenSchedule(t *testing.T) {
 "21:00" = 10
 "23:00" = 15
 `
-
 	var cfg TestConfig
 	_, err := toml.Decode(tomlData, &cfg)
 	if err != nil {
@@ -310,6 +309,49 @@ func TestOpenSchedule(t *testing.T) {
 			got := sch.period(tt.date)
 			if got != 55500000 {
 				t.Errorf("%s  got %v, want %v", tt.date.Format("15:04"), got, tt.want)
+			}
+		}
+	}
+}
+
+func TestFindPhoneWithMissingDigit(t *testing.T) {
+	type test struct {
+		ph   string
+		want string
+	}
+	{
+		phones := map[string]*PalESUser{
+			"79991234567": nil,
+		}
+		tests := []test{
+			{"7991234567", "79991234567"},
+			{"7999234567", "79991234567"},
+			{"7999134567", "79991234567"},
+			{"7999124567", "79991234567"},
+			{"7999123567", "79991234567"},
+			{"7999123467", "79991234567"},
+			{"7999123457", "79991234567"},
+			{"7999123456", "79991234567"},
+		}
+		for _, tt := range tests {
+			got := findPhoneWithMissingDigit(phones, tt.ph)
+			if got != tt.want {
+				t.Errorf("%q: got %q, want %q", tt.ph, got, tt.want)
+			}
+		}
+	}
+	{
+		phones := map[string]*PalESUser{
+			"79991234567": nil,
+			"79990234567": nil,
+		}
+		tests := []test{
+			{"7999234567", ""},
+		}
+		for _, tt := range tests {
+			got := findPhoneWithMissingDigit(phones, tt.ph)
+			if got != tt.want {
+				t.Errorf("%q: got %q, want %q", tt.ph, got, tt.want)
 			}
 		}
 	}

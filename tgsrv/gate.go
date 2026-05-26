@@ -61,7 +61,7 @@ type GateCommandAndText struct {
 }
 
 type Gate struct {
-	Phones                 map[string]*PalesUser
+	Phones                 map[string]*PalESUser
 	RestrictedPhones       map[string]bool
 	Cfg                    *config.Config
 	TelegramUrl            string
@@ -211,11 +211,11 @@ type PalesUsers struct {
 	Msg   string
 	Users struct {
 		Count int
-		List  []*PalesUser
+		List  []*PalESUser
 	}
 }
 
-type PalesUser struct {
+type PalESUser struct {
 	Id                  string `json:"_id"`
 	Firstname           string
 	Lastname            string
@@ -246,11 +246,11 @@ type PalesUser struct {
 	}
 }
 
-func (u *PalesUser) name() string {
+func (u *PalESUser) name() string {
 	return fmt.Sprintf("%s %s %s", u.Id, u.Firstname, u.Lastname)
 }
 
-func (u *PalesUser) hasPlotNumber(n string) bool {
+func (u *PalESUser) hasPlotNumber(n string) bool {
 	pattern := `(?i)(^|[^a-zа-я0-9])` + regexp.QuoteMeta(n) + `([^a-zа-я0-9]|$)`
 	re := regexp.MustCompile(pattern)
 	return re.MatchString(u.Firstname + " " + u.Lastname)
@@ -263,11 +263,11 @@ type ESPHomeRelayResp struct {
 	State  string
 }
 
-func PalesUserFromCsv(row []string, cols map[string]int) *PalesUser {
+func PalesUserFromCsv(row []string, cols map[string]int) *PalESUser {
 	//Phone number,First name,Last name,Admin,Linked device,Output 1,Time group,Remote control sn,Dial to open,Dial number (read only),Nearby only,Latch 1,Notes
 	//79991234567 ,          ,         ,FALSE,FALSE        ,TRUE    ,          ,                 ,TRUE        ,                       ,FALSE      ,FALSE  ,
 
-	u := new(PalesUser)
+	u := new(PalESUser)
 	u.Id = row[cols["Phone number"]]
 	u.Firstname = row[cols["First name"]]
 	u.Lastname = row[cols["Last name"]]
@@ -1093,7 +1093,8 @@ Loop:
 			bleTimer.openAfterPeriodOfActivity(t, time.Duration(sch.period(time.Now()))*time.Minute)
 
 		case c := <-g.wifiClients:
-			g.sendSystemNotification(fmt.Sprintf("WiFi: %s %s %s (%s)", c.MAC, c.IP, c.Hostname, c.Timestamp))
+			name, _ := cfg.WiFiMacNames[c.MAC]
+			g.sendSystemNotification(fmt.Sprintf("WiFi: %s %s %s (%s) %s", c.MAC, c.IP, c.Hostname, c.Timestamp, name))
 			phone, ok := cfg.WiFiMACAutoOpenGate[c.MAC]
 			if !ok {
 				continue
@@ -1715,28 +1716,80 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		} else {
 			phone = "7" + c.Code
 		}
-		for _, v := range g.Cfg.MaskedPhones {
-			if phone == v {
-				g.sendSystemNotification(fmt.Sprintf("SOMEONE TRIED ENTER MASKED PHONE %s", phone))
-				return nil
+		return g.phoneAsCodeEntered(phone, c)
+	}
+	if len(c.Code) == 12 && (strings.HasPrefix(c.Code, "79") || strings.HasPrefix(c.Code, "89")) {
+		n := len(c.Code)
+		for i := 2; i < n; i++ {
+			phone := "7" + c.Code[1:i] + c.Code[i+1:n]
+			if _, ok := g.Phones[phone]; ok {
+				return g.phoneAsCodeEntered(phone, c)
 			}
 		}
-		u, ok := g.Phones[phone]
-		if !ok {
-			g.sendSystemNotification(fmt.Sprintf("keypad code !OK %s . phone is not found in gate register", phone))
-			return Err403Forbidden
+	}
+	if len(c.Code) == 10 && (strings.HasPrefix(c.Code, "79") || strings.HasPrefix(c.Code, "89")) {
+		phone := findPhoneWithMissingDigit(g.Phones, c.Code)
+		if phone != "" {
+			return g.phoneAsCodeEntered(phone, c)
 		}
-		info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
-		if !g.allowed(phone) {
-			g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
-			return Err403Forbidden
-		}
-		g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
-		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", info, time.Now().In(Location).Format("15:04:05")))
-		return nil
 	}
 	g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
 	return Err400BadFormat
+}
+
+func findPhoneWithMissingDigit(phones map[string]*PalESUser, p string) string {
+	p = "7" + p[1:]
+	res := ""
+	for ph := range phones {
+		if !equalsMissingDigit1(ph, p) {
+			continue
+		}
+		if res != "" {
+			return ""
+		}
+		res = ph
+	}
+	return res
+}
+
+func equalsMissingDigit1(s1, s2 string) bool {
+	if s1[:7] == s2[:7] {
+		return equalsMissingDigit2(s1[7:], s2[7:])
+	}
+	return s1[len(s1)-4:] == s2[len(s2)-4:] && equalsMissingDigit2(s1[2:7], s2[2:6])
+}
+
+func equalsMissingDigit2(s1, s2 string) bool {
+	n := len(s2)
+	for i := 0; i < n; i++ {
+		if s1[i] == s2[i] {
+			continue
+		}
+		return s1[i+1:] == s2[i:]
+	}
+	return true
+}
+
+func (g *Gate) phoneAsCodeEntered(phone string, c KeypadCode) error {
+	for _, v := range g.Cfg.MaskedPhones {
+		if phone == v {
+			g.sendSystemNotification(fmt.Sprintf("SOMEONE TRIED ENTER MASKED PHONE %s", phone))
+			return nil
+		}
+	}
+	u, ok := g.Phones[phone]
+	if !ok {
+		g.sendSystemNotification(fmt.Sprintf("keypad code !OK %s . phone is not found in gate register", phone))
+		return Err403Forbidden
+	}
+	info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
+	if !g.allowed(phone) {
+		g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
+		return Err403Forbidden
+	}
+	g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
+	g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", info, time.Now().In(Location).Format("15:04:05")))
+	return nil
 }
 
 func (g *Gate) findTOTPPhoneByCode(phonePostfix string, totpCode string) string {

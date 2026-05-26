@@ -46,6 +46,7 @@ type Config struct {
 	BTMacAutoOpenGate             map[string]string
 	BTMacNames                    map[string]string
 	WiFiMACAutoOpenGate           map[string]string
+	WiFiMacNames                  map[string]string
 	MaskedPhones                  map[string]string
 	LogsTikerMinutes              int64
 }

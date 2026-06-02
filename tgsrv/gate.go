@@ -1668,7 +1668,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		}
 		return nil
 	}
-	if len(c.Code) >= 9 && len(c.Code) <= 11 {
+	if n >= 9 && n <= 11 {
 		if phone, ok := g.Cfg.MaskedPhones[c.Code]; ok {
 			if u, ok := g.Phones[phone]; ok {
 				info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
@@ -1685,9 +1685,9 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		}
 	}
 	// last 3 digits of phone and 6-digits totp code
-	if len(c.Code) == 9 {
-		totpCode := c.Code[len(c.Code)-6:]
-		phonePostfix := c.Code[:len(c.Code)-6]
+	if n == 9 {
+		totpCode := c.Code[n-6:]
+		phonePostfix := c.Code[:n-6]
 		phone := g.findTOTPPhoneByCode(phonePostfix, totpCode)
 		if phone == "" {
 			return Err403Forbidden
@@ -1707,19 +1707,18 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		return nil
 	}
 	// phone 79990010203 или 89990010203 или 9990010203
-	if len(c.Code) == 11 && (strings.HasPrefix(c.Code, "7") || strings.HasPrefix(c.Code, "8")) ||
-		len(c.Code) == 10 && strings.HasPrefix(c.Code, "9") {
+	if (n == 11 || n == 13 || n == 16) && (strings.HasPrefix(c.Code, "7") || strings.HasPrefix(c.Code, "8")) ||
+		n == 10 && strings.HasPrefix(c.Code, "9") {
 
 		phone := ""
-		if len(c.Code) == 11 {
-			phone = "7" + c.Code[1:]
-		} else {
+		if n == 10 {
 			phone = "7" + c.Code
+		} else {
+			phone = "7" + c.Code[1:11]
 		}
 		return g.phoneAsCodeEntered(phone, c)
 	}
-	if len(c.Code) == 12 && (strings.HasPrefix(c.Code, "79") || strings.HasPrefix(c.Code, "89")) {
-		n := len(c.Code)
+	if n == 12 && (strings.HasPrefix(c.Code, "79") || strings.HasPrefix(c.Code, "89")) {
 		for i := 2; i < n; i++ {
 			phone := "7" + c.Code[1:i] + c.Code[i+1:n]
 			if _, ok := g.Phones[phone]; ok {
@@ -1727,7 +1726,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			}
 		}
 	}
-	if len(c.Code) == 10 && (strings.HasPrefix(c.Code, "79") || strings.HasPrefix(c.Code, "89")) {
+	if n == 10 && (strings.HasPrefix(c.Code, "79") || strings.HasPrefix(c.Code, "89")) {
 		phone := findPhoneWithMissingDigit(g.Phones, c.Code)
 		if phone != "" {
 			return g.phoneAsCodeEntered(phone, c)

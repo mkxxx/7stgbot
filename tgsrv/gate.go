@@ -1451,7 +1451,12 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 		if !strings.HasSuffix(l.UserId, l.Sn) {
 			sn = l.Sn
 		}
-		msg.WriteString(fmt.Sprintf("%s %s %s %s %s %s%s %s \n", opened, l.timestamp(), l.typeName(), l.UserId, sn,
+		phone := l.Phone()
+		// {"UserId":"","Sn":"","Approved":false,"Type":100,"Tm":1779650919,"Reason":3,"Firstname":"Михаил","Lastname":""}
+		if phone == "" {
+			phone = g.findPhoneByName(l.Firstname, l.Lastname)
+		}
+		msg.WriteString(fmt.Sprintf("%s %s %s %s %s %s %s%s %s \n", opened, l.timestamp(), l.typeName(), phone, l.UserId, sn,
 			l.Firstname, l.Lastname, approved))
 
 		bb, err := json.Marshal(l)

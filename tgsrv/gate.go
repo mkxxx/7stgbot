@@ -484,32 +484,28 @@ Loop:
 		select {
 		case call := <-g.phoneCalls:
 			phone := strings.TrimPrefix(call.Phone, "+")
-			name := phone
-			u, ok := g.Phones[phone]
-			if ok {
-				name = u.name()
-			}
+			_, ok := g.Phones[phone]
 			if call.CalledNumber == g.GateOpenNumber {
 				if !ok {
 					g.sendSystemNotification(fmt.Sprintf("%s %s uknown", call.timestamp(), phone))
 					continue
 				}
-				if !g.allowed(phone) {
-					g.sendSystemNotification(fmt.Sprintf("%s dial2 restricted %s", call.timestamp(), name))
+				if !g.allowedNow(phone) {
+					g.sendSystemNotification(fmt.Sprintf("%s dial2 restricted %s %s", call.timestamp(), phone, g.userName(phone, "")))
 					continue
 				}
 				if time.Since(gateTime) < 10*time.Second {
-					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok, opening already in action %s", call.timestamp(), name))
+					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok, opening already in action %s %s", call.timestamp(), phone, g.userName(phone, "")))
 					continue
 				}
 				gateTime = time.Now()
 				elapsed := time.Since(call.time())
 				if elapsed > 20*time.Second {
-					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok, but call is overdue %d s  %s", call.timestamp(), elapsed/time.Second, name))
+					g.sendSystemNotification(fmt.Sprintf("%s dial2 ok, but call is overdue %d s  %s %s", call.timestamp(), elapsed/time.Second, phone, g.userName(phone, "")))
 					continue
 				}
 				g.openGate(phone, "")
-				g.sendSystemNotification(fmt.Sprintf("OPENED %s dial2  %s", call.timestamp(), name))
+				g.sendSystemNotification(fmt.Sprintf("OPENED %s dial2  %s %s", call.timestamp(), phone, g.userName(phone, "")))
 				continue
 			}
 			if call.CalledNumber == g.GateInfoNumber {
@@ -517,7 +513,7 @@ Loop:
 					g.sendUserNotification(fmt.Sprintf("%s не зарегистрирован", maskPhone(phone)))
 					continue
 				}
-				if !g.allowed(phone) {
+				if !g.allowedNow(phone) {
 					g.sendUserNotification(fmt.Sprintf("%s проезд запрещен", maskPhone(phone)))
 					continue
 				}
@@ -530,7 +526,7 @@ Loop:
 	}
 }
 
-func (g *Gate) allowed(phone string) bool {
+func (g *Gate) allowedNow(phone string) bool {
 	u, ok := g.Phones[phone]
 	if !ok {
 		return false
@@ -539,13 +535,21 @@ func (g *Gate) allowed(phone string) bool {
 		g.palEsTimeGroups.containsNow(u.TimeGroupId, u.TimeGroupName)
 }
 
-func (g *Gate) allowedUser(phone string) bool {
+func (g *Gate) allowedAllTime(phone string) bool {
 	u, ok := g.Phones[phone]
 	if !ok {
 		return false
 	}
-	gr := g.palEsTimeGroups.get(u.TimeGroupId, u.TimeGroupName)
-	return (u.DialToOpen || u.LocalOnly) && !g.RestrictedPhones[phone] && gr == nil
+	return (u.DialToOpen || u.LocalOnly) && !g.RestrictedPhones[phone] &&
+		g.palEsTimeGroups.get(u.TimeGroupId, u.TimeGroupName) == nil
+}
+
+func (g *Gate) userName(phone, defaultName string) string {
+	u, ok := g.Phones[phone]
+	if !ok {
+		return defaultName
+	}
+	return u.name()
 }
 
 func (g *Gate) handlingSmses(abort chan struct{}) {
@@ -579,7 +583,7 @@ Loop:
 			u, ok := g.Phones[phone]
 			allowed := false
 			if ok {
-				allowed = g.allowedUser(phone)
+				allowed = g.allowedAllTime(phone)
 				name = u.name()
 			}
 			if !ok {
@@ -996,12 +1000,12 @@ func (k *BLEGatekeeper) checkAndOpen(bt *BLETracking, cfg *config.Config) {
 	if t.Sub(lastMacTime) <= g.BLEPeriodSec*time.Second {
 		return
 	}
-	if !g.allowed(phone) {
-		g.sendSystemNotification(fmt.Sprintf("%s BLE restricted %s", bt.timestamp(), u.name()))
+	if !g.allowedNow(phone) {
+		g.sendSystemNotification(fmt.Sprintf("%s BLE restricted %s %s", bt.timestamp(), phone, u.name()))
 		return
 	}
 	g.openGate(fmt.Sprintf("%s %s", bt.MAC, phone), "")
-	g.sendSystemNotification(fmt.Sprintf("OPENED by BLE: %s (%s)  %s", bt.MAC, bt.timestamp(), u.name()))
+	g.sendSystemNotification(fmt.Sprintf("OPENED by BLE: %s (%s)  %s %s", bt.MAC, bt.timestamp(), phone, u.name()))
 }
 
 type BLETrackingTimer struct {
@@ -1103,12 +1107,12 @@ Loop:
 			if !ok {
 				continue
 			}
-			if !g.allowed(phone) {
+			if !g.allowedNow(phone) {
 				g.sendSystemNotification(fmt.Sprintf("WiFi restricted %s", u.name()))
 				continue
 			}
 			g.openGate(fmt.Sprintf("WiFi %s %s", c.MAC, phone), "")
-			g.sendSystemNotification(fmt.Sprintf("OPENED by WiFi: %s (%s)  %s", c.MAC, c.Timestamp, u.name()))
+			g.sendSystemNotification(fmt.Sprintf("OPENED by WiFi: %s (%s)  %s %s", c.MAC, c.Timestamp, phone, u.name()))
 
 		case <-each30Second.C:
 			aggr.sendSystemNotification(nil)
@@ -1476,9 +1480,9 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 	if phone == "" {
 		phone = g.findPhoneByName(l.Firstname, l.Lastname)
 	}
-	if g.allowed(phone) {
+	if g.allowedNow(phone) {
 		g.openGate(phone, "")
-		g.sendSystemNotification(fmt.Sprintf("OPENED by received log %s", phone))
+		g.sendSystemNotification(fmt.Sprintf("OPENED by received log %s  %s", phone, g.userName(phone, "")))
 	}
 	return resp.StatusCode
 }
@@ -1671,10 +1675,9 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 	if n >= 9 && n <= 11 {
 		if phone, ok := g.Cfg.MaskedPhones[c.Code]; ok {
 			if u, ok := g.Phones[phone]; ok {
-				info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
-				if g.allowed(phone) {
+				if g.allowedNow(phone) {
 					g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
-					g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", info, time.Now().In(Location).Format("15:04:05")))
+					g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s %s", c.Code, u.name(), time.Now().In(Location).Format("15:04:05")))
 					return nil
 				} else {
 					Logger.Warnf("keypad code !OK %s . masked phone is not allowed by register", phone)
@@ -1697,13 +1700,12 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			g.sendSystemNotification(fmt.Sprintf("keypad code %s is valid totp code for %s, but phone is not found in gate register", c.Code, phone))
 			return Err403Forbidden
 		}
-		info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
-		if !g.allowed(phone) {
-			g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
+		if !g.allowedNow(phone) {
+			g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s %s", c.Code, u.name()))
 			return Err403Forbidden
 		}
 		g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
-		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", info, time.Now().In(Location).Format("15:04:05")))
+		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s %s", c.Code, u.name(), time.Now().In(Location).Format("15:04:05")))
 		return nil
 	}
 	// phone 79990010203 или 89990010203 или 9990010203
@@ -1781,13 +1783,12 @@ func (g *Gate) phoneAsCodeEntered(phone string, c KeypadCode) error {
 		g.sendSystemNotification(fmt.Sprintf("keypad code !OK %s . phone is not found in gate register", phone))
 		return Err403Forbidden
 	}
-	info := fmt.Sprintf("%s %s %s", c.Code, u.Firstname, u.Lastname)
-	if !g.allowed(phone) {
-		g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s", info))
+	if !g.allowedNow(phone) {
+		g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s %s", c.Code, u.name()))
 		return Err403Forbidden
 	}
 	g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
-	g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", info, time.Now().In(Location).Format("15:04:05")))
+	g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s %s", c.Code, u.name(), time.Now().In(Location).Format("15:04:05")))
 	return nil
 }
 

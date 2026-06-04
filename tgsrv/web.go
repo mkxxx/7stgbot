@@ -925,7 +925,7 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			info := fmt.Sprintf("%s %s %s", phone, u.Firstname, u.Lastname)
-			if !s.gate.allowed(phone) {
+			if !s.gate.allowedNow(phone) {
 				s.gate.sendSystemNotification(fmt.Sprintf("mattermost: user restricted %s", info))
 				encoder.Encode(NewMattermostActionResponse("нет доступа к шлагбауму"))
 				return

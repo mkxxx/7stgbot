@@ -105,6 +105,11 @@ type Gate struct {
 	NtfyNotification       chan *Notification
 	NtfyURL                string
 	NtfyToken              string
+	FakeKeypad             atomic.Bool
+}
+
+func (g *Gate) setFakeKeypad(p bool) {
+	g.FakeKeypad.Store(p)
 }
 
 type Notification struct {
@@ -1640,6 +1645,11 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		return Err429TooManyRequests
 	}
 	n := len(c.Code)
+	if g.FakeKeypad.Load() {
+		g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
+		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s in FAKE mode %s", c.Code, time.Now().In(Location).Format("15:04:05")))
+		return nil
+	}
 	if n <= 5 && strings.HasPrefix(c.Code, "0") {
 		if c.Code == "000" {
 			g.sendUserNotification(fmt.Sprintf(`неизвесный гость ввел код %s "я приехал"`, c.Code))

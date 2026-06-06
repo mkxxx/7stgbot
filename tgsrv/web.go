@@ -1177,7 +1177,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		encoder.Encode(NewMattermostResponse("gate state changed to opened"))
 		return
 	}
-	if req.Command == "/7_keep_open_end" {
+	if req.Command == "/7_keep_open_cancel" {
 		if req.Token != "5c6nsgpkpj837fmd5o63pxopge" {
 			Logger.Infof("%s bad token", r.URL.Path)
 			http.Error(w, "wtf", http.StatusBadRequest)
@@ -1185,6 +1185,26 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		}
 		s.gate.endKeepOpenGate()
 		encoder.Encode(NewMattermostResponse("gate state changed to normal"))
+		return
+	}	
+	if req.Command == "/7_fake_keypad" {
+		if req.Token != "3tf8u9qk1jr7tf7yjyxb4pponr" {
+			Logger.Infof("%s bad token", r.URL.Path)
+			http.Error(w, "wtf", http.StatusBadRequest)
+			return
+		}
+		s.gate.setFakeKeypad(true)
+		encoder.Encode(NewMattermostResponse("fake keypad is set"))
+		return
+	}
+	if req.Command == "/7_fake_keypad_cancel" {
+		if req.Token != "way3sz1qmidubrc93bishcizse" {
+			Logger.Infof("%s bad token", r.URL.Path)
+			http.Error(w, "wtf", http.StatusBadRequest)
+			return
+		}
+		s.gate.setFakeKeypad(false)
+		encoder.Encode(NewMattermostResponse("gate state changed to normal keypad"))
 		return
 	}
 	Logger.Warnf("unknown mattermost command: %s", req.Command)

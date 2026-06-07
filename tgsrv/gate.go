@@ -1645,109 +1645,122 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		return Err429TooManyRequests
 	}
 	n := len(c.Code)
-	if g.FakeKeypad.Load() {
-		g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
-		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s in FAKE mode %s", c.Code, time.Now().In(Location).Format("15:04:05")))
-		return nil
-	}
-	if n <= 5 && strings.HasPrefix(c.Code, "0") {
-		if c.Code == "000" {
-			g.sendUserNotification(fmt.Sprintf(`неизвесный гость ввел код %s "я приехал"`, c.Code))
-			return nil
-		}
-		if strings.HasPrefix(c.Code, "00") && n >= 3 && n <= 5 {
-			plotN, err := strconv.Atoi(c.Code)
-			if err == nil && plotN >= 1 && plotN <= 315 {
-				g.sendUserNotification(fmt.Sprintf("ввели код %s - гости %d участка запрашивают проезд", c.Code, plotN))
+	fakeMode := g.FakeKeypad.Load()
+	switch {
+	case true:
+		if n <= 5 && strings.HasPrefix(c.Code, "0") {
+			if c.Code == "000" {
+				g.sendUserNotification(fmt.Sprintf(`неизвесный гость ввел код %s "я приехал"`, c.Code))
 				return nil
 			}
-		}
-		g.sendUserNotification(fmt.Sprintf("неизвестный код %s", c.Code))
-		return Err400BadFormat
-
-	}
-	if n == 5 || n == 6 {
-		code, err := gate.Find(g.KeypadCodes, c.Code)
-		if err != nil {
-			Logger.Errorf("error finding kpcode %v", err)
-			return Err400BadFormat
-		}
-		if code == nil {
-			g.sendUserNotification(fmt.Sprintf("код %s не найден или уже закончил свое действие", c.Code))
-			return Err400BadFormat
-		}
-		if code.EndTimeMilli == 0 {
-			code.EndTimeMilli = time.Now().Add(time.Duration(code.TTLMinutes) * time.Minute).UnixMilli()
-			g.KeypadCodes.Update(code)
-		}
-		g.openGate(fmt.Sprintf("keypad %s", code.Code), "")
-		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", code.Code, time.Now().In(Location).Format("15:04:05")))
-		if code.Temporal() {
-			g.sendUserNotification(fmt.Sprintf("гость %s успешно ввел код", maskPhone(code.RequesterPhone)))
-		}
-		return nil
-	}
-	if n >= 9 && n <= 11 {
-		if phone, ok := g.Cfg.MaskedPhones[c.Code]; ok {
-			if u, ok := g.Phones[phone]; ok {
-				if g.allowedNow(phone) {
-					g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
-					g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s %s", c.Code, u.name(), time.Now().In(Location).Format("15:04:05")))
+			if strings.HasPrefix(c.Code, "00") && n >= 3 && n <= 5 {
+				plotN, err := strconv.Atoi(c.Code)
+				if err == nil && plotN >= 1 && plotN <= 315 {
+					g.sendUserNotification(fmt.Sprintf("ввели код %s - гости %d участка запрашивают проезд", c.Code, plotN))
 					return nil
-				} else {
-					Logger.Warnf("keypad code !OK %s . masked phone is not allowed by register", phone)
 				}
-			} else {
-				Logger.Warnf("keypad code !OK %s . masked phone is not found in gate register", phone)
+			}
+			if fakeMode {
+				break
+			}
+			g.sendUserNotification(fmt.Sprintf("неизвестный код %s", c.Code))
+			return Err400BadFormat
+
+		}
+		if n == 5 || n == 6 {
+			code, err := gate.Find(g.KeypadCodes, c.Code)
+			if err != nil {
+				Logger.Errorf("error finding kpcode %v", err)
+				return Err400BadFormat
+			}
+			if code == nil {
+				if fakeMode {
+					break
+				}
+				g.sendUserNotification(fmt.Sprintf("код %s не найден или уже закончил свое действие", c.Code))
+				return Err400BadFormat
+			}
+			if code.EndTimeMilli == 0 {
+				code.EndTimeMilli = time.Now().Add(time.Duration(code.TTLMinutes) * time.Minute).UnixMilli()
+				g.KeypadCodes.Update(code)
+			}
+			g.openGate(fmt.Sprintf("keypad %s", code.Code), "")
+			g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", code.Code, time.Now().In(Location).Format("15:04:05")))
+			if code.Temporal() {
+				g.sendUserNotification(fmt.Sprintf("гость %s успешно ввел код", maskPhone(code.RequesterPhone)))
+			}
+			return nil
+		}
+		if n >= 9 && n <= 11 {
+			if phone, ok := g.Cfg.MaskedPhones[c.Code]; ok {
+				if u, ok := g.Phones[phone]; ok {
+					if g.allowedNow(phone) {
+						g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
+						g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s %s", c.Code, u.name(), time.Now().In(Location).Format("15:04:05")))
+						return nil
+					} else {
+						Logger.Warnf("keypad code !OK %s . masked phone is not allowed by register", phone)
+					}
+				} else {
+					Logger.Warnf("keypad code !OK %s . masked phone is not found in gate register", phone)
+				}
 			}
 		}
-	}
-	// last 3 digits of phone and 6-digits totp code
-	if n == 9 {
-		totpCode := c.Code[n-6:]
-		phonePostfix := c.Code[:n-6]
-		phone := g.findTOTPPhoneByCode(phonePostfix, totpCode)
-		if phone == "" {
-			return Err403Forbidden
+		// last 3 digits of phone and 6-digits totp code
+		if n == 9 {
+			totpCode := c.Code[n-6:]
+			phonePostfix := c.Code[:n-6]
+			phone := g.findTOTPPhoneByCode(phonePostfix, totpCode)
+			if phone == "" {
+				if fakeMode {
+					break
+				}
+				return Err403Forbidden
+			}
+			u, ok := g.Phones[phone]
+			if !ok {
+				g.sendSystemNotification(fmt.Sprintf("keypad code %s is valid totp code for %s, but phone is not found in gate register", c.Code, phone))
+				return Err403Forbidden
+			}
+			if !g.allowedNow(phone) {
+				g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s %s", c.Code, u.name()))
+				return Err403Forbidden
+			}
+			g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
+			g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s %s", c.Code, u.name(), time.Now().In(Location).Format("15:04:05")))
+			return nil
 		}
-		u, ok := g.Phones[phone]
-		if !ok {
-			g.sendSystemNotification(fmt.Sprintf("keypad code %s is valid totp code for %s, but phone is not found in gate register", c.Code, phone))
-			return Err403Forbidden
-		}
-		if !g.allowedNow(phone) {
-			g.sendSystemNotification(fmt.Sprintf("keypad code: user restricted %s %s", c.Code, u.name()))
-			return Err403Forbidden
-		}
-		g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
-		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s %s", c.Code, u.name(), time.Now().In(Location).Format("15:04:05")))
-		return nil
-	}
-	// phone 79990010203 или 89990010203 или 9990010203
-	if (n == 11 || n == 13 || n == 16) && (strings.HasPrefix(c.Code, "7") || strings.HasPrefix(c.Code, "8")) ||
-		n == 10 && strings.HasPrefix(c.Code, "9") {
+		// phone 79990010203 или 89990010203 или 9990010203
+		if (n == 11 || n == 13 || n == 16) && (strings.HasPrefix(c.Code, "7") || strings.HasPrefix(c.Code, "8")) ||
+			n == 10 && strings.HasPrefix(c.Code, "9") {
 
-		phone := ""
-		if n == 10 {
-			phone = "7" + c.Code
-		} else {
-			phone = "7" + c.Code[1:11]
+			phone := ""
+			if n == 10 {
+				phone = "7" + c.Code
+			} else {
+				phone = "7" + c.Code[1:11]
+			}
+			return g.phoneAsCodeEntered(phone, c)
 		}
-		return g.phoneAsCodeEntered(phone, c)
-	}
-	if n == 12 && (strings.HasPrefix(c.Code, "79") || strings.HasPrefix(c.Code, "89")) {
-		for i := 2; i < n; i++ {
-			phone := "7" + c.Code[1:i] + c.Code[i+1:n]
-			if _, ok := g.Phones[phone]; ok {
+		if n == 12 && (strings.HasPrefix(c.Code, "79") || strings.HasPrefix(c.Code, "89")) {
+			for i := 2; i < n; i++ {
+				phone := "7" + c.Code[1:i] + c.Code[i+1:n]
+				if _, ok := g.Phones[phone]; ok {
+					return g.phoneAsCodeEntered(phone, c)
+				}
+			}
+		}
+		if n == 10 && (strings.HasPrefix(c.Code, "79") || strings.HasPrefix(c.Code, "89")) {
+			phone := findPhoneWithMissingDigit(g.Phones, c.Code)
+			if phone != "" {
 				return g.phoneAsCodeEntered(phone, c)
 			}
 		}
 	}
-	if n == 10 && (strings.HasPrefix(c.Code, "79") || strings.HasPrefix(c.Code, "89")) {
-		phone := findPhoneWithMissingDigit(g.Phones, c.Code)
-		if phone != "" {
-			return g.phoneAsCodeEntered(phone, c)
-		}
+	if fakeMode {
+		g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
+		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s in FAKE mode %s", c.Code, time.Now().In(Location).Format("15:04:05")))
+		return nil
 	}
 	g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
 	return Err400BadFormat

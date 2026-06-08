@@ -40,10 +40,10 @@ import (
 )
 
 const (
-	gateStateKey      = "gate.inOpenedState"
-	lastOpenedTimeKey = "gate.lastOpenedTime"
-	scheduleKey       = "gate.schedule"
-	bleScheduleKey    = "gate.bleSchedule"
+	gateStateKey      = "g.inOpenedState.b"
+	lastOpenedTimeKey = "g.lastOpenedTime"
+	scheduleKey       = "g.schedule"
+	bleScheduleKey    = "g.bleSchedule"
 )
 
 type GateCommand int

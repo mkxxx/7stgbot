@@ -1186,7 +1186,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		s.gate.endKeepOpenGate()
 		encoder.Encode(NewMattermostResponse("gate state changed to normal"))
 		return
-	}	
+	}
 	if req.Command == "/7_fake_keypad" {
 		if req.Token != "3tf8u9qk1jr7tf7yjyxb4pponr" {
 			Logger.Infof("%s bad token", r.URL.Path)
@@ -1205,6 +1205,48 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		}
 		s.gate.setFakeKeypad(false)
 		encoder.Encode(NewMattermostResponse("gate state changed to normal keypad"))
+		return
+	}
+	if req.Command == "/7_set" {
+		if req.Token != "pgxynxmuobbmudhfwgge7tyhxy" {
+			Logger.Infof("%s bad token", r.URL.Path)
+			http.Error(w, "wtf", http.StatusBadRequest)
+			return
+		}
+		text := strings.TrimSpace(req.Text)
+		if text == "" || !strings.Contains(text, " ") {
+			ss, err := s.gate.Settings.FindN(text)
+			if err != nil {
+				encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
+				return
+			}
+			if len(*ss) == 0 {
+				encoder.Encode(NewMattermostResponse("not found"))
+				return
+			}
+			var msg strings.Builder
+			for i, set := range *ss {
+				if i != 0 {
+					msg.WriteString("\n")
+				}
+				msg.WriteString(set.Key)
+				msg.WriteString(" ")
+				msg.WriteString(set.ValueString())
+			}
+			encoder.Encode(NewMattermostResponse(msg.String()))
+			return
+		}
+		i := strings.Index(text, " ")
+		key := text[:i]
+		value := strings.TrimSpace(text[i+1:])
+		set, err := s.gate.Settings.Find(key)
+		if err != nil {
+			encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
+			return
+		}
+		set.SetString(value)
+		s.gate.Settings.Update(set)
+		encoder.Encode(NewMattermostResponse("updated"))
 		return
 	}
 	Logger.Warnf("unknown mattermost command: %s", req.Command)

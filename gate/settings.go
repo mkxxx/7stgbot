@@ -46,6 +46,7 @@ func (s *Setting) SetBool(p bool) {
 
 type SettingsDAO interface {
 	Find(string) (*Setting, error)
+	FindN(string) (*[]Setting, error)
 	Update(p *Setting) error
 }
 
@@ -95,11 +96,35 @@ func (s *Settings) Find(key string) (*Setting, error) {
 	return &settings[0], nil
 }
 
+func (s *Settings) FindN(key string) (*[]Setting, error) {
+	rows, err := s.db.Query("SELECT key, value FROM settings WHERE key like ?", key+"%")
+	if err != nil {
+		Logger.Errorf("db select from settings %q error: %v", key, err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	settings := []Setting{}
+	for rows.Next() {
+		s := Setting{}
+		err = rows.Scan(&s.Key, &s.value)
+		if err != nil {
+			return nil, err
+		}
+		settings = append(settings, s)
+	}
+	return &settings, nil
+}
+
 type NullSettings struct {
 }
 
 func (s *NullSettings) Find(key string) (*Setting, error) {
 	return &Setting{Key: key}, nil
+}
+
+func (s *NullSettings) FindN(key string) (*[]Setting, error) {
+	return nil, nil
 }
 
 func (s *NullSettings) Update(p *Setting) error {

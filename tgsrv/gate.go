@@ -1173,13 +1173,14 @@ func (g *Gate) updateLastOpenedTime(now time.Time) {
 }
 
 func (g *Gate) handlingKeypadRequests(abort chan struct{}) {
-	codes := make(map[string]*gate.KeypadCode)
+	codes := make(map[string]bool)
 	cc, err := g.KeypadCodes.ListActive()
 	if err != nil {
 		Logger.Errorf("error reading db kpcodes: %v", err)
+		return
 	}
 	for _, c := range cc {
-		codes[c.Code] = &c
+		codes[c.Code] = true
 	}
 Loop:
 	for {
@@ -1660,7 +1661,6 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			}
 			g.sendUserNotification(fmt.Sprintf("неизвестный код %s", c.Code))
 			return Err400BadFormat
-
 		}
 		if n == 5 || n == 6 {
 			code, err := gate.Find(g.KeypadCodes, c.Code)
@@ -1675,15 +1675,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 				g.sendUserNotification(fmt.Sprintf("код %s не найден или уже закончил свое действие", c.Code))
 				return Err400BadFormat
 			}
-			if code.EndTimeMilli == 0 {
-				code.EndTimeMilli = time.Now().Add(time.Duration(code.TTLMinutes) * time.Minute).UnixMilli()
-				g.KeypadCodes.Update(code)
-			}
-			g.openGate(fmt.Sprintf("keypad %s", code.Code), "")
-			g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", code.Code, time.Now().In(Location).Format("15:04:05")))
-			if code.Temporal() {
-				g.sendUserNotification(fmt.Sprintf("гость %s успешно ввел код", maskPhone(code.RequesterPhone)))
-			}
+			g.openGateByCode(code)
 			return nil
 		}
 		if n >= 9 && n <= 11 {
@@ -1753,6 +1745,41 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		}
 	}
 	if badKeys != "" {
+		if n >= 3 && n < 6 {
+			cc, err := g.KeypadCodes.ListActive()
+			if err != nil {
+				Logger.Errorf("error reading db kpcodes: %v", err)
+			} else {
+				for _, kc := range cc {
+					if equalsLossy(badKeys, c.Code, kc.Code) {
+						g.openGateByCode(&kc)
+						return nil
+					}
+				}
+
+			}
+		}
+		if n >= 5 && n < 11 {
+			code := c.Code
+			if strings.HasPrefix(code, "89") {
+				code = code[1:]
+			}
+			if strings.HasPrefix(code, "9") {
+				code = "7" + code
+			}
+			if !strings.HasPrefix(code, "79") {
+				if strings.HasPrefix(code, "7") || strings.HasPrefix(code, "8") {
+					code = "79" + code[1:]
+				}
+			}
+			if strings.HasPrefix(code, "79") && len(code) >= 7 {
+				phone := findPhoneWithFailingKeys(g.Phones, badKeys, code)
+				if phone != "" {
+					return g.phoneAsCodeEntered(phone, c)
+				}
+			}
+		}
+		// TODO на третий раз
 		g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
 		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s in FAKE mode %s", c.Code, time.Now().In(Location).Format("15:04:05")))
 		return nil
@@ -1761,11 +1788,61 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 	return Err400BadFormat
 }
 
+func (g *Gate) openGateByCode(code *gate.KeypadCode) {
+	if code.EndTimeMilli == 0 {
+		code.EndTimeMilli = time.Now().Add(time.Duration(code.TTLMinutes) * time.Minute).UnixMilli()
+		g.KeypadCodes.Update(code)
+	}
+	g.openGate(fmt.Sprintf("keypad %s", code.Code), "")
+	g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", code.Code, time.Now().In(Location).Format("15:04:05")))
+	if code.Temporal() {
+		g.sendUserNotification(fmt.Sprintf("гость %s успешно ввел код", maskPhone(code.RequesterPhone)))
+	}
+}
+
+func equalsLossy(failingChars, lossyString, targetString string) bool {
+	i, j := 0, 0
+	for {
+		if i == len(lossyString) {
+			return true
+		}
+		if j == len(targetString) {
+			return false
+		}
+		b := targetString[j]
+		if lossyString[i] == b {
+			i++
+			j++
+			continue
+		}
+		if strings.IndexByte(failingChars, b) < 0 {
+			return false
+		}
+		j++
+	}
+
+}
+
 func findPhoneWithMissingDigit(phones map[string]*PalESUser, p string) string {
 	p = "7" + p[1:]
 	res := ""
 	for ph := range phones {
 		if !equalsMissingDigit1(ph, p) {
+			continue
+		}
+		if res != "" {
+			return ""
+		}
+		res = ph
+	}
+	return res
+}
+
+func findPhoneWithFailingKeys(phones map[string]*PalESUser, failingKeys, p string) string {
+	p = "7" + p[1:]
+	res := ""
+	for ph := range phones {
+		if !equalsLossy(failingKeys, p, ph) {
 			continue
 		}
 		if res != "" {

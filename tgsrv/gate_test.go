@@ -356,3 +356,27 @@ func TestFindPhoneWithMissingDigit(t *testing.T) {
 		}
 	}
 }
+
+func Test(t *testing.T) {
+	type test struct {
+		failingChars string
+		lossy        string
+		target       string
+		want         bool
+	}
+	tests := []test{
+		{"4", "7999123567", "79991234567", true},
+		{"", "7999123567", "79991234567", false},
+		{"47", "7999123567", "79991234567", true},
+		{"47", "799912356", "79991234567", true},
+		{"47", "99912356", "79991234567", true},
+		{"47", "9912356", "79991234567", false},
+	}
+	for _, tt := range tests {
+		got := equalsLossy(tt.failingChars, tt.lossy, tt.target)
+		if got != tt.want {
+			t.Errorf("%q %q %q: got %v, want %v", tt.failingChars, tt.lossy, tt.target, got, tt.want)
+		}
+	}
+
+}

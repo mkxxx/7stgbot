@@ -41,9 +41,10 @@ import (
 
 const (
 	gateStateKey      = "g.inOpenedState.b"
-	lastOpenedTimeKey = "g.lastOpenedTime"
+	lastOpenedTimeKey = "g.lastOpenedTime.i"
 	scheduleKey       = "g.schedule"
 	bleScheduleKey    = "g.bleSchedule"
+	badKeysKey        = "g.badKeys"
 )
 
 type GateCommand int
@@ -105,11 +106,6 @@ type Gate struct {
 	NtfyNotification       chan *Notification
 	NtfyURL                string
 	NtfyToken              string
-	FakeKeypad             atomic.Bool
-}
-
-func (g *Gate) setFakeKeypad(p bool) {
-	g.FakeKeypad.Store(p)
 }
 
 type Notification struct {
@@ -331,20 +327,15 @@ func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
 	g.palesLastLog = &PalesLogUser{}
 	g.lastOpenCommandTime = atomic.Int64{}
 	g.lastOpenedTime = atomic.Int64{}
-	s, err := g.Settings.Find(lastOpenedTimeKey)
-	if err != nil {
-		g.lastOpenedTime.Store(time.Now().Unix())
-	} else if s.ValueString() == "" {
-		g.lastOpenedTime.Store(time.Now().Unix())
-	} else {
-		n, err := strconv.Atoi(s.ValueString())
+	{
+		s, err := g.Settings.Find(lastOpenedTimeKey)
+		now := time.Now().Unix()
 		if err != nil {
-			Logger.Errorf("setting %q value error: %v", lastOpenedTimeKey, err)
+			g.lastOpenedTime.Store(now)
 		} else {
-			g.lastOpenedTime.Store(int64(n))
+			g.lastOpenedTime.Store(int64(s.ValueInt(int(now))))
 		}
 	}
-
 }
 
 type PalEsTimeGroups struct {
@@ -1645,7 +1636,11 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 		return Err429TooManyRequests
 	}
 	n := len(c.Code)
-	fakeMode := g.FakeKeypad.Load()
+	badKeys := ""
+	s, err := g.Settings.Find(badKeysKey)
+	if err == nil {
+		badKeys = s.ValueString()
+	}
 	switch {
 	case true:
 		if n <= 5 && strings.HasPrefix(c.Code, "0") {
@@ -1660,7 +1655,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 					return nil
 				}
 			}
-			if fakeMode {
+			if badKeys != "" {
 				break
 			}
 			g.sendUserNotification(fmt.Sprintf("неизвестный код %s", c.Code))
@@ -1674,7 +1669,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 				return Err400BadFormat
 			}
 			if code == nil {
-				if fakeMode {
+				if badKeys != "" {
 					break
 				}
 				g.sendUserNotification(fmt.Sprintf("код %s не найден или уже закончил свое действие", c.Code))
@@ -1712,7 +1707,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			phonePostfix := c.Code[:n-6]
 			phone := g.findTOTPPhoneByCode(phonePostfix, totpCode)
 			if phone == "" {
-				if fakeMode {
+				if badKeys != "" {
 					break
 				}
 				return Err403Forbidden
@@ -1757,7 +1752,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			}
 		}
 	}
-	if fakeMode {
+	if badKeys != "" {
 		g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
 		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s in FAKE mode %s", c.Code, time.Now().In(Location).Format("15:04:05")))
 		return nil

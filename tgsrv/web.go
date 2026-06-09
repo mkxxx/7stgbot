@@ -1187,26 +1187,6 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		encoder.Encode(NewMattermostResponse("gate state changed to normal"))
 		return
 	}
-	if req.Command == "/7_fake_keypad" {
-		if req.Token != "3tf8u9qk1jr7tf7yjyxb4pponr" {
-			Logger.Infof("%s bad token", r.URL.Path)
-			http.Error(w, "wtf", http.StatusBadRequest)
-			return
-		}
-		s.gate.setFakeKeypad(true)
-		encoder.Encode(NewMattermostResponse("fake keypad is set"))
-		return
-	}
-	if req.Command == "/7_fake_keypad_cancel" {
-		if req.Token != "way3sz1qmidubrc93bishcizse" {
-			Logger.Infof("%s bad token", r.URL.Path)
-			http.Error(w, "wtf", http.StatusBadRequest)
-			return
-		}
-		s.gate.setFakeKeypad(false)
-		encoder.Encode(NewMattermostResponse("gate state changed to normal keypad"))
-		return
-	}
 	if req.Command == "/7_set" {
 		if req.Token != "pgxynxmuobbmudhfwgge7tyhxy" {
 			Logger.Infof("%s bad token", r.URL.Path)
@@ -1239,13 +1219,23 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		i := strings.Index(text, " ")
 		key := text[:i]
 		value := strings.TrimSpace(text[i+1:])
-		set, err := s.gate.Settings.Find(key)
+		n := len(value)
+		value = strings.Trim(value, `"`)
+		if len(value) == n {
+			value = strings.Trim(value, "'")
+		}
+		set := gate.Setting{Key: key}
+		set.SetString(value)
+		err := set.Validate()
 		if err != nil {
 			encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
 			return
 		}
-		set.SetString(value)
-		s.gate.Settings.Update(set)
+		err = s.gate.Settings.Update(&set)
+		if err != nil {
+			encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
+			return
+		}
 		encoder.Encode(NewMattermostResponse("updated"))
 		return
 	}

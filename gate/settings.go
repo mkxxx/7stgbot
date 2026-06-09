@@ -44,6 +44,58 @@ func (s *Setting) SetBool(p bool) {
 	s.value = strconv.FormatBool(p)
 }
 
+func (s *Setting) ValueInt(def int) int {
+	if s.value == "" {
+		return def
+	}
+	v, err := strconv.Atoi(s.value)
+	if err != nil {
+		Logger.Errorf("setting %q parse %q error: ", s.Key, s.value, err)
+		return def
+	}
+	return v
+}
+
+func (s *Setting) SetInt(p int) {
+	s.value = strconv.Itoa(p)
+}
+
+func (s *Setting) ValueFloat(def float64) float64 {
+	if s.value == "" {
+		return def
+	}
+	v, err := strconv.ParseFloat(s.value, 64)
+	if err != nil {
+		Logger.Errorf("setting %q parse %q error: ", s.Key, s.value, err)
+		return def
+	}
+	return v
+}
+
+func (s *Setting) SetFloat(p float64) {
+	s.value = strconv.FormatFloat(p, 'f', -1, 64)
+}
+
+func (s *Setting) Validate() (err error) {
+	if s.value == "" {
+		return nil
+	}
+	n := len(s.Key)
+	if n < 3 {
+		return nil
+	}
+	suffex := s.Key[n-2:]
+	switch suffex {
+	case ".b":
+		_, err = strconv.ParseBool(s.value)
+	case ".i":
+		_, err = strconv.Atoi(s.value)
+	case ".f":
+		_, err = strconv.ParseFloat(s.value, 64)
+	}
+	return err
+}
+
 type SettingsDAO interface {
 	Find(string) (*Setting, error)
 	FindN(string) (*[]Setting, error)

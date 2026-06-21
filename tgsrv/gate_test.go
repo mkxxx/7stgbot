@@ -357,7 +357,7 @@ func TestFindPhoneWithMissingDigit(t *testing.T) {
 	}
 }
 
-func Test(t *testing.T) {
+func TestEqualsLossy(t *testing.T) {
 	type test struct {
 		failingChars string
 		lossy        string
@@ -379,4 +379,54 @@ func Test(t *testing.T) {
 		}
 	}
 
+}
+
+func TestGenerateCode(t *testing.T) {
+	type test struct {
+		badKeys string
+		rand    int
+		want    string
+		codes   map[string]bool
+	}
+	codes := make(map[string]bool)
+	tests := []test{ // единица добавляется в старший разряд
+		{"", 23456, "123456", codes},
+		{"", 23456, "123457", codes},
+		{"", 23456, "123458", codes},
+		{"4", 0, "100000", nil},
+		{"45", 0, "100000", nil},
+		{"456", 0, "100000", nil},
+		{"4", -1, "999999", nil},
+		{"45", -1, "999999", nil},
+		{"456", -1, "999999", nil},
+		{"4", -2, "999998", nil},
+		{"45", -2, "999998", nil},
+		{"456", -2, "999998", nil},
+		{"4", -4, "999996", nil},
+		{"45", -4, "999996", nil},
+		{"456", -4, "999993", nil},
+		{"4", -5, "999995", nil},
+		{"45", -5, "999993", nil},
+		{"456", -5, "999992", nil},
+		{"4", -6, "999993", nil},
+		{"45", -6, "999992", nil},
+		{"456", -6, "999991", nil},
+	}
+	for _, tt := range tests {
+		i := 0
+		f := func(n int) int {
+			i++
+			if tt.rand < 0 {
+				return n + tt.rand + i - 1
+			}
+			return tt.rand + i - 1
+		}
+		got := generateCodeFunc(f, len(tt.want), tt.badKeys, codes)
+		if tt.codes != nil {
+			tt.codes[got] = true
+		}
+		if got != tt.want {
+			t.Errorf("%q: got %v, want %v", tt.badKeys, got, tt.want)
+		}
+	}
 }

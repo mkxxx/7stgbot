@@ -45,6 +45,7 @@ const (
 	scheduleKey       = "g.schedule"
 	bleScheduleKey    = "g.bleSchedule"
 	badKeysKey        = "g.badKeys"
+	minCodeLenKey     = "g.minCodeLen.i"
 )
 
 type GateCommand int
@@ -1186,23 +1187,18 @@ Loop:
 	for {
 		select {
 		case sms := <-g.KeypadCodesRequests:
-			msg := sms.Sms
 			now := time.Now()
 			if sms.isTempCode() {
-				min := 100000
-				max := 999999
-				if msg == "30m" {
-					min = 10000
-					max = 99999
+				badKeys := ""
+				s, err := g.Settings.Find(badKeysKey)
+				if err == nil {
+					badKeys = s.ValueString()
 				}
-				code := ""
-				for {
-					n := rand.IntN(max-min+1) + min
-					code = strconv.Itoa(n)
-					if _, ok := codes[code]; !ok {
-						break
-					}
+				length := 6
+				if sms.Sms == "30m" {
+					length = 5
 				}
+				code := generateCode(length, badKeys, codes)
 				m := gate.NewSMS(sms.Phone, now.Add(20*time.Minute))
 				kpCode := &gate.KeypadCode{Code: code, RequesterPhone: sms.Phone, CreatedTimeMilli: time.Now().UnixMilli()}
 				hours := sms.tempCodeTTLHours()
@@ -1213,7 +1209,7 @@ Loop:
 					kpCode.EndTimeMilli = now.Add(30 * time.Minute).UnixMilli()
 					m.Msg = fmt.Sprintf("код для шлагбаума %s. действителен 30 мин", code)
 				}
-				err := g.KeypadCodes.Insert(kpCode)
+				err = g.KeypadCodes.Insert(kpCode)
 				if err != nil {
 					Logger.Errorf("error saving to db kpcodes: %v", err)
 					continue
@@ -1232,6 +1228,56 @@ Loop:
 		}
 	}
 
+}
+
+func generateCode(length int, badKeys string, codes map[string]bool) string {
+	return generateCodeFunc(rand.IntN, length, badKeys, codes)
+}
+
+func generateCodeFunc(randGen func(int) int, length int, badKeys string, codes map[string]bool) string {
+	alphabet := ""
+	base := 10 - len(badKeys)
+	if base < 10 {
+		for i := range 10 {
+			d := strconv.Itoa(i)
+			if strings.Contains(badKeys, d) {
+				continue
+			}
+			alphabet += d
+		}
+	}
+	min := int(math.Round(math.Pow(float64(base), float64(length-1))))
+	max := int(math.Round(math.Pow(float64(base), float64(length)))) - 1
+	code := ""
+	for {
+		n := randGen(max-min+1) + min
+		if base == 10 {
+			code = strconv.Itoa(n)
+		} else {
+			code = IntToBaseCustom(int64(n), alphabet)
+		}
+		if _, ok := codes[code]; !ok {
+			break
+		}
+	}
+	return code
+}
+
+func IntToBaseCustom(n int64, alphabet string) string {
+	base := int64(len(alphabet))
+	if base < 2 {
+		return ""
+	}
+	if n == 0 {
+		return string(alphabet[0])
+	}
+	result := ""
+	for n > 0 {
+		remainder := n % base
+		result = string(alphabet[remainder]) + result
+		n = n / base
+	}
+	return result
 }
 
 func (g *Gate) sendToTelegramMsg(tt []*BLETracking, cfg *config.Config) {
@@ -1779,10 +1825,16 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 				}
 			}
 		}
-		// TODO на третий раз
-		g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
-		g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s in FAKE mode %s", c.Code, time.Now().In(Location).Format("15:04:05")))
-		return nil
+		// TODO на третий/n-ный раз (через сеттинг)
+		s, err := g.Settings.Find(minCodeLenKey)
+		if err == nil {
+			minLen := s.ValueInt(0)
+			if minLen != 0 && n >= minLen {
+				g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
+				g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s in FAKE mode %s", c.Code, time.Now().In(Location).Format("15:04:05")))
+				return nil
+			}
+		}
 	}
 	g.sendSystemNotification(fmt.Sprintf("keypad code %s  %s", c.Code, c.timestampSent()))
 	return Err400BadFormat

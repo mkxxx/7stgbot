@@ -899,13 +899,12 @@ func (g *Gate) sendCommandToGate(text string, now time.Time, cmd GateCommand) er
 	gurl := ""
 	switch cmd {
 	case Open:
-		gurl = g.Cfg.GateRelayOnOffUrl
+		gurl = g.Cfg.GateRelayTextPostURL(g.Cfg.Gate.Relay.OnOffTextName, url.QueryEscape(text))
 	case KeepOpenBegin:
-		gurl = g.Cfg.GateRelayOnUrl
+		gurl = g.Cfg.GateRelayTextPostURL(g.Cfg.Gate.Relay.OnTextName, url.QueryEscape(text))
 	case KeepOpenEnd:
-		gurl = g.Cfg.GateRelayOffUrl
+		gurl = g.Cfg.GateRelayTextPostURL(g.Cfg.Gate.Relay.OffTextName, url.QueryEscape(text))
 	}
-	gurl = fmt.Sprintf(gurl, url.QueryEscape(text))
 	req, err := http.NewRequestWithContext(ctx, "POST", gurl, strings.NewReader(""))
 	if err != nil {
 		Logger.Errorf("%q: %v", gurl, err)

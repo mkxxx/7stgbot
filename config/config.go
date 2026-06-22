@@ -1,22 +1,35 @@
 package config
 
 import (
+	"fmt"
 	"time"
 )
 
 type Config struct {
-	Port                          int
-	StaticDir                     string
-	TgToken                       string
-	Price                         map[string]float64
-	Coef                          map[string]float64
-	QR                            map[string]string
-	DiscordAlertChannelURL        string
-	IfTTTKey                      string
-	AdminEmails                   []string
-	AdminPhone                    string
-	SMSRateLimiterCfg             map[string]int
-	SMSRateLimiter                []Rate
+	Port                   int
+	StaticDir              string
+	TgToken                string
+	Price                  map[string]float64
+	Coef                   map[string]float64
+	QR                     map[string]string
+	DiscordAlertChannelURL string
+	IfTTTKey               string
+	AdminEmails            []string
+	AdminPhone             string
+	SMSRateLimiterCfg      map[string]int
+	SMSRateLimiter         []Rate
+	Gate                   struct {
+		IP   string
+		User string
+		Pwd  string
+
+		Relay struct {
+			OnOffTextName string
+			OnTextName    string
+			OffTextName   string
+			SwitchName    string
+		}
+	}
 	GateRelayOnOffUrl             string
 	GateRelayOnUrl                string
 	GateRelayOffUrl               string
@@ -49,6 +62,18 @@ type Config struct {
 	WiFiMacNames                  map[string]string
 	MaskedPhones                  map[string]string
 	LogsTikerMinutes              int64
+}
+
+func (c *Config) GateRelayTextGetURL(name string) string {
+	return fmt.Sprintf("http://%s/text/%s", c.Gate.IP, name)
+}
+
+func (c *Config) GateRelayTextPostURL(name, value string) string {
+	return fmt.Sprintf("http://%s/text/%s/set?value=%s", c.Gate.IP, name, value)
+}
+
+func (c *Config) GateRelaySwitchGetURL(name string) string {
+	return fmt.Sprintf("http://%s/switch/%s", c.Gate.IP, name)
 }
 
 type ConfigSubscription struct {

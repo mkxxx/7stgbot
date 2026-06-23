@@ -315,9 +315,9 @@ func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
 	g.MattermostUsers = gate.NewMattermostUsers(db)
 	g.Settings = gate.NewSettings(db)
 	g.Stored = make(chan struct{}, 8)
-	g.TelegramNotification = make(chan *Notification, 32)
+	g.TelegramNotification = make(chan *Notification, 128)
 	g.GateCommands = make(chan *GateCommandAndText, 4)
-	g.NtfyNotification = make(chan *Notification, 32)
+	g.NtfyNotification = make(chan *Notification, 128)
 	g.KeypadCodesRequests = make(chan *PhoneSms, 32)
 	g.phoneCalls = make(chan *PhoneCall)
 	g.phoneSmses = make(chan *PhoneSms)
@@ -684,11 +684,18 @@ func (g *Gate) sendUserNotification(msg string) {
 
 func (g *Gate) sendNotification(msg string, system, user bool) {
 	if system {
-		g.TelegramNotification <- &Notification{msg: msg, system: system, user: user}
-		g.NtfyNotification <- &Notification{msg: msg, system: system, user: user}
+		select {
+		case g.TelegramNotification <- &Notification{msg: msg, system: system, user: user}:
+		default:
+			Logger.Warn("channel overflow - telegram: %s", msg)
+		}
 	}
-	if user {
-		g.NtfyNotification <- &Notification{msg: msg, system: system, user: user}
+	if system || user {
+		select {
+		case g.NtfyNotification <- &Notification{msg: msg, system: system, user: user}:
+		default:
+			Logger.Warn("channel overflow - ntfy: %s", msg)
+		}
 	}
 }
 

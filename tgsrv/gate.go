@@ -40,12 +40,12 @@ import (
 )
 
 const (
-	gateStateKey      = "g.inOpenedState.b"
-	lastOpenedTimeKey = "g.lastOpenedTime.i"
-	scheduleKey       = "g.schedule"
-	bleScheduleKey    = "g.bleSchedule"
-	badKeysKey        = "g.badKeys"
-	minCodeLenKey     = "g.minCodeLen.i"
+	gateInOpenStateKey = "g.inOpenedState.b"
+	lastOpenedTimeKey  = "g.lastOpenedTime.i"
+	scheduleKey        = "g.schedule"
+	bleScheduleKey     = "g.bleSchedule"
+	badKeysKey         = "g.badKeys"
+	minCodeLenKey      = "g.minCodeLen.i"
 )
 
 type GateCommand int
@@ -70,8 +70,6 @@ type Gate struct {
 	TelegramChatId         string
 	TelegramTimeoutSec     int
 	ProxyUrl               string
-	User                   string
-	Password               string
 	phoneCalls             chan *PhoneCall
 	phoneSmses             chan *PhoneSms
 	bleTrackings           chan *BLETracking
@@ -265,6 +263,10 @@ type ESPHomeRelayResp struct {
 	State  string
 }
 
+type ESPHomeTextResp struct {
+	Value string
+}
+
 func PalesUserFromCsv(row []string, cols map[string]int) *PalESUser {
 	//Phone number,First name,Last name,Admin,Linked device,Output 1,Time group,Remote control sn,Dial to open,Dial number (read only),Nearby only,Latch 1,Notes
 	//79991234567 ,          ,         ,FALSE,FALSE        ,TRUE    ,          ,                 ,TRUE        ,                       ,FALSE      ,FALSE  ,
@@ -293,8 +295,6 @@ func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
 	g.TelegramChatId = cfg.TelegramChatId
 	g.TelegramTimeoutSec = cfg.TelegramTimeoutSec
 	g.ProxyUrl = cfg.ProxyUrl
-	g.User = cfg.GateUser
-	g.Password = cfg.GatePwd
 	g.PalesPortalUser = cfg.PalesPortalUser
 	g.PalesPortalPwd = cfg.PalesPortalPwd
 	g.GateOpenNumber = cfg.GateOpenNumber
@@ -697,13 +697,11 @@ func (g *Gate) openGate(text, systemNotification string) {
 }
 
 func (g *Gate) keepOpenGate() {
-	text := time.Now().In(Location).Format("2006-01-02 15:04:05")
-	g.GateCommands <- &GateCommandAndText{command: KeepOpenBegin, text: text}
+	g.GateCommands <- &GateCommandAndText{command: KeepOpenBegin}
 }
 
 func (g *Gate) endKeepOpenGate() {
-	text := time.Now().In(Location).Format("2006-01-02 15:04:05")
-	g.GateCommands <- &GateCommandAndText{command: KeepOpenEnd, text: text}
+	g.GateCommands <- &GateCommandAndText{command: KeepOpenEnd}
 }
 
 /*
@@ -716,9 +714,9 @@ indirect: POST /text/Relay_Turn_Off/set?value=text
 func (g *Gate) handlingGateState(abort <-chan struct{}, cfg *config.Config, cfgSub chan *config.Config, schedule <-chan map[string]int) {
 	inOpenedState := false
 	{
-		s, err := g.Settings.Find(gateStateKey)
+		s, err := g.Settings.Find(gateInOpenStateKey)
 		if err != nil {
-			Logger.Errorf("read setting %q error: %v", gateStateKey, err)
+			Logger.Errorf("read setting %q error: %v", gateInOpenStateKey, err)
 		} else {
 			inOpenedState = s.ValueBool(false)
 		}
@@ -740,36 +738,49 @@ func (g *Gate) handlingGateState(abort <-chan struct{}, cfg *config.Config, cfgS
 			}
 		}
 	}
-	ticker := time.NewTicker(time.Minute)
+	minuteTicker := time.NewTicker(time.Minute)
+	var tenSecAfterErrorChan <-chan time.Time
 	reset := false
 	lastOpenedTimeNano := g.lastOpenedTime.Load()
+	var lastGateOpenCommand *GateCommandAndText
 
 Loop:
 	for {
 		select {
 		case cmd := <-g.GateCommands:
 			now := time.Now()
+			cmd.text += now.In(Location).Format(" 0102 15:04:05")
 			switch cmd.command {
 			case Open:
+				tenSecAfterErrorChan = nil
 				if inOpenedState {
 					if cmd.systemNotification == "" {
 						Logger.Infof("ignoring open command in opened state for: %q", cmd.text)
 					}
 					continue
 				}
-				g.sendCommandToGate(cmd.text, now, cmd.command)
+				lastGateOpenCommand = cmd
+				err := g.sendCommandToGate(cmd.text, now, cmd.command)
 				g.updateLastOpenedTime(now)
+				if err != nil {
+					tenSecAfterErrorChan = time.NewTicker(10 * time.Second).C
+				}
 				if cmd.systemNotification != "" {
-					g.sendSystemNotification(cmd.systemNotification)
+					if err != nil {
+						g.sendSystemNotification(fmt.Sprintf("%s error: %v", cmd.systemNotification, err))
+					} else {
+						g.sendSystemNotification(cmd.systemNotification)
+					}
 				}
 
 			case KeepOpenBegin:
+				tenSecAfterErrorChan = nil
 				if inOpenedState {
 					Logger.Infof("ignoring keep open command in opened state for: %q", cmd.text)
 					continue
 				}
 				inOpenedState = true
-				s := gate.Setting{Key: gateStateKey}
+				s := gate.Setting{Key: gateInOpenStateKey}
 				s.SetBool(true)
 				err := g.Settings.Update(&s)
 				if err != nil {
@@ -783,7 +794,7 @@ Loop:
 					continue
 				}
 				inOpenedState = false
-				s := gate.Setting{Key: gateStateKey}
+				s := gate.Setting{Key: gateInOpenStateKey}
 				s.SetBool(false)
 				err := g.Settings.Update(&s)
 				if err != nil {
@@ -792,9 +803,17 @@ Loop:
 				g.sendCommandToGate(cmd.text, now, cmd.command)
 			}
 
-		case <-ticker.C:
+		case <-tenSecAfterErrorChan:
+			now := time.Now()
+			ok, _ := g.resendAfterCheckCommandToGate(lastGateOpenCommand.text, now, lastGateOpenCommand.command)
+			g.updateLastOpenedTime(now)
+			if ok {
+				tenSecAfterErrorChan = nil
+			}
+
+		case <-minuteTicker.C:
 			if reset {
-				ticker.Reset(time.Minute)
+				minuteTicker.Reset(time.Minute)
 				reset = false
 			}
 			now := time.Now()
@@ -815,7 +834,7 @@ Loop:
 				remaining := time.Duration(minutes)*time.Minute - now.Sub(lot)
 				if remaining < time.Minute {
 					if remaining >= 5*time.Second {
-						ticker.Reset(remaining)
+						minuteTicker.Reset(remaining)
 						reset = true
 					} else {
 						// assert: remaining < 5*time.Second
@@ -853,81 +872,127 @@ Loop:
 	}
 }
 
-func (g *Gate) syncGateRelayState(inOpenedState bool) {
+func (g *Gate) syncGateRelayState(inOpenedState bool) error {
+	value, err := g.getGateSwitchValue()
+	if err != nil {
+		return err
+	}
+	if value == inOpenedState {
+		return nil
+	}
+	Logger.Warnf("relay state out of sync  %q", g.Cfg.GateRelaySwitchGetURL(g.Cfg.Gate.Relay.SwitchName))
+	now := time.Now()
+	if inOpenedState {
+		g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, KeepOpenBegin)
+	} else {
+		g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, KeepOpenEnd)
+	}
+	return nil
+}
+
+func (g *Gate) getGateSwitchValue() (bool, error) {
+	getURL := g.Cfg.GateRelaySwitchGetURL(g.Cfg.Gate.Relay.SwitchName)
+	var result ESPHomeRelayResp
+	err := g.doGateGet(getURL, &result)
+	if err != nil {
+		return false, err
+	}
+	return result.Value, nil
+}
+
+func (g *Gate) doGateGet(getURL string, result any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", g.Cfg.GateRelayGetUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", getURL, nil)
 	if err != nil {
 		Logger.Errorf("%v", err)
-		return
+		return err
 	}
-	req.SetBasicAuth(g.User, g.Password)
+	req.SetBasicAuth(g.Cfg.Gate.User, g.Cfg.Gate.Pwd)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		Logger.Errorf("GET %q error: %v", g.Cfg.GateRelayGetUrl, err)
-		return
+		Logger.Errorf("GET %q error: %v", getURL, err)
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		Logger.Errorf("GET %q response: %d", g.Cfg.GateRelayGetUrl, resp.StatusCode)
-		return
+		Logger.Errorf("GET %q response: %d", getURL, resp.StatusCode)
+		return fmt.Errorf("http %d", resp.StatusCode)
 	}
-	var result ESPHomeRelayResp
-	err = json.NewDecoder(resp.Body).Decode(&result)
+	err = json.NewDecoder(resp.Body).Decode(result)
 	if err != nil {
-		Logger.Errorf("error unmarshalling relay state %q: %v", g.Cfg.GateRelayGetUrl, err)
-		return
+		Logger.Errorf("error unmarshalling relay state %q: %v", getURL, err)
+		return err
 	}
-	if result.Value != inOpenedState {
-		Logger.Warnf("relay state out of sync  %q", g.Cfg.GateRelayGetUrl)
-		now := time.Now()
-		if inOpenedState {
-			g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, KeepOpenBegin)
-		} else {
-			g.sendCommandToGate(fmt.Sprintf("%s resynced", now.In(Location).Format("2006-01-02 15:04:05")), now, KeepOpenEnd)
-		}
-	}
+	return nil
 }
 
 func (g *Gate) sendCommandToGate(text string, now time.Time, cmd GateCommand) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	gurl := ""
-	switch cmd {
-	case Open:
-		gurl = g.Cfg.GateRelayTextPostURL(g.Cfg.Gate.Relay.OnOffTextName, url.QueryEscape(text))
-	case KeepOpenBegin:
-		gurl = g.Cfg.GateRelayTextPostURL(g.Cfg.Gate.Relay.OnTextName, url.QueryEscape(text))
-	case KeepOpenEnd:
-		gurl = g.Cfg.GateRelayTextPostURL(g.Cfg.Gate.Relay.OffTextName, url.QueryEscape(text))
-	}
-	req, err := http.NewRequestWithContext(ctx, "POST", gurl, strings.NewReader(""))
+	postURL := g.Cfg.GateRelayTextPostURL(g.gateESP32TextSensorName(cmd), url.QueryEscape(text))
+	req, err := http.NewRequestWithContext(ctx, "POST", postURL, strings.NewReader(""))
 	if err != nil {
-		Logger.Errorf("%q: %v", gurl, err)
+		Logger.Errorf("%q: %v", postURL, err)
 		return err
 	}
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	req.SetBasicAuth(g.User, g.Password)
+	req.SetBasicAuth(g.Cfg.Gate.User, g.Cfg.Gate.Pwd)
 
 	g.lastOpenCommandTime.Store(now.Unix())
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		Logger.Errorf("error calling gate %q: %v", gurl, err)
+		Logger.Errorf("error calling gate %q: %v", postURL, err)
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		Logger.Errorf("error calling gate %q: %d", gurl, resp.StatusCode)
+		Logger.Errorf("error calling gate %q: %d", postURL, resp.StatusCode)
 		return fmt.Errorf("http %d", resp.StatusCode)
 	}
 	Logger.Debugf("%q http %d", text, resp.StatusCode)
 	return err
+}
+
+func (g *Gate) getGateTextValue(cmd GateCommand) (string, error) {
+	getURL := g.Cfg.GateRelayTextGetURL(g.gateESP32TextSensorName(cmd))
+	var result ESPHomeTextResp
+	err := g.doGateGet(getURL, &result)
+	if err != nil {
+		return "", err
+	}
+	return result.Value, nil
+}
+
+func (g *Gate) resendAfterCheckCommandToGate(text string, now time.Time, cmd GateCommand) (bool, error) {
+	gateText, err := g.getGateTextValue(cmd)
+	if err != nil {
+		return false, err
+	}
+	if gateText == text {
+		return true, nil
+	}
+	err = g.sendCommandToGate(text, now, cmd)
+	return err == nil, err
+}
+
+func (g *Gate) gateESP32TextSensorName(cmd GateCommand) string {
+	textName := ""
+	switch cmd {
+	case Open:
+		textName = g.Cfg.Gate.Relay.OnOffTextName
+	case KeepOpenBegin:
+		textName = g.Cfg.Gate.Relay.OnTextName
+	case KeepOpenEnd:
+		textName = g.Cfg.Gate.Relay.OffTextName
+	}
+	return textName
 }
 
 type BLETrackingAggregator struct {

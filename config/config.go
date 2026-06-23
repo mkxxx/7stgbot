@@ -38,8 +38,6 @@ type Config struct {
 	TelegramChatId                string
 	TelegramTimeoutSec            int
 	ProxyUrl                      string
-	GateUser                      string
-	GatePwd                       string
 	PalesPortalUser               string
 	PalesPortalPwd                string
 	BleWatchLocation              int

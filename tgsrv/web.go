@@ -261,20 +261,19 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	}()
 
 	topicEvents := make(chan string, 1)
-	ws.schedule = make(chan map[string]int, 1)
-	ws.bleSchedule = make(chan map[string]int, 1)
 
 	go g.palesLoginAndLoadLoop(abort, topicEvents, cfg, cfgSub.Subscribe())
 	go g.handlingCalls(abort)
 	go g.handlingSmses(abort)
-	go g.handlingBLETracking(abort, cfg, cfgSub.Subscribe(), ws.bleSchedule)
+	go g.handlingBLETracking(abort, cfg, cfgSub.Subscribe())
 	go g.readingSMSesForSend(abort)
 	go g.handlingKeypadRequests(abort)
 	go g.sendingSystemNotification(abort)
 	go g.sendingUserNotification(abort)
 	go g.listenPalESMQTT(abort, topicEvents)
-	go g.handlingGateState(abort, cfg, cfgSub.Subscribe(), ws.schedule)
+	go g.handlingGateState(abort, cfg, cfgSub.Subscribe())
 	go g.startSyslogListener(abort)
+	go g.handlingScheduledJobs(abort, cfg)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", ws.handle)
@@ -369,8 +368,6 @@ type webSrv struct {
 	registry      atomic.Value
 	gate          *Gate
 	abort         chan struct{}
-	schedule      chan map[string]int
-	bleSchedule   chan map[string]int
 }
 
 func (s *webSrv) start(port int) {
@@ -947,300 +944,42 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request,
 		encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
 		return
 	}
-	if req.Command == "/7_totp_auth" {
-		// if !req.systemBotDirectMessage() {encoder.Encode(NewMattermostResponse("напишите это сообщение system-bot"))
-		if req.Token != "pbegqjtqu78w8nx5fw19sk6egc" {
-			Logger.Infof("%s bad token", r.URL.Path)
-			http.Error(w, "wtf", http.StatusBadRequest)
-			return
-		}
-		text := strings.TrimSpace(req.Text)
-		if text == "" {
-			if mmUser != nil {
-				encoder.Encode(NewMattermostResponse(fmt.Sprintf(
-					"Ваш подтвержденный номер телефона %s", maskPhone(mmUser.Phone))))
-				return
-			}
-		}
-		i := strings.LastIndex(text, " ")
-		if i < 0 {
-			encoder.Encode(NewMattermostResponse(fmt.Sprintf(
-				"формат команды: %s <номер телефона> <код totp>  например: %s 79990010203 123456", req.Command, req.Command)))
-			return
-		}
-		phone := text[:i]
-		code := text[i+1:]
-		replacer := strings.NewReplacer("+", "", "(", "", ")", "", "-", "", " ", "")
-		phone = replacer.Replace(phone)
-		if phone[:1] == "8" {
-			phone = "7" + phone[1:]
-		} else if phone[:1] != "7" {
-			phone = "7" + phone
-		}
-		if len(phone) != 11 {
-			encoder.Encode(NewMattermostResponse("номер телефона не распознан"))
-			return
-		}
-		_, err := strconv.Atoi(phone)
-		if err != nil {
-			encoder.Encode(NewMattermostResponse("номер телефона не распознан"))
-			return
-		}
-		if len(code) != 6 {
-			encoder.Encode(NewMattermostResponse("неверный формат кода TOTP"))
-			return
-		}
-		_, err = strconv.Atoi(code)
-		if err != nil {
-			encoder.Encode(NewMattermostResponse("неверный формат кода TOTP"))
-			return
-		}
-		valid, err := validateTOTPCodeForPhone(phone, code)
-		if err != nil {
-			Logger.Errorf("%s TOTP validation error phone: %s code: %s  %v", r.URL.Path, phone, code, err)
-			encoder.Encode(NewMattermostResponse("неверный код TOTP"))
-			return
-		}
-		if !valid {
-			Logger.Infof("%s TOTP validation is not OK  phone: %s code: %s", r.URL.Path, phone, code)
-			encoder.Encode(NewMattermostResponse("неверный код TOTP"))
-			return
-		}
-		u, err := s.gate.MattermostUsers.Find(req.UserId)
-		if err != nil {
-			Logger.Errorf("db error: %v", err)
-			encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
-			return
-		}
-		if u == nil {
-			err = s.gate.MattermostUsers.Insert(&gate.MattermostUser{UserId: req.UserId, Phone: phone})
-			if err != nil {
-				Logger.Errorf("db error: %v", err)
-				encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
-				return
-			}
-			encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден. Вам доступен функционал авторизованного пользоваеля."))
-			return
-		}
-		if u.Phone == phone {
-			encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден (повторно). Вам доступен функционал авторизованного пользоваеля."))
-			return
-		}
-		u.Phone = phone
-		s.gate.MattermostUsers.Update(u)
-		encoder.Encode(NewMattermostResponse("Ваш номер телефона изменен."))
+	token := mattermostToken(req.Command)
+	if token == "" {
+		Logger.Warnf("unknown mattermost command: %s", req.Command)
+		encoder.Encode(NewMattermostResponse("неизвестная команда"))
 		return
 	}
-	if req.Command == "/7_open" {
-		if req.Token != "gm9nyssncibhtkrkchdgicd1fe" {
-			Logger.Infof("%s bad token", r.URL.Path)
-			http.Error(w, "wtf", http.StatusBadRequest)
-			return
-		}
-		atts := MattermostUIResponse{Attachments: []*MattermostUIAttachment{{Text: "Открыть шлагбаум?"}}}
-		atts.Attachments[0].addAction(&MattermostUIAction{
-			Id:    "open_yes",
-			Name:  "Да",
-			Type:  UITypeButton,
-			Style: UIStylePrimary,
-			Integration: MMUIIntegration{
-				Url: fmt.Sprintf("%s/gate/mm/action", site),
-				Context: MMUIContext{
-					Action: UIActionOpen,
-					Value:  true,
-				},
-			},
-		})
-		atts.Attachments[0].addAction(&MattermostUIAction{
-			Id:    "open_no",
-			Name:  "Нет",
-			Type:  UITypeButton,
-			Style: UIStyleDefault,
-			Integration: MMUIIntegration{
-				Url: fmt.Sprintf("%s/gate/mm/action", site),
-				Context: MMUIContext{
-					Action: UIActionOpen,
-					Value:  false,
-				},
-			},
-		})
-		data, _ := json.Marshal(atts)
-		Logger.Debug(string(data))
-		encoder.Encode(atts)
+	if req.Token != token {
+		Logger.Infof("%s bad token", r.URL.Path)
+		http.Error(w, "wtf", http.StatusBadRequest)
 		return
 	}
-	if req.Command == "/7_timer" {
-		if req.Token != "mfpcfn4br7b37ngd1fhnkxq7wa" {
-			Logger.Infof("%s bad token", r.URL.Path)
-			http.Error(w, "wtf", http.StatusBadRequest)
-			return
-		}
-		text := strings.TrimSpace(req.Text)
-		var sch map[string]int
-		if text != "" {
-			var err error
-			if strings.Contains(text, ":") {
-				err = json.Unmarshal([]byte("{"+text+"}"), &sch)
-			} else {
-				sch = make(map[string]int)
-				var n int
-				n, err = strconv.Atoi(text)
-				sch["00:00"] = n
-			}
-			if err != nil {
-				encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
-			} else {
-				s.schedule <- sch
-				bytes, _ := json.Marshal(sch)
-				encoder.Encode(NewMattermostResponse(fmt.Sprintf("%s schedule is set", strings.Trim(string(bytes), "{}"))))
-			}
-		} else {
-			s.schedule <- sch
-			encoder.Encode(NewMattermostResponse("schedule is canceled"))
-		}
-		return
+	if !s.gate.handleMattermostSysCommand(req.Command, req.Text, encoder) {
+		s.gate.handleMattermostUserCommand(req, r.URL.Path, mmUser, encoder)
 	}
-	if req.Command == "/7_ble_timer" {
-		if req.Token != "xuxaxzxrttdttpyau5aw7zz3th" {
-			Logger.Infof("%s bad token", r.URL.Path)
-			http.Error(w, "wtf", http.StatusBadRequest)
-			return
-		}
-		text := strings.TrimSpace(req.Text)
-		var sch map[string]int
-		if text != "" {
-			var err error
-			if strings.Contains(text, ":") {
-				err = json.Unmarshal([]byte("{"+text+"}"), &sch)
-			} else {
-				sch = make(map[string]int)
-				var n int
-				n, err = strconv.Atoi(text)
-				sch["00:00"] = n
-			}
-			if err != nil {
-				encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
-			} else {
-				s.bleSchedule <- sch
-				bytes, _ := json.Marshal(sch)
-				encoder.Encode(NewMattermostResponse(fmt.Sprintf("%s BLE schedule is set", strings.Trim(string(bytes), "{}"))))
-			}
-		} else {
-			s.bleSchedule <- sch
-			encoder.Encode(NewMattermostResponse("BLE schedule is canceled"))
-		}
-		return
+}
+
+func mattermostToken(cmd string) string {
+	switch cmd {
+	case "/7_totp_auth":
+		return "pbegqjtqu78w8nx5fw19sk6egc"
+	case "/7_open":
+		return "gm9nyssncibhtkrkchdgicd1fe"
+	case "/7_timer":
+		return "mfpcfn4br7b37ngd1fhnkxq7wa"
+	case "/7_ble_timer":
+		return "xuxaxzxrttdttpyau5aw7zz3th"
+	case "/7_open_after_m":
+		return "a97r7xopgtd48j653b8d9ru9yw"
+	case "/7_keep_open":
+		return "abmqoykj1iynmkw91ned5nr6uh"
+	case "/7_keep_open_cancel":
+		return "5c6nsgpkpj837fmd5o63pxopge"
+	case "/7_set":
+		return "pgxynxmuobbmudhfwgge7tyhxy"
 	}
-	if req.Command == "/7_open_after_m" {
-		command := req.Command
-		if req.Token != "a97r7xopgtd48j653b8d9ru9yw" {
-			Logger.Infof("%s bad token", r.URL.Path)
-			http.Error(w, "wtf", http.StatusBadRequest)
-			return
-		}
-		text := strings.TrimSpace(req.Text)
-		if text == "" {
-			encoder.Encode(NewMattermostResponse("n of minutes expected"))
-			return
-		}
-		n, err := strconv.Atoi(text)
-		if err != nil {
-			encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
-			return
-		}
-		go func() {
-			wait := time.Duration(n) * time.Minute
-			time.Sleep(wait)
-			lastTime := s.gate.lastOpenedTime.Load()
-			closedTime := time.Since(time.Unix(0, lastTime))
-			if closedTime > wait {
-				s.gate.openGate(command, "")
-				agoStr := "unknown"
-				if lastTime != 0 {
-					agoStr = (time.Duration(closedTime.Seconds()) * time.Second).String()
-				}
-				s.gate.sendSystemNotification(fmt.Sprintf("opened by %s. previously opened %s ago", command, agoStr))
-			}
-		}()
-		encoder.Encode(NewMattermostResponse(fmt.Sprintf(
-			"opening after %d minutes at %s", n,
-			time.Now().Add(time.Duration(n)*time.Minute).In(Location).Format("15:04:05"))))
-		return
-	}
-	if req.Command == "/7_keep_open" {
-		if req.Token != "abmqoykj1iynmkw91ned5nr6uh" {
-			Logger.Infof("%s bad token", r.URL.Path)
-			http.Error(w, "wtf", http.StatusBadRequest)
-			return
-		}
-		s.gate.keepOpenGate()
-		encoder.Encode(NewMattermostResponse("gate state changed to opened"))
-		return
-	}
-	if req.Command == "/7_keep_open_cancel" {
-		if req.Token != "5c6nsgpkpj837fmd5o63pxopge" {
-			Logger.Infof("%s bad token", r.URL.Path)
-			http.Error(w, "wtf", http.StatusBadRequest)
-			return
-		}
-		s.gate.endKeepOpenGate()
-		encoder.Encode(NewMattermostResponse("gate state changed to normal"))
-		return
-	}
-	if req.Command == "/7_set" {
-		if req.Token != "pgxynxmuobbmudhfwgge7tyhxy" {
-			Logger.Infof("%s bad token", r.URL.Path)
-			http.Error(w, "wtf", http.StatusBadRequest)
-			return
-		}
-		text := strings.TrimSpace(req.Text)
-		if text == "" || !strings.Contains(text, " ") {
-			ss, err := s.gate.Settings.FindN(text)
-			if err != nil {
-				encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
-				return
-			}
-			if len(*ss) == 0 {
-				encoder.Encode(NewMattermostResponse("not found"))
-				return
-			}
-			var msg strings.Builder
-			for i, set := range *ss {
-				if i != 0 {
-					msg.WriteString("\n")
-				}
-				msg.WriteString(set.Key)
-				msg.WriteString(" ")
-				msg.WriteString(set.ValueString())
-			}
-			encoder.Encode(NewMattermostResponse(msg.String()))
-			return
-		}
-		i := strings.Index(text, " ")
-		key := text[:i]
-		value := strings.TrimSpace(text[i+1:])
-		n := len(value)
-		value = strings.Trim(value, `"`)
-		if len(value) == n {
-			value = strings.Trim(value, "'")
-		}
-		set := gate.Setting{Key: key}
-		set.SetString(value)
-		err := set.Validate()
-		if err != nil {
-			encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
-			return
-		}
-		err = s.gate.Settings.Update(&set)
-		if err != nil {
-			encoder.Encode(NewMattermostResponse(fmt.Sprintf("error: %v", err)))
-			return
-		}
-		encoder.Encode(NewMattermostResponse("updated"))
-		return
-	}
-	Logger.Warnf("unknown mattermost command: %s", req.Command)
-	encoder.Encode(NewMattermostResponse("неизвестная команда"))
+	return ""
 }
 
 func QRURL(year string, month string, plotNumber string) string {

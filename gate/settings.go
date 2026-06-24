@@ -1,9 +1,27 @@
 package gate
 
 import (
+	"bytes"
 	"database/sql"
+	"log"
 	"strconv"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
 )
+
+const ScheduledSettingsKeyPrefix = "mm-daily."
+
+var Location *time.Location
+
+func init() {
+	var err error
+	Location, err = time.LoadLocation("Europe/Moscow")
+	if err != nil {
+		log.Fatal(err)
+	}
+}
 
 const createSettings string = `
   CREATE TABLE IF NOT EXISTS settings (
@@ -93,7 +111,37 @@ func (s *Setting) Validate() (err error) {
 	case ".f":
 		_, err = strconv.ParseFloat(s.value, 64)
 	}
+	if err != nil {
+		return err
+	}
+	if s.IsScheduled() {
+		_, err = s.Schedule()
+	}
 	return err
+}
+
+func (s *Setting) IsScheduled() bool {
+	return strings.HasPrefix(s.Key, ScheduledSettingsKeyPrefix)
+}
+
+func (s *Setting) Schedule() (*Schedule, error) {
+	var sch Schedule
+	err := UnmarshalYAMLOneLine(s.value, &sch)
+	return &sch, err
+}
+
+func UnmarshalYAMLOneLine(p string, v any) error {
+	decoder := yaml.NewDecoder(bytes.NewReader([]byte(p)))
+	decoder.KnownFields(true)
+	return decoder.Decode(v)
+}
+
+func MarshalYAMLOneLine(v any) string {
+	var sb strings.Builder
+	encoder := yaml.NewEncoder(&sb)
+	encoder.SetIndent(0)
+	encoder.Encode(v)
+	return "{" + strings.TrimSuffix(strings.ReplaceAll(sb.String(), "\n", ","), ",") + "}"
 }
 
 type SettingsDAO interface {
@@ -181,4 +229,53 @@ func (s *NullSettings) FindN(key string) (*[]Setting, error) {
 
 func (s *NullSettings) Update(p *Setting) error {
 	return nil
+}
+
+type Schedule struct {
+	From          string `yaml:"from"`
+	To            string `yaml:"to"`
+	Args          string `yaml:"args,omitempty"`
+	ExecTimeMilli int64  `yaml:"execTimeMilli,omitempty"`
+	ExecError     string `yaml:"execError,omitempty"`
+	ExecResult    string `yaml:"execResult,omitempty"`
+}
+
+func (s *Schedule) IsTime(t time.Time) bool {
+	to := withTime(t, s.To)
+	from := withTime(t, s.From)
+	containsMidnight := from.After(to)
+	if containsMidnight {
+		from = from.AddDate(0, 0, -1)
+	}
+	if from.After(t) || !to.After(t) {
+		from = from.AddDate(0, 0, 1)
+		to = to.AddDate(0, 0, 1)
+		if from.After(t) || !to.After(t) {
+			return false
+		}
+	}
+	if s.ExecTimeMilli == 0 {
+		return true
+	}
+	lastTime := time.UnixMilli(s.ExecTimeMilli)
+	return from.After(lastTime) || !to.After(lastTime)
+}
+
+func withTime(t time.Time, tm string) time.Time {
+	if tm == "" {
+		return t
+	}
+	hh, mm, ss := 0, 0, 0
+	hhmmss := strings.Split(tm, ":")
+	n := len(hhmmss)
+	if n >= 1 {
+		hh, _ = strconv.Atoi(hhmmss[0])
+	}
+	if n >= 2 {
+		mm, _ = strconv.Atoi(hhmmss[1])
+	}
+	if n >= 3 {
+		ss, _ = strconv.Atoi(hhmmss[2])
+	}
+	return time.Date(t.Year(), t.Month(), t.Day(), hh, mm, ss, 0, Location)
 }

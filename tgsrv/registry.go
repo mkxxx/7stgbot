@@ -1,19 +1,11 @@
 package tgsrv
 
 import (
-	"log"
+	"7stgbot/gate"
 	"time"
 )
 
-var Location *time.Location
-
-func init() {
-	var err error
-	Location, err = time.LoadLocation("Europe/Moscow")
-	if err != nil {
-		log.Fatal(err)
-	}
-}
+var Location = gate.Location
 
 type SearchResult struct {
 	Total   int             `csv:"total"`

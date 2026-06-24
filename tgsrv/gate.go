@@ -105,6 +105,8 @@ type Gate struct {
 	NtfyNotification       chan *Notification
 	NtfyURL                string
 	NtfyToken              string
+	schedule               chan map[string]int
+	bleSchedule            chan map[string]int
 }
 
 type Notification struct {
@@ -337,6 +339,8 @@ func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
 			g.lastOpenedTime.Store(int64(s.ValueInt(int(now))))
 		}
 	}
+	g.schedule = make(chan map[string]int, 1)
+	g.bleSchedule = make(chan map[string]int, 1)
 }
 
 type PalEsTimeGroups struct {
@@ -718,7 +722,7 @@ direct: POST /switch/Main%20Relay/turn_off
 indirect: POST /text/Relay_Turn_On/set?value=text
 indirect: POST /text/Relay_Turn_Off/set?value=text
 */
-func (g *Gate) handlingGateState(abort <-chan struct{}, cfg *config.Config, cfgSub chan *config.Config, schedule <-chan map[string]int) {
+func (g *Gate) handlingGateState(abort <-chan struct{}, cfg *config.Config, cfgSub chan *config.Config) {
 	inOpenedState := false
 	{
 		s, err := g.Settings.Find(gateInOpenStateKey)
@@ -857,7 +861,7 @@ Loop:
 				sch = NewOpenSchedule(cfg.OpenSchedule)
 			}
 
-		case m := <-schedule:
+		case m := <-g.schedule:
 			s := gate.Setting{Key: scheduleKey}
 			if len(m) != 0 {
 				bytes, _ := json.Marshal(m)
@@ -877,6 +881,62 @@ Loop:
 			break Loop
 		}
 	}
+}
+
+func (g *Gate) handlingScheduledJobs(abort <-chan struct{}, cfg *config.Config) {
+	g.findAndApplyScheduledJobs()
+	minuteTicker := time.NewTicker(time.Minute)
+Loop:
+	for {
+		select {
+		case <-minuteTicker.C:
+			g.findAndApplyScheduledJobs()
+		case <-abort:
+			break Loop
+		}
+	}
+}
+
+func (g *Gate) findAndApplyScheduledJobs() error {
+	ss, err := g.Settings.FindN(gate.ScheduledSettingsKeyPrefix)
+	if err != nil {
+		return err
+	}
+	for i := range *ss {
+		s := &(*ss)[i]
+		sch, err := s.Schedule()
+		if err != nil {
+			Logger.Errorf("parse %s setting error: %v", s.Key, err)
+			continue
+		}
+		now := time.Now()
+		if !sch.IsTime(now) {
+			continue
+		}
+		cmd := "/" + s.Key[len(gate.ScheduledSettingsKeyPrefix):]
+		res, err := g.doHandleMattermostSysCommand(cmd, sch.Args)
+		if err == ErrNotFound {
+			Logger.Warnf("%s - unknown mattermost commad", cmd)
+			continue
+		}
+		sch.ExecTimeMilli = now.UnixMilli()
+		sch.ExecError = ""
+		if err != nil {
+			sch.ExecError = fmt.Sprintf("%v", err)
+		}
+		msg, ok := res.(string)
+		if !ok && res != nil {
+			var sb strings.Builder
+			encoder := json.NewEncoder(&sb)
+			encoder.Encode(res)
+			msg = sb.String()
+		}
+		sch.ExecResult = msg
+
+		s.SetString(gate.MarshalYAMLOneLine(&sch))
+		g.Settings.Update(s)
+	}
+	return nil
 }
 
 func (g *Gate) syncGateRelayState(inOpenedState bool) error {
@@ -1117,7 +1177,7 @@ func (a *BLETrackingTimer) openAfterPeriodOfActivity(t *BLETracking, prolongedPr
 	a.g.openGate("BLE timer", "OPENED by BLE timer")
 }
 
-func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config, bleSchedule <-chan map[string]int) {
+func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config) {
 	var firstWaitIsOver <-chan time.Time
 	var nextWaitIsOver <-chan time.Time
 	const firstDuration = 3 * time.Second
@@ -1185,7 +1245,7 @@ Loop:
 		case <-each30Second.C:
 			aggr.sendSystemNotification(nil)
 
-		case m := <-bleSchedule:
+		case m := <-g.bleSchedule:
 			sch = NewOpenSchedule(m)
 			s := gate.Setting{Key: bleScheduleKey}
 			if len(m) != 0 {
@@ -2301,4 +2361,269 @@ func decrypt(cryptoText string) (string, error) {
 	// Конвертируем байты обратно в число, а число в строку
 	num := binary.BigEndian.Uint64(plaintext)
 	return strconv.Itoa(int(num)), nil // %016d сохранит ведущие нули
+}
+
+var ErrNotFound = errors.New("not found")
+
+func (g *Gate) handleMattermostSysCommand(cmd, args string, encoder *json.Encoder) bool {
+	res, err := g.doHandleMattermostSysCommand(cmd, args)
+	if err == ErrNotFound {
+		return false
+	}
+	msg, isStr := res.(string)
+	if err != nil {
+		errMsg := fmt.Sprintf("error: %v", err)
+		if msg == "" {
+			msg = errMsg
+		} else {
+			msg += " " + errMsg
+		}
+	}
+	if !isStr {
+		encoder.Encode(res)
+	} else if msg != "" {
+		encoder.Encode(NewMattermostResponse(msg))
+	}
+	return true
+}
+
+func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err error) {
+	switch cmd {
+	case "/7_open":
+		atts := &MattermostUIResponse{Attachments: []*MattermostUIAttachment{{Text: "Открыть шлагбаум?"}}}
+		atts.Attachments[0].addAction(&MattermostUIAction{
+			Id:    "open_yes",
+			Name:  "Да",
+			Type:  UITypeButton,
+			Style: UIStylePrimary,
+			Integration: MMUIIntegration{
+				Url: fmt.Sprintf("%s/gate/mm/action", site),
+				Context: MMUIContext{
+					Action: UIActionOpen,
+					Value:  true,
+				},
+			},
+		})
+		atts.Attachments[0].addAction(&MattermostUIAction{
+			Id:    "open_no",
+			Name:  "Нет",
+			Type:  UITypeButton,
+			Style: UIStyleDefault,
+			Integration: MMUIIntegration{
+				Url: fmt.Sprintf("%s/gate/mm/action", site),
+				Context: MMUIContext{
+					Action: UIActionOpen,
+					Value:  false,
+				},
+			},
+		})
+		data, _ := json.Marshal(atts)
+		Logger.Debug(string(data))
+		return atts, nil
+
+	case "/7_timer":
+		text := strings.TrimSpace(args)
+		var sch map[string]int
+		if text == "" {
+			g.schedule <- sch
+			return "schedule is canceled", nil
+		}
+		var err error
+		if strings.Contains(text, ":") {
+			err = json.Unmarshal([]byte("{"+text+"}"), &sch)
+		} else {
+			sch = make(map[string]int)
+			var n int
+			n, err = strconv.Atoi(text)
+			sch["00:00"] = n
+		}
+		if err != nil {
+			return "", err
+		}
+		g.schedule <- sch
+		bytes, _ := json.Marshal(sch)
+		return fmt.Sprintf("%s schedule is set", strings.Trim(string(bytes), "{}")), nil
+
+	case "/7_ble_timer":
+		text := strings.TrimSpace(args)
+		var sch map[string]int
+		if text == "" {
+			g.bleSchedule <- sch
+			return "BLE schedule is canceled", nil
+		}
+		if strings.Contains(text, ":") {
+			return "", json.Unmarshal([]byte("{"+text+"}"), &sch)
+		}
+		sch = make(map[string]int)
+		n, err := strconv.Atoi(text)
+		if err != nil {
+			return "", err
+		}
+		sch["00:00"] = n
+		g.bleSchedule <- sch
+		bytes, _ := json.Marshal(sch)
+		return fmt.Sprintf("%s BLE schedule is set", strings.Trim(string(bytes), "{}")), nil
+
+	case "/7_open_after_m":
+		text := strings.TrimSpace(args)
+		if text == "" {
+			return "n of minutes expected", nil
+		}
+		n, err := strconv.Atoi(text)
+		if err != nil {
+			return "", err
+		}
+		go func() {
+			wait := time.Duration(n) * time.Minute
+			time.Sleep(wait)
+			lastTime := g.lastOpenedTime.Load()
+			closedTime := time.Since(time.Unix(0, lastTime))
+			if closedTime > wait {
+				g.openGate(cmd, "")
+				agoStr := "unknown"
+				if lastTime != 0 {
+					agoStr = (time.Duration(closedTime.Seconds()) * time.Second).String()
+				}
+				g.sendSystemNotification(fmt.Sprintf("opened by %s. previously opened %s ago", cmd, agoStr))
+			}
+		}()
+		return fmt.Sprintf(
+			"opening after %d minutes at %s", n,
+			time.Now().Add(time.Duration(n)*time.Minute).In(Location).Format("15:04:05")), nil
+
+	case "/7_keep_open":
+		g.keepOpenGate()
+		return "gate state changed to opened", nil
+
+	case "/7_keep_open_cancel":
+		g.endKeepOpenGate()
+		return "gate state changed to normal", nil
+
+	case "/7_set":
+		text := strings.TrimSpace(args)
+		if text == "" || !strings.Contains(text, " ") {
+			ss, err := g.Settings.FindN(text)
+			if err != nil {
+				return "", err
+			}
+			if len(*ss) == 0 {
+				return "not found", nil
+			}
+			var msg strings.Builder
+			for i, set := range *ss {
+				if i != 0 {
+					msg.WriteString("\n")
+				}
+				msg.WriteString(set.Key)
+				msg.WriteString(" ")
+				msg.WriteString(set.ValueString())
+			}
+			return msg.String(), nil
+		}
+		i := strings.Index(text, " ")
+		key := text[:i]
+		value := strings.TrimSpace(text[i+1:])
+		n := len(value)
+		value = strings.Trim(value, `"`)
+		if len(value) == n {
+			value = strings.Trim(value, "'")
+		}
+		set := gate.Setting{Key: key}
+		set.SetString(value)
+		err := set.Validate()
+		if err != nil {
+			return "", err
+		}
+		err = g.Settings.Update(&set)
+		if err != nil {
+			return "", err
+		}
+		return "updated", nil
+
+	default:
+		return "", ErrNotFound
+	}
+}
+
+func (g *Gate) handleMattermostUserCommand(req MattermostRequest, urlPath string, mmUser *gate.MattermostUser, encoder *json.Encoder) {
+	switch req.Command {
+	case "/7_totp_auth":
+		// if !req.systemBotDirectMessage() {encoder.Encode(NewMattermostResponse("напишите это сообщение system-bot"))
+		text := strings.TrimSpace(req.Text)
+		if text == "" {
+			if mmUser != nil {
+				encoder.Encode(NewMattermostResponse(fmt.Sprintf(
+					"Ваш подтвержденный номер телефона %s", maskPhone(mmUser.Phone))))
+				return
+			}
+		}
+		i := strings.LastIndex(text, " ")
+		if i < 0 {
+			encoder.Encode(NewMattermostResponse(fmt.Sprintf(
+				"формат команды: %s <номер телефона> <код totp>  например: %s 79990010203 123456", req.Command, req.Command)))
+			return
+		}
+		phone := text[:i]
+		code := text[i+1:]
+		replacer := strings.NewReplacer("+", "", "(", "", ")", "", "-", "", " ", "")
+		phone = replacer.Replace(phone)
+		if phone[:1] == "8" {
+			phone = "7" + phone[1:]
+		} else if phone[:1] != "7" {
+			phone = "7" + phone
+		}
+		if len(phone) != 11 {
+			encoder.Encode(NewMattermostResponse("номер телефона не распознан"))
+			return
+		}
+		_, err := strconv.Atoi(phone)
+		if err != nil {
+			encoder.Encode(NewMattermostResponse("номер телефона не распознан"))
+			return
+		}
+		if len(code) != 6 {
+			encoder.Encode(NewMattermostResponse("неверный формат кода TOTP"))
+			return
+		}
+		_, err = strconv.Atoi(code)
+		if err != nil {
+			encoder.Encode(NewMattermostResponse("неверный формат кода TOTP"))
+			return
+		}
+		valid, err := validateTOTPCodeForPhone(phone, code)
+		if err != nil {
+			Logger.Errorf("%s TOTP validation error phone: %s code: %s  %v", urlPath, phone, code, err)
+			encoder.Encode(NewMattermostResponse("неверный код TOTP"))
+			return
+		}
+		if !valid {
+			Logger.Infof("%s TOTP validation is not OK  phone: %s code: %s", urlPath, phone, code)
+			encoder.Encode(NewMattermostResponse("неверный код TOTP"))
+			return
+		}
+		u, err := g.MattermostUsers.Find(req.UserId)
+		if err != nil {
+			Logger.Errorf("db error: %v", err)
+			encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
+			return
+		}
+		if u == nil {
+			err = g.MattermostUsers.Insert(&gate.MattermostUser{UserId: req.UserId, Phone: phone})
+			if err != nil {
+				Logger.Errorf("db error: %v", err)
+				encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
+				return
+			}
+			encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден. Вам доступен функционал авторизованного пользоваеля."))
+			return
+		}
+		if u.Phone == phone {
+			encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден (повторно). Вам доступен функционал авторизованного пользоваеля."))
+			return
+		}
+		u.Phone = phone
+		g.MattermostUsers.Update(u)
+		encoder.Encode(NewMattermostResponse("Ваш номер телефона изменен."))
+
+	}
 }

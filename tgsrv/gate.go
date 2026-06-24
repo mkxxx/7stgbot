@@ -915,10 +915,6 @@ func (g *Gate) findAndApplyScheduledJobs() error {
 		}
 		cmd := "/" + s.Key[len(gate.ScheduledSettingsKeyPrefix):]
 		res, err := g.doHandleMattermostSysCommand(cmd, sch.Args)
-		if err == ErrNotFound {
-			Logger.Warnf("%s - unknown mattermost commad", cmd)
-			continue
-		}
 		sch.ExecTimeMilli = now.UnixMilli()
 		sch.ExecError = ""
 		if err != nil {
@@ -932,8 +928,13 @@ func (g *Gate) findAndApplyScheduledJobs() error {
 			msg = sb.String()
 		}
 		sch.ExecResult = msg
-
-		s.SetString(gate.MarshalYAMLOneLine(&sch))
+		yamlStr := gate.MarshalYAMLOneLine(&sch)
+		s.SetString(yamlStr)
+		if err != nil {
+			Logger.Error(yamlStr)
+		} else {
+			Logger.Info(yamlStr)
+		}
 		g.Settings.Update(s)
 	}
 	return nil

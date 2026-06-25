@@ -148,6 +148,7 @@ type SettingsDAO interface {
 	Find(string) (*Setting, error)
 	FindN(string) (*[]Setting, error)
 	Update(p *Setting) error
+	Delete(p *Setting) error
 }
 
 func NewSettings(db *sql.DB) SettingsDAO {
@@ -167,6 +168,14 @@ func (s *Settings) Update(p *Setting) error {
 	_, err := s.db.Exec("INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
 		p.Key, p.value)
 
+	if err != nil {
+		Logger.Errorf("db upsert settings (%q,%q) error: %v", p.Key, p.value, err)
+	}
+	return err
+}
+
+func (s *Settings) Delete(p *Setting) error {
+	_, err := s.db.Exec("DELETE FROM settings WHERE key = ?", p.Key)
 	if err != nil {
 		Logger.Errorf("db upsert settings (%q,%q) error: %v", p.Key, p.value, err)
 	}
@@ -228,6 +237,10 @@ func (s *NullSettings) FindN(key string) (*[]Setting, error) {
 }
 
 func (s *NullSettings) Update(p *Setting) error {
+	return nil
+}
+
+func (s *NullSettings) Delete(p *Setting) error {
 	return nil
 }
 

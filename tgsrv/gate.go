@@ -2534,6 +2534,13 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 			value = strings.Trim(value, "'")
 		}
 		set := gate.Setting{Key: key}
+		if value == "" {
+			err = g.Settings.Delete(&set)
+			if err != nil {
+				return "", err
+			}
+			return "deleted", nil
+		}
 		set.SetString(value)
 		err := set.Validate()
 		if err != nil {

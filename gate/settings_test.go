@@ -1,11 +1,8 @@
 package gate
 
 import (
-	"bytes"
 	"testing"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 func TestYAML(t *testing.T) {
@@ -13,9 +10,7 @@ func TestYAML(t *testing.T) {
 	{
 		input := `{from: 22:00,to: 7:00,execTimeMilli: 0,execError: "error",execResult}`
 		//input = `{from: "22:00",to: "7:00",execTimeMilli: 1782244800000,execError: some error}`
-		decoder := yaml.NewDecoder(bytes.NewReader([]byte(input)))
-		decoder.KnownFields(true)
-		err := decoder.Decode(&sch)
+		err := UnmarshalYAMLOneLine(input, &sch)
 		if err != nil {
 			t.Error(err)
 		}
@@ -86,6 +81,24 @@ func TestYAML(t *testing.T) {
 		{
 			sch.ExecTimeMilli = now.AddDate(0, 0, -1).UnixMilli()
 			got := sch.IsTime(now)
+			want := true
+			if got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+		}
+	}
+	{
+		input := `{from: 22:00,to: 0:00}`
+		UnmarshalYAMLOneLine(input, &sch)
+		{
+			got := sch.IsTime(time.Date(2026, time.June, 23, 0, 0, 0, 0, loc))
+			want := false
+			if got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+		}
+		{
+			got := sch.IsTime(time.Date(2026, time.June, 23, 23, 0, 0, 0, loc))
 			want := true
 			if got != want {
 				t.Errorf("got %v, want %v", got, want)

@@ -906,7 +906,11 @@ func (g *Gate) findAndApplyScheduledJobs() error {
 		s := &(*ss)[i]
 		sch, err := s.Schedule()
 		if err != nil {
-			Logger.Errorf("parse %s setting error: %v", s.Key, err)
+			Logger.Errorf("parse %s %s setting error: %v", s.Key, s.ValueString(), err)
+			continue
+		}
+		if !sch.IsValid() {
+			Logger.Warnf("invalid setting %s %s", s.Key, s.ValueString())
 			continue
 		}
 		now := time.Now()

@@ -240,25 +240,57 @@ type Schedule struct {
 	ExecResult    string `yaml:"execResult,omitempty"`
 }
 
+func (s *Schedule) IsValid() bool {
+	from, to, _ := s.PeriodContaining(time.Unix(1782378000, 0), true)
+	return !from.Equal(to)
+}
+
 func (s *Schedule) IsTime(t time.Time) bool {
-	to := withTime(t, s.To)
-	from := withTime(t, s.From)
-	containsMidnight := from.After(to)
-	if containsMidnight {
-		from = from.AddDate(0, 0, -1)
-	}
-	if from.After(t) || !to.After(t) {
-		from = from.AddDate(0, 0, 1)
-		to = to.AddDate(0, 0, 1)
-		if from.After(t) || !to.After(t) {
-			return false
-		}
+	from, to, ok := s.PeriodContaining(t, true)
+	if !ok {
+		return ok
 	}
 	if s.ExecTimeMilli == 0 {
 		return true
 	}
 	lastTime := time.UnixMilli(s.ExecTimeMilli)
 	return from.After(lastTime) || !to.After(lastTime)
+}
+
+func (s *Schedule) PeriodContaining(t time.Time, orBefore bool) (from, to time.Time, ok bool) {
+	from = withTime(t, s.From)
+	to = withTime(t, s.To)
+	if to.Hour() == 0 && to.Minute() == 0 && to.Second() == 0 {
+		to = to.AddDate(0, 0, 1)
+	}
+	containsMidnight := from.After(to)
+	if containsMidnight {
+		from = from.AddDate(0, 0, -1)
+	}
+	ok = !from.After(t) && to.After(t)
+	if ok {
+		return
+	}
+	if containsMidnight {
+		from2 := from.AddDate(0, 0, 1)
+		to2 := to.AddDate(0, 0, 1)
+		ok = !from2.After(t) && to2.After(t)
+		if ok || orBefore {
+			return from2, to2, ok
+		}
+		return
+	}
+	after := from.After(t)
+	if orBefore {
+		if after {
+			from = from.AddDate(0, 0, -1)
+			to = to.AddDate(0, 0, -1)
+		}
+	} else if !after {
+		from = from.AddDate(0, 0, 1)
+		to = to.AddDate(0, 0, 1)
+	}
+	return
 }
 
 func withTime(t time.Time, tm string) time.Time {

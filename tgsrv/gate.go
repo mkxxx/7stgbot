@@ -84,11 +84,9 @@ type Gate struct {
 	lastOpenedNotification time.Time
 	lastOpenCommandTime    atomic.Int64
 	lastOpenedTime         atomic.Int64
-	bleTimes               map[string]time.Time
 	GateOpenNumber         string
 	GateInfoNumber         string
 	palEsTimeGroups        *PalEsTimeGroups
-	BLEPeriodSec           time.Duration
 	RateWatcher            *RateWatcher
 	PendingCalls           chan *gate.Call
 	PendingSMSes           chan *gate.SMS
@@ -303,7 +301,6 @@ func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
 	g.GateInfoNumber = cfg.GateInfoNumber
 	g.NtfyURL = cfg.NtfyURL
 	g.NtfyToken = cfg.NtfyToken
-	g.BLEPeriodSec = time.Duration(cfg.BLEPeriodSec)
 	g.RateWatcher = &RateWatcher{
 		Duration:         time.Duration(cfg.KeypadHitLimitDurationMinutes) * time.Minute,
 		ThrottleDuration: time.Duration(cfg.KeypadThrottleMinutes) * time.Minute}
@@ -326,7 +323,6 @@ func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
 	g.bleTrackings = make(chan *BLETracking, 8)
 	g.wifiClients = make(chan *NetworkClientInfo, 8)
 	g.openedEvets = make(chan OpenTime, 8)
-	g.bleTimes = make(map[string]time.Time)
 	g.palesLastLog = &PalesLogUser{}
 	g.lastOpenCommandTime = atomic.Int64{}
 	g.lastOpenedTime = atomic.Int64{}
@@ -1099,13 +1095,28 @@ func (a *BLETrackingAggregator) sendSystemNotification(t *BLETracking) {
 	a.g.sendSystemNotification(sb.String())
 }
 
+type BLETime struct {
+	lastSrvTime time.Time
+	lastESPTime time.Time
+}
+
+func (b *BLETime) isTimeAndSet(srvTime time.Time, espTime time.Time, autoOpenLag time.Duration, BLEPeriod time.Duration) bool {
+	if srvTime.Sub(b.lastSrvTime) < autoOpenLag {
+		return false
+	}
+	b.lastSrvTime = srvTime
+	ok := espTime.Sub(b.lastESPTime) > BLEPeriod
+	b.lastESPTime = espTime
+	return ok
+}
+
 type BLEGatekeeper struct {
-	g                      *Gate
-	lastBLEOpenCommandTime map[string]time.Time
+	g        *Gate
+	bleTimes map[string]*BLETime
 }
 
 func (k *BLEGatekeeper) init() {
-	k.lastBLEOpenCommandTime = make(map[string]time.Time)
+	k.bleTimes = make(map[string]*BLETime)
 }
 
 func (k *BLEGatekeeper) checkAndOpen(bt *BLETracking, cfg *config.Config) {
@@ -1121,16 +1132,14 @@ func (k *BLEGatekeeper) checkAndOpen(bt *BLETracking, cfg *config.Config) {
 	if time.Since(g.lastOpenedNotification) < 71*time.Second {
 		return
 	}
-	// open gate and telegram message lag
-	if time.Since(k.lastBLEOpenCommandTime[bt.MAC]) < time.Duration(cfg.BLEAutoOpenLagMin)*time.Minute {
-		return
+	t, ok := k.bleTimes[bt.MAC]
+	if !ok {
+		t = &BLETime{}
+		k.bleTimes[bt.MAC] = t
 	}
-	k.lastBLEOpenCommandTime[bt.MAC] = time.Now()
-	lastMacTime := g.bleTimes[bt.MAC]
-	t := time.Unix(bt.Time, 0)
-	g.bleTimes[bt.MAC] = t
-	// avoid nuisance gate cycling while in range
-	if t.Sub(lastMacTime) <= g.BLEPeriodSec*time.Second {
+	autoOpenLag := time.Duration(cfg.BLEAutoOpenLagMin) * time.Minute
+	BLEPeriod := time.Duration(cfg.BLEPeriodSec) * time.Second
+	if !t.isTimeAndSet(time.Now(), time.Unix(bt.Time, 0), autoOpenLag, BLEPeriod) {
 		return
 	}
 	if !g.allowedNow(phone) {
@@ -1139,6 +1148,7 @@ func (k *BLEGatekeeper) checkAndOpen(bt *BLETracking, cfg *config.Config) {
 	}
 	g.openGate(fmt.Sprintf("%s %s", bt.MAC, phone), "")
 	g.sendSystemNotification(fmt.Sprintf("OPENED by BLE: %s (%s)  %s %s", bt.MAC, bt.timestamp(), phone, u.name()))
+
 }
 
 type BLETrackingTimer struct {

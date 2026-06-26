@@ -609,9 +609,15 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		now := time.Now()
 		for _, bt := range bleTrackings {
-			Logger.Debugf("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d",
-				bt.MAC, bt.RSSI, bt.Name, bt.Location)
+			ago := ""
+			t := bt.AsTime()
+			if !t.IsZero() {
+				ago = now.Sub(t).Round(time.Millisecond).String()
+			}
+			Logger.Debugf("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d, %s ago",
+				bt.MAC, bt.RSSI, bt.Name, bt.Location, ago)
 			s.gate.bleTrackings <- bt
 		}
 		w.WriteHeader(http.StatusOK)

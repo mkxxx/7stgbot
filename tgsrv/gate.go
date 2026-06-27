@@ -72,7 +72,7 @@ type Gate struct {
 	ProxyUrl               string
 	phoneCalls             chan *PhoneCall
 	phoneSmses             chan *PhoneSms
-	bleTrackings           chan *BLETracking
+	bleTrackings           chan []*BLETracking
 	wifiClients            chan *NetworkClientInfo
 	openedEvets            chan OpenTime
 	PalesPortalUser        string
@@ -320,7 +320,7 @@ func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
 	g.KeypadCodesRequests = make(chan *PhoneSms, 32)
 	g.phoneCalls = make(chan *PhoneCall)
 	g.phoneSmses = make(chan *PhoneSms)
-	g.bleTrackings = make(chan *BLETracking, 8)
+	g.bleTrackings = make(chan []*BLETracking, 8)
 	g.wifiClients = make(chan *NetworkClientInfo, 8)
 	g.openedEvets = make(chan OpenTime, 8)
 	g.palesLastLog = &PalesLogUser{}
@@ -1064,35 +1064,32 @@ func (g *Gate) gateESP32TextSensorName(cmd GateCommand) string {
 }
 
 type BLETrackingAggregator struct {
-	g        *Gate
-	tt       []*BLETracking
-	lastSent time.Time
+	g  *Gate
+	tt []*BLETracking
 }
 
-func (a *BLETrackingAggregator) sendSystemNotification(t *BLETracking) {
-	if t != nil {
+func (a *BLETrackingAggregator) sendSystemNotification(p []*BLETracking) (empty bool) {
+	for _, t := range p {
 		a.tt = append(a.tt, t)
 	}
 	if len(a.tt) == 0 {
-		return
+		return true
 	}
-	if time.Since(a.lastSent) < 29*time.Second {
-		return
-	}
+	now := time.Now()
 	var sb strings.Builder
 	for i, t := range a.tt {
 		if i != 0 {
 			sb.WriteString("\n")
 		}
-		sb.WriteString(t.String())
+		sb.WriteString(t.StringNow(now))
 		if s, ok := a.g.Cfg.BTMacNames[t.MAC]; ok {
 			sb.WriteString(" ")
 			sb.WriteString(s)
 		}
 	}
-	a.lastSent = time.Now()
 	a.tt = a.tt[:0]
 	a.g.sendSystemNotification(sb.String())
+	return false
 }
 
 type BLETime struct {
@@ -1119,36 +1116,38 @@ func (k *BLEGatekeeper) init() {
 	k.bleTimes = make(map[string]*BLETime)
 }
 
-func (k *BLEGatekeeper) checkAndOpen(bt *BLETracking, cfg *config.Config) {
-	phone, ok := cfg.BTMacAutoOpenGate[bt.MAC]
-	if !ok {
+func (k *BLEGatekeeper) checkAndOpen(p []*BLETracking, cfg *config.Config) {
+	for _, bt := range p {
+		phone, ok := cfg.BTMacAutoOpenGate[bt.MAC]
+		if !ok {
+			continue
+		}
+		g := k.g
+		u, ok := g.Phones[phone]
+		if !ok {
+			continue
+		}
+		if time.Since(g.lastOpenedNotification) < 71*time.Second {
+			continue
+		}
+		t, ok := k.bleTimes[bt.MAC]
+		if !ok {
+			t = &BLETime{}
+			k.bleTimes[bt.MAC] = t
+		}
+		autoOpenLag := time.Duration(cfg.BLEAutoOpenLagMin) * time.Minute
+		BLEPeriod := time.Duration(cfg.BLEPeriodSec) * time.Second
+		if !t.isTimeAndSet(time.Now(), time.Unix(bt.Time, 0), autoOpenLag, BLEPeriod) {
+			continue
+		}
+		if !g.allowedNow(phone) {
+			g.sendSystemNotification(fmt.Sprintf("%s BLE restricted %s %s", bt.timestamp(), phone, u.name()))
+			continue
+		}
+		g.openGate(fmt.Sprintf("%s %s", bt.MAC, phone), "")
+		g.sendSystemNotification(fmt.Sprintf("OPENED by BLE: %s (%s)  %s %s", bt.MAC, bt.timestamp(), phone, u.name()))
 		return
 	}
-	g := k.g
-	u, ok := g.Phones[phone]
-	if !ok {
-		return
-	}
-	if time.Since(g.lastOpenedNotification) < 71*time.Second {
-		return
-	}
-	t, ok := k.bleTimes[bt.MAC]
-	if !ok {
-		t = &BLETime{}
-		k.bleTimes[bt.MAC] = t
-	}
-	autoOpenLag := time.Duration(cfg.BLEAutoOpenLagMin) * time.Minute
-	BLEPeriod := time.Duration(cfg.BLEPeriodSec) * time.Second
-	if !t.isTimeAndSet(time.Now(), time.Unix(bt.Time, 0), autoOpenLag, BLEPeriod) {
-		return
-	}
-	if !g.allowedNow(phone) {
-		g.sendSystemNotification(fmt.Sprintf("%s BLE restricted %s %s", bt.timestamp(), phone, u.name()))
-		return
-	}
-	g.openGate(fmt.Sprintf("%s %s", bt.MAC, phone), "")
-	g.sendSystemNotification(fmt.Sprintf("OPENED by BLE: %s (%s)  %s %s", bt.MAC, bt.timestamp(), phone, u.name()))
-
 }
 
 type BLETrackingTimer struct {
@@ -1157,49 +1156,54 @@ type BLETrackingTimer struct {
 	lastTime  time.Time
 }
 
-func (a *BLETrackingTimer) openAfterPeriodOfActivity(t *BLETracking, prolongedPresence time.Duration) {
-	if _, ok := a.g.Cfg.BTMacAutoOpenGate[t.MAC]; ok {
-		return
-	}
-	if s, ok := a.g.Cfg.BTMacNames[t.MAC]; ok && strings.HasPrefix(s, "Ritsa:") {
-		return
-	}
-	lag := t.AsTime().Sub(a.lastTime)
-	if lag <= 0 {
-		return
-	}
-	if lag > time.Minute {
-		a.startTime = t.AsTime()
-		a.lastTime = a.startTime
-		return
-	}
-	a.lastTime = t.AsTime()
-	duration := a.lastTime.Sub(a.startTime)
-	if duration < prolongedPresence {
-		return
-	}
-	reStartTime := time.Unix(0, a.g.lastOpenedTime.Load()).Add(time.Minute)
-	if a.startTime.Sub(reStartTime) < 0 {
-		a.startTime = reStartTime
-		if a.lastTime.Sub(a.startTime) < 0 {
-			a.lastTime = a.startTime
+func (a *BLETrackingTimer) openAfterPeriodOfActivity(p []*BLETracking, prolongedPresence time.Duration) {
+	open := false
+	for _, bt := range p {
+		if _, ok := a.g.Cfg.BTMacAutoOpenGate[bt.MAC]; ok {
+			continue
 		}
+		if s, ok := a.g.Cfg.BTMacNames[bt.MAC]; ok && strings.HasPrefix(s, "Ritsa:") {
+			continue
+		}
+		tm := bt.AsTime()
+		lag := tm.Sub(a.lastTime)
+		if lag <= 0 {
+			continue
+		}
+		if lag > time.Minute {
+			a.startTime = tm
+			a.lastTime = tm
+			continue
+		}
+		a.lastTime = tm
 		duration := a.lastTime.Sub(a.startTime)
 		if duration < prolongedPresence {
-			return
+			continue
 		}
+		reStartTime := time.Unix(0, a.g.lastOpenedTime.Load()).Add(time.Minute)
+		if a.startTime.Sub(reStartTime) < 0 {
+			a.startTime = reStartTime
+			if a.lastTime.Sub(a.startTime) < 0 {
+				a.lastTime = a.startTime
+			}
+			duration := a.lastTime.Sub(a.startTime)
+			if duration < prolongedPresence {
+				continue
+			}
+		}
+		open = true
 	}
-	a.g.openGate("BLE timer", "OPENED by BLE timer")
+	if open {
+		a.g.openGate("BLE timer", "OPENED by BLE timer")
+	}
 }
 
 func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config) {
 	var firstWaitIsOver <-chan time.Time
 	var nextWaitIsOver <-chan time.Time
 	const firstDuration = 3 * time.Second
-	const nextDuration = 60 * time.Second
+	const nextDuration = 30 * time.Second
 	ticker := time.NewTicker(firstDuration)
-	each30Second := time.NewTicker(30 * time.Second)
-	var tt []*BLETracking
 	aggr := BLETrackingAggregator{g: g}
 	bleGatekeeper := BLEGatekeeper{g: g}
 	bleGatekeeper.init()
@@ -1220,24 +1224,22 @@ func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgS
 Loop:
 	for {
 		select {
-		case t := <-g.bleTrackings:
+		case btbt := <-g.bleTrackings:
 			// ignore if system location is unknown or not from system location
-			if t.Location != 100 {
+			if len(btbt) != 0 && btbt[0].Location != 100 {
 				continue
 			}
-			if _, ok := cfg.BTMacIgnore[t.MAC]; ok {
+			btbt = filterOut(btbt, cfg.BTMacIgnore)
+			if len(btbt) == 0 {
 				continue
 			}
-			bleGatekeeper.checkAndOpen(t, cfg)
-			if _, ok := cfg.BTMacNames[t.MAC]; ok {
-				tt = append(tt, t)
-			}
+			bleGatekeeper.checkAndOpen(btbt, cfg)
 			if firstWaitIsOver == nil && nextWaitIsOver == nil {
 				ticker.Reset(firstDuration)
 				firstWaitIsOver = ticker.C
 			}
-			aggr.sendSystemNotification(t)
-			bleTimer.openAfterPeriodOfActivity(t, time.Duration(sch.period(time.Now()))*time.Minute)
+			aggr.sendSystemNotification(btbt)
+			bleTimer.openAfterPeriodOfActivity(btbt, time.Duration(sch.period(time.Now()))*time.Minute)
 
 		case c := <-g.wifiClients:
 			name, _ := cfg.WiFiMacNames[c.MAC]
@@ -1257,9 +1259,6 @@ Loop:
 			g.openGate(fmt.Sprintf("WiFi %s %s", c.MAC, phone), "")
 			g.sendSystemNotification(fmt.Sprintf("OPENED by WiFi: %s (%s)  %s %s", c.MAC, c.Timestamp, phone, u.name()))
 
-		case <-each30Second.C:
-			aggr.sendSystemNotification(nil)
-
 		case m := <-g.bleSchedule:
 			sch = NewOpenSchedule(m)
 			s := gate.Setting{Key: bleScheduleKey}
@@ -1276,16 +1275,12 @@ Loop:
 			ticker.Reset(nextDuration)
 			firstWaitIsOver = nil
 			nextWaitIsOver = ticker.C
-			g.sendToTelegramMsg(tt, cfg)
-			tt = tt[:0]
+			aggr.sendSystemNotification(nil)
 
 		case <-nextWaitIsOver:
-			if len(tt) == 0 {
+			if aggr.sendSystemNotification(nil) {
 				nextWaitIsOver = nil
-				continue
 			}
-			g.sendToTelegramMsg(tt, cfg)
-			tt = tt[:0]
 
 		case t := <-g.openedEvets:
 			//g.openCommandTime.Store(time.Now().Unix())
@@ -1305,6 +1300,17 @@ Loop:
 			break Loop
 		}
 	}
+}
+
+func filterOut(p []*BLETracking, rem map[string]string) []*BLETracking {
+	res := make([]*BLETracking, 0, len(p))
+	for _, bt := range p {
+		if _, ok := rem[bt.MAC]; ok {
+			continue
+		}
+		res = append(res, bt)
+	}
+	return res
 }
 
 func (g *Gate) updateLastOpenedTime(now time.Time) {
@@ -1424,42 +1430,6 @@ func IntToBaseCustom(n int64, alphabet string) string {
 		n = n / base
 	}
 	return result
-}
-
-func (g *Gate) sendToTelegramMsg(tt []*BLETracking, cfg *config.Config) {
-	if len(tt) == 0 {
-		return
-	}
-	var msg strings.Builder
-	for _, t := range tt {
-		mac := cfg.BTMacNames[t.MAC]
-		if len(mac) == 0 {
-			mac = t.MAC
-		}
-		msg.WriteString(mac)
-		if len(t.Name) != 0 {
-			msg.WriteString(" ")
-			msg.WriteString(t.Name)
-		}
-		if t.RSSI != 0 {
-			msg.WriteString(" RSSI:")
-			msg.WriteString(strconv.Itoa(t.RSSI))
-		}
-		if len(t.UUID) != 0 {
-			msg.WriteString(" UUID:")
-			msg.WriteString(t.UUID)
-		}
-		if t.CompanyId != 0 {
-			msg.WriteString(" CompanyId:")
-			msg.WriteString(strconv.Itoa(t.CompanyId))
-		}
-		if t.Time != 0 {
-			msg.WriteString(" time:")
-			msg.WriteString(t.timestamp())
-		}
-		msg.WriteString("\n")
-	}
-	g.sendSystemNotification(msg.String())
 }
 
 func (g *Gate) palesLoginAndLoadLoop(abort chan struct{}, topicEvents <-chan string, cfg *config.Config, cfgSub chan *config.Config) {

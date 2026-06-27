@@ -88,7 +88,7 @@ globals:
     restore_value: no
   - id: throttle_seconds
     type: int
-    initial_value: "30" # Не чаще 1 раза в минуту для одного MAC
+    initial_value: "30" # Не чаще 1 раза в _ для одного MAC
   - id: ble_queue
     type: "std::vector<std::map<std::string, std::string>>"
     restore_value: no
@@ -362,42 +362,6 @@ script:
             - delay: 100ms
             - output.set_level: { id: buzzer_pin, level: 0% }
 
-  - id: report_device_script
-    mode: single # или parallel, но с max_parallel: 1
-    parameters:
-      mac: string
-      rssi: int
-      name: string
-      uuid: string
-      company_id: int
-    then:
-      - logger.log:
-          format: "Reporting BLE Device -> %s RSSI: %d '%s' %s company_id: %d"
-          args:
-            ["mac.c_str()", rssi, "name.c_str()", "uuid.c_str()", company_id]
-      - http_request.post:
-          url: !secret url_ble
-          request_headers:
-            Content-Type: application/json
-          json: |-
-            root["mac"] = mac;
-            root["uuid"] = uuid;
-            root["rssi"] = rssi;
-            root["name"] = name;
-            root["company_id"] = company_id;
-            root["location"] = (int)2;
-            if (id(sntp_time).now().is_valid()) {
-              root["time"] = id(sntp_time).now().timestamp;
-            }
-          on_response:
-            - lambda: |-
-                if (response->status_code == 200) {
-                  ESP_LOGI("http_post", "Успешно отправлено для %s", mac.c_str());
-                } else {
-                  ESP_LOGW("http_post", "Ошибка сервера %d для %s", response->status_code, mac.c_str());
-                }
-          on_error:
-            - logger.log: "Ошибка сети при отправке"
 
   - id: send_batch_script
     parameters:

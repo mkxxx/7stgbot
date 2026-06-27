@@ -116,6 +116,10 @@ func (t *BLETracking) AsTime() time.Time {
 }
 
 func (t *BLETracking) String() string {
+	return t.StringNow(time.Time{})
+}
+
+func (t *BLETracking) StringNow(now time.Time) string {
 	var sb strings.Builder
 	sb.WriteString("BT-MAC ")
 	sb.WriteString(t.MAC)
@@ -134,8 +138,17 @@ func (t *BLETracking) String() string {
 	}
 	sb.WriteString(" RSSI: ")
 	sb.WriteString(strconv.Itoa(t.RSSI))
-	sb.WriteString(" ")
-	sb.WriteString(t.timestamp())
+	sb.WriteString(" Location: ")
+	sb.WriteString(strconv.Itoa(t.Location))
+	if t.Time != 0 {
+		sb.WriteString(" Time: ")
+		sb.WriteString(t.timestamp())
+		if !now.IsZero() {
+			sb.WriteString(" (")
+			sb.WriteString(now.Sub(t.AsTime()).Round(time.Millisecond).String())
+			sb.WriteString(")")
+		}
+	}
 	return sb.String()
 }
 
@@ -609,16 +622,12 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		now := time.Now()
-		for _, bt := range bleTrackings {
-			ago := ""
-			t := bt.AsTime()
-			if !t.IsZero() {
-				ago = now.Sub(t).Round(time.Millisecond).String()
+		if len(bleTrackings) != 0 {
+			s.gate.bleTrackings <- bleTrackings
+			now := time.Now()
+			for _, bt := range bleTrackings {
+				Logger.Debugf(bt.StringNow(now))
 			}
-			Logger.Debugf("Received BLE: MAC: %s, RSSI: %d, Name: %s, Location: %d, %s ago",
-				bt.MAC, bt.RSSI, bt.Name, bt.Location, ago)
-			s.gate.bleTrackings <- bt
 		}
 		w.WriteHeader(http.StatusOK)
 		return

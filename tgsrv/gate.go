@@ -1093,18 +1093,20 @@ func (a *BLETrackingAggregator) sendSystemNotification(p []*BLETracking) (empty 
 }
 
 type BLEGatekeeper struct {
-	g        *Gate
-	bleTimes map[string]time.Time
+	g              *Gate
+	RecentlyOpened map[string]*BLETracking
 }
 
 func (k *BLEGatekeeper) init() {
-	k.bleTimes = make(map[string]time.Time)
+	k.RecentlyOpened = make(map[string]*BLETracking)
 }
 
 func (k *BLEGatekeeper) checkAndOpen(p []*BLETracking, cfg *config.Config) {
-	BLEResumeAbsenceDuration := time.Duration(cfg.BLEResumeAbsenceDurationSec) * time.Second
-	var openByBT *BLETracking
+	k.cleanRecentlyOpenedLongStanding(cfg)
 	for _, bt := range p {
+		if _, ok := k.RecentlyOpened[bt.MAC]; ok {
+			continue
+		}
 		phone, ok := cfg.BTMacAutoOpenGate[bt.MAC]
 		if !ok {
 			continue
@@ -1114,16 +1116,6 @@ func (k *BLEGatekeeper) checkAndOpen(p []*BLETracking, cfg *config.Config) {
 		if !ok {
 			continue
 		}
-		lastTime, ok := k.bleTimes[bt.MAC]
-		tm := bt.AsTime()
-		k.bleTimes[bt.MAC] = tm
-		if openByBT != nil {
-			continue
-		}
-		absence := tm.Sub(lastTime)
-		if absence < BLEResumeAbsenceDuration {
-			continue
-		}
 		if !g.allowedNow(phone) {
 			g.sendSystemNotification(fmt.Sprintf("%s BLE restricted %s %s", bt.timestamp(), phone, u.name()))
 			continue
@@ -1131,16 +1123,23 @@ func (k *BLEGatekeeper) checkAndOpen(p []*BLETracking, cfg *config.Config) {
 		if time.Since(time.Unix(0, g.lastOpenedTime.Load())) < 71*time.Second {
 			continue
 		}
-		openByBT = bt
 		g.openGate(fmt.Sprintf("%s %s", bt.MAC, phone), "")
 		g.sendSystemNotification(fmt.Sprintf("OPENED by BLE: %s (%s)  %s %s", bt.MAC, bt.timestamp(), phone, u.name()))
+		break
 	}
-	if len(k.bleTimes) > 20 {
-		now := time.Now()
-		for mac, tm := range k.bleTimes {
-			if now.Sub(tm) >= BLEResumeAbsenceDuration {
-				delete(k.bleTimes, mac)
-			}
+	for _, bt := range p {
+		if t, ok := k.RecentlyOpened[bt.MAC]; ok && t.Time < bt.Time {
+			k.RecentlyOpened[bt.MAC] = bt
+		}
+	}
+}
+
+func (k *BLEGatekeeper) cleanRecentlyOpenedLongStanding(cfg *config.Config) {
+	BLEResumeAbsenceDuration := time.Duration(cfg.BLEResumeAbsenceDurationSec) * time.Second
+	now := time.Now()
+	for mac, bt := range k.RecentlyOpened {
+		if now.Sub(bt.AsTime()) >= BLEResumeAbsenceDuration {
+			delete(k.RecentlyOpened, mac)
 		}
 	}
 }

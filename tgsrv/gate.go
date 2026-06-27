@@ -1092,31 +1092,18 @@ func (a *BLETrackingAggregator) sendSystemNotification(p []*BLETracking) (empty 
 	return false
 }
 
-type BLETime struct {
-	lastSrvTime time.Time
-	lastESPTime time.Time
-}
-
-func (b *BLETime) isTimeAndSet(srvTime time.Time, espTime time.Time, autoOpenLag time.Duration, BLEPeriod time.Duration) bool {
-	if srvTime.Sub(b.lastSrvTime) < autoOpenLag {
-		return false
-	}
-	b.lastSrvTime = srvTime
-	ok := espTime.Sub(b.lastESPTime) > BLEPeriod
-	b.lastESPTime = espTime
-	return ok
-}
-
 type BLEGatekeeper struct {
 	g        *Gate
-	bleTimes map[string]*BLETime
+	bleTimes map[string]time.Time
 }
 
 func (k *BLEGatekeeper) init() {
-	k.bleTimes = make(map[string]*BLETime)
+	k.bleTimes = make(map[string]time.Time)
 }
 
 func (k *BLEGatekeeper) checkAndOpen(p []*BLETracking, cfg *config.Config) {
+	BLEResumeAbsenceDuration := time.Duration(cfg.BLEResumeAbsenceDurationSec) * time.Second
+	var openByBT *BLETracking
 	for _, bt := range p {
 		phone, ok := cfg.BTMacAutoOpenGate[bt.MAC]
 		if !ok {
@@ -1127,26 +1114,34 @@ func (k *BLEGatekeeper) checkAndOpen(p []*BLETracking, cfg *config.Config) {
 		if !ok {
 			continue
 		}
-		if time.Since(g.lastOpenedNotification) < 71*time.Second {
+		lastTime, ok := k.bleTimes[bt.MAC]
+		tm := bt.AsTime()
+		k.bleTimes[bt.MAC] = tm
+		if openByBT != nil {
 			continue
 		}
-		t, ok := k.bleTimes[bt.MAC]
-		if !ok {
-			t = &BLETime{}
-			k.bleTimes[bt.MAC] = t
-		}
-		autoOpenLag := time.Duration(cfg.BLEAutoOpenLagMin) * time.Minute
-		BLEPeriod := time.Duration(cfg.BLEPeriodSec) * time.Second
-		if !t.isTimeAndSet(time.Now(), time.Unix(bt.Time, 0), autoOpenLag, BLEPeriod) {
+		absence := tm.Sub(lastTime)
+		if absence < BLEResumeAbsenceDuration {
 			continue
 		}
 		if !g.allowedNow(phone) {
 			g.sendSystemNotification(fmt.Sprintf("%s BLE restricted %s %s", bt.timestamp(), phone, u.name()))
 			continue
 		}
+		if time.Since(time.Unix(0, g.lastOpenedTime.Load())) < 71*time.Second {
+			continue
+		}
+		openByBT = bt
 		g.openGate(fmt.Sprintf("%s %s", bt.MAC, phone), "")
 		g.sendSystemNotification(fmt.Sprintf("OPENED by BLE: %s (%s)  %s %s", bt.MAC, bt.timestamp(), phone, u.name()))
-		return
+	}
+	if len(k.bleTimes) > 20 {
+		now := time.Now()
+		for mac, tm := range k.bleTimes {
+			if now.Sub(tm) >= BLEResumeAbsenceDuration {
+				delete(k.bleTimes, mac)
+			}
+		}
 	}
 }
 

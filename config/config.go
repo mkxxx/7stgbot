@@ -30,10 +30,6 @@ type Config struct {
 			SwitchName    string
 		}
 	}
-	GateRelayOnOffUrl             string
-	GateRelayOnUrl                string
-	GateRelayOffUrl               string
-	GateRelayGetUrl               string
 	TelegramUrl                   string
 	TelegramChatId                string
 	TelegramTimeoutSec            int
@@ -43,15 +39,15 @@ type Config struct {
 	BleWatchLocation              int
 	GateOpenNumber                string
 	GateInfoNumber                string
-	BLEPeriodSec                  int64
+	BLEResumeAbsenceDurationSec   int64
+	BLEPeriodSec                  int64 // TODO remove
 	KeypadHitLimit                int
 	KeypadHitLimitDurationMinutes int64
 	KeypadThrottleMinutes         int64
-	KeypadReleased                bool // remove
 	NtfyURL                       string
 	NtfyToken                     string
 	OpenSchedule                  map[string]int // "09:00"=10\n"10:30"=5\n"22:00"=15   "hh:mm"=number_of_minutes
-	BLEAutoOpenLagMin             int64
+	BLEAutoOpenLagMin             int64          // TODO remove
 	BTMacSystem                   map[string]string
 	BTMacIgnore                   map[string]string
 	BTMacAutoOpenGate             map[string]string

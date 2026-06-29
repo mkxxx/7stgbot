@@ -1192,6 +1192,18 @@ func (a *BLETrackingTimer) openAfterPeriodOfActivity(p []*BLETracking, prolonged
 	}
 }
 
+type bleCount struct {
+	cnt       int
+	logCnt    int
+	firstTime time.Time
+	lastTime  time.Time
+	companyId int
+}
+
+func (c *bleCount) age() time.Duration {
+	return c.lastTime.Sub(c.firstTime)
+}
+
 func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config) {
 	var firstWaitIsOver <-chan time.Time
 	var nextWaitIsOver <-chan time.Time
@@ -1215,12 +1227,19 @@ func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgS
 			sch = NewOpenSchedule(m)
 		}
 	}
+	bleAggr := make(map[string]*bleCount)
 Loop:
 	for {
 		select {
 		case btbt := <-g.bleTrackings:
+			if len(btbt) == 0 {
+				continue
+			}
+			if btbt[0].Location == cfg.TestLocation {
+				g.logBLETrackings(btbt, bleAggr)
+			}
 			// ignore if system location is unknown or not from system location
-			if len(btbt) != 0 && btbt[0].Location != 100 {
+			if btbt[0].Location != 100 {
 				continue
 			}
 			btbt = filterOut(btbt, cfg.BTMacIgnore)
@@ -1292,6 +1311,30 @@ Loop:
 
 		case <-abort:
 			break Loop
+		}
+	}
+}
+
+func (g *Gate) logBLETrackings(p []*BLETracking, bleAggr map[string]*bleCount) {
+	now := time.Now()
+	for _, bt := range p {
+		c := bleAggr[bt.MAC]
+		if c == nil {
+			c = &bleCount{cnt: 1, firstTime: now, lastTime: now, companyId: bt.CompanyId}
+			bleAggr[bt.MAC] = c
+			continue
+		}
+		c.cnt++
+		c.lastTime = now
+		if c.age() < time.Duration(c.logCnt+1)*time.Minute {
+			continue
+		}
+		c.logCnt++
+		Logger.Debugf("%s NN: %d age: %s", bt.MAC, c.cnt, c.age().Round(time.Minute).String())
+	}
+	for k, v := range bleAggr {
+		if now.Sub(v.lastTime) > 2*time.Minute {
+			delete(bleAggr, k)
 		}
 	}
 }

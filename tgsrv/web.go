@@ -105,6 +105,7 @@ type BLETracking struct {
 	CompanyId int `json:"company_id"`
 	Location  int
 	Time      int64 // seconds
+	Count     int
 }
 
 func (t *BLETracking) timestamp() string {
@@ -140,13 +141,15 @@ func (t *BLETracking) StringNow(now time.Time) string {
 	sb.WriteString(strconv.Itoa(t.RSSI))
 	sb.WriteString(" Location: ")
 	sb.WriteString(strconv.Itoa(t.Location))
+	sb.WriteString(" N: ")
+	sb.WriteString(strconv.Itoa(t.Count))
 	if t.Time != 0 {
 		sb.WriteString(" Time: ")
 		sb.WriteString(t.timestamp())
 		if !now.IsZero() {
 			sb.WriteString(" (")
 			sb.WriteString(now.Sub(t.AsTime()).Round(time.Millisecond).String())
-			sb.WriteString(")")
+			sb.WriteString(" ago)")
 		}
 	}
 	return sb.String()

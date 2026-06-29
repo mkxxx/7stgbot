@@ -1330,7 +1330,7 @@ func (g *Gate) logBLETrackings(p []*BLETracking, bleAggr map[string]*bleCount) {
 			continue
 		}
 		c.logCnt++
-		Logger.Debugf("%s NN: %d age: %s", bt.MAC, c.cnt, c.age().Round(time.Minute).String())
+		Logger.Debugf("%s NN: %d age: %s", bt.MAC, c.cnt, c.age().Round(time.Second).String())
 	}
 	for k, v := range bleAggr {
 		if now.Sub(v.lastTime) > 2*time.Minute {

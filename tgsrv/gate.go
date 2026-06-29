@@ -1320,11 +1320,11 @@ func (g *Gate) logBLETrackings(p []*BLETracking, bleAggr map[string]*bleCount) {
 	for _, bt := range p {
 		c := bleAggr[bt.MAC]
 		if c == nil {
-			c = &bleCount{cnt: 1, firstTime: now, lastTime: now, companyId: bt.CompanyId}
+			c = &bleCount{cnt: bt.Count, firstTime: now, lastTime: now, companyId: bt.CompanyId}
 			bleAggr[bt.MAC] = c
 			continue
 		}
-		c.cnt++
+		c.cnt += bt.Count
 		c.lastTime = now
 		if c.age() < time.Duration(c.logCnt+1)*time.Minute {
 			continue

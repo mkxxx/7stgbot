@@ -1193,11 +1193,12 @@ func (a *BLETrackingTimer) openAfterPeriodOfActivity(p []*BLETracking, prolonged
 }
 
 type bleCount struct {
-	cnt       int
-	logCnt    int
-	firstTime time.Time
-	lastTime  time.Time
-	companyId int
+	cnt        int
+	logCnt     int
+	firstTime  time.Time
+	lastTime   time.Time
+	companyId  int
+	companyCnt int
 }
 
 func (c *bleCount) age() time.Duration {
@@ -1326,11 +1327,16 @@ func (g *Gate) logBLETrackings(p []*BLETracking, bleAggr map[string]*bleCount) {
 		}
 		c.cnt += bt.Count
 		c.lastTime = now
+		if bt.CompanyId != 0 && c.companyId != bt.CompanyId {
+			c.companyCnt++
+			c.companyId = bt.CompanyId
+		}
 		if c.age() < time.Duration(c.logCnt+1)*time.Minute {
 			continue
 		}
 		c.logCnt++
-		Logger.Debugf("%s NN: %d age: %s", bt.MAC, c.cnt, c.age().Round(time.Second).String())
+		Logger.Debugf("%s CompanyId: %d NN: %d age: %s CompanyCnt: %s", bt.MAC, c.companyId, c.cnt,
+			c.age().Round(time.Second).String(), c.companyCnt)
 	}
 	for k, v := range bleAggr {
 		if now.Sub(v.lastTime) > 2*time.Minute {

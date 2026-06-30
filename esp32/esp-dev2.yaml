@@ -83,7 +83,7 @@ globals:
     type: int
     initial_value: "30" # Не чаще 1 раза в _ для одного MAC
   - id: ble_queue
-    type: "std::vector<std::string>"
+    type: "std::vector<std::map<std::string, std::string>>"
     restore_value: no
   - id: ble_counts
     type: std::map<std::string, int>
@@ -216,6 +216,7 @@ interval:
               ++it;
             }
           }
+
   - interval: 4s
     then:
       - lambda: |-
@@ -226,33 +227,30 @@ interval:
 
           std::string json_payload = "[";
           for (size_t i = 0; i < current_batch.size(); i++) {
-            std::string item = current_batch[i];
-            
-            // Последовательный поиск трех разделителей ';'
-            size_t first_semi = item.find(';');
-            size_t second_semi = item.find(';', first_semi + 1);
-            size_t third_semi = item.find(';', second_semi + 1);
-            
-            if (first_semi == std::string::npos || second_semi == std::string::npos || third_semi == std::string::npos) continue;
-
-            std::string mac = item.substr(0, first_semi);
-            std::string rssi = item.substr(first_semi + 1, second_semi - first_semi - 1);
-            std::string pkt_time = item.substr(second_semi + 1, third_semi - second_semi - 1);
-            std::string raw = item.substr(third_semi + 1);
-
             json_payload += "{";
-            json_payload += "\"mac\":\"" + mac + "\",";
-            json_payload += "\"rssi\":" + rssi + ",";
-            json_payload += "\"location\":" + id(current_location) + ",";
-            json_payload += "\"time\":" + pkt_time + ","; // Отправляем реальное время пакета
-            json_payload += "\"raw\":\"" + raw + "\"";
+            bool first = true;
+            for (auto const& [key, val] : current_batch[i]) {
+              if (!first) json_payload += ",";
+              
+              json_payload += "\"" + key + "\":";
+              
+              // Проверяем, является ли поле числовым
+              if (key == "rssi" || key == "time" || key == "location" || key == "company_id" || key == "count") {
+                // Если значение пустое (например, time не определен), пишем null или 0
+                json_payload += (val.empty() ? "0" : val);
+              } else {
+                // Для всех остальных (mac, uuid, name) — в кавычках
+                json_payload += "\"" + val + "\"";
+              }
+              first = false;
+            }
             json_payload += "}";
-            
             if (i < current_batch.size() - 1) json_payload += ",";
           }
           json_payload += "]";
 
           id(send_batch_script).execute(json_payload);
+
 
 
 esp32_ble_tracker:
@@ -281,18 +279,34 @@ esp32_ble_tracker:
             id(ble_counts)[mac] = 0;
             id(last_call_time)[mac] = now;
 
-            std::string pkt_time = "0";
+            std::map<std::string, std::string> device;          
+            device["mac"] = mac;
+            device["rssi"] = std::to_string(x.get_rssi());
+            device["name"] = x.get_name();
+            device["location"] = id(current_location);
+            device["count"] = std::to_string(total_count);
+            auto ibeacon = x.get_ibeacon();
+            if (ibeacon.has_value()) {
+              device["uuid"] = ibeacon->get_uuid().to_string();
+            }
+            // Извлечение Company ID (Manufacturer Data)
+            auto m_datas = x.get_manufacturer_datas();
+            if (!m_datas.empty() && m_datas[0].data.size() >= 2) {
+              // В ESPHome data — это std::vector<uint8_t>
+              uint16_t cid = (m_datas[0].data[1] << 8) | m_datas[0].data[0];
+              device["company_id"] = std::to_string(cid);
+            } else {
+              device["company_id"] = "0";
+            }
             if (id(sntp_time).now().is_valid()) {
-              pkt_time = std::to_string(id(sntp_time).now().timestamp);
+              device["time"] = std::to_string(id(sntp_time).now().timestamp);
             }
             auto sr = x.get_scan_result();
             size_t total_len = sr.adv_data_len + sr.scan_rsp_len;
-            
             std::string raw_hex = format_hex(sr.ble_adv, total_len);
-            std::string packed_data = mac + ";" + std::to_string(x.get_rssi()) + ";" + pkt_time + ";" + raw_hex;
-            id(ble_queue).push_back(packed_data);
-            // Dummy variable to bypass any latent validation/caching bugs
-            std::string device = "";
+            device["raw"] = raw_hex;
+
+            id(ble_queue).push_back(device);
 
 script:
   - id: beep_short

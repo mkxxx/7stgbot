@@ -1,8 +1,8 @@
 package tgsrv
 
 import (
+	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -31,47 +31,7 @@ type BLETracking struct {
 	Time      int64 // seconds
 	Count     int
 	Raw       string
-}
-
-func (t *BLETracking) init() error {
-	if t.Raw == "00" {
-		return nil
-	}
-	bytes, err := hex.DecodeString(t.Raw)
-	if err != nil {
-		return err
-	}
-	var structures []ADStructure
-	cursor := 0
-	length := len(bytes)
-	for cursor < length {
-		// Читаем длину текущей AD-структуры
-		adLength := bytes[cursor]
-		if adLength == 0 {
-			// Нулевая длина означает конец полезной нагрузки или паддинг
-			break
-		}
-		// Проверяем, не выходит ли структура за границы массива
-		if cursor+1+int(adLength) > length {
-			return errors.New("malformed BLE payload: length field exceeds remaining bytes")
-		}
-		// Читаем тип данных
-		adType := bytes[cursor+1]
-		// Извлекаем сами данные структуры
-		adData := bytes[cursor+2 : cursor+1+int(adLength)]
-		structures = append(structures, ADStructure{
-			Length: adLength,
-			Type:   adType,
-			Data:   adData,
-		})
-		// Сдвигаем курсор на следующую структуру (1 байт длины + её размер)
-		cursor += 1 + int(adLength)
-	}
-	var sb strings.Builder
-	for _, s := range structures {
-		s.StringBld(sb)
-	}
-	return nil
+	RawData   *BLEData
 }
 
 func (t *BLETracking) timestamp() string {
@@ -101,7 +61,7 @@ func (t *BLETracking) StringNow(now time.Time) string {
 	}
 	if t.CompanyId != 0 {
 		sb.WriteString(" Company: ")
-		sb.WriteString(strconv.Itoa(t.CompanyId))
+		sb.WriteString(strconv.FormatInt(int64(t.CompanyId), 16))
 	}
 	sb.WriteString(" RSSI: ")
 	sb.WriteString(strconv.Itoa(t.RSSI))
@@ -118,65 +78,205 @@ func (t *BLETracking) StringNow(now time.Time) string {
 			sb.WriteString(" ago)")
 		}
 	}
-	if t.Raw != "" {
-		sb.WriteString(" Raw: ")
-		sb.WriteString(t.Raw)
+	t.ParseRaw()
+	if t.RawData != nil {
+		sb.WriteString(" Raw[")
+		sb.WriteString(t.RawData.String())
+		sb.WriteString("]")
 	}
 	return sb.String()
 }
 
-// ADStructure представляет одну структуру данных внутри BLE пакета
-type ADStructure struct {
-	Length uint8
-	Type   uint8
-	Data   []byte
+func (t *BLETracking) ParseRaw() {
+	if t.Raw == "" || t.RawData != nil {
+		return
+	}
+	bd, err := ParseRawBLE(t.Raw)
+	if err != nil {
+		Logger.Errorf("error parsing %q: %v", t.Raw, err)
+	} else {
+		t.RawData = bd
+	}
 }
 
-func (ad *ADStructure) StringBld(sb strings.Builder) {
-	switch ad.Type {
-	case DataTypeLocalNameFull, DataTypeLocalNameShort:
-		sb.WriteString(` "`)
-		sb.WriteString(string(ad.Data))
+type BLEFlags struct {
+	LELimitedDiscoverable bool // Ограниченный режим обнаружения (быстро выключается)
+	LEGeneralDiscoverable bool // Обычный режим обнаружения (виден всегда)
+	BREDRNotSupported     bool // Чистый BLE-девайс (классический Bluetooth НЕ поддерживается)
+	SimultaneousLE_BR     bool // Поддерживает одновременно BLE и классический BT (на стороне контроллера)
+	SimultaneousLE_Host   bool // Поддерживает одновременно BLE и классический BT (на стороне хоста)
+	All                   byte
+}
+
+func (f *BLEFlags) String() string {
+	if f == nil {
+		return ""
+	}
+	return hex.EncodeToString([]byte{f.All})
+}
+
+type BLEData struct {
+	LocalName        string
+	TxPower          int8
+	ServiceUUIDs     []string
+	ManufacturerID   uint16
+	ManufacturerData []byte
+	IBeacon          *IBeacon
+	ServiceData      map[string][]byte
+	Flags            *BLEFlags
+}
+
+func (bd *BLEData) String() string {
+	sb := strings.Builder{}
+	if bd.LocalName != "" {
 		sb.WriteString(`"`)
-
-	case DataTypeFlags:
-		if len(ad.Data) > 0 {
-			sb.WriteString(fmt.Sprintf(" Flags: 0x%02X", ad.Data[0]))
+		sb.WriteString(bd.LocalName)
+		sb.WriteString(`"`)
+	}
+	if bd.TxPower != 0 {
+		sb.WriteString(" pw: ")
+		sb.WriteString(strconv.Itoa(int(bd.TxPower)))
+	}
+	if len(bd.ServiceUUIDs) != 0 {
+		sb.WriteString(" UUID: ")
+		sb.WriteString(strings.Join(bd.ServiceUUIDs, ""))
+	}
+	if bd.ManufacturerID != 0 {
+		sb.WriteString(" Manufacturer: ")
+		sb.WriteString(strconv.Itoa(int(bd.ManufacturerID)))
+	}
+	if bd.IBeacon != nil {
+		sb.WriteString(" ")
+		sb.WriteString(bd.IBeacon.String())
+	} else if len(bd.ManufacturerData) != 0 {
+		sb.WriteString(" Data: ")
+		sb.WriteString(hex.EncodeToString(bd.ManufacturerData))
+	}
+	if bd.Flags != nil {
+		sb.WriteString(" Flags: ")
+		sb.WriteString(bd.Flags.String())
+	}
+	if len(bd.ServiceData) != 0 {
+		sb.WriteString(" ServiceData: ")
+		i := 0
+		for k, v := range bd.ServiceData {
+			if i != 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString(k)
+			sb.WriteString(":")
+			sb.WriteString(hex.EncodeToString(v))
+			i++
 		}
+		sb.WriteString(bd.Flags.String())
+	}
+	return sb.String()
+}
 
-	case DataTypeTxPower:
-		if len(ad.Data) > 0 {
-			sb.WriteString(" [Tx Power]: ")
-			sb.WriteString(strconv.Itoa(int(ad.Data[0])))
-			sb.WriteString(" dBm")
+// ParseRawBLE парсит сырой массив байт (adv_data + scan_rsp)
+func ParseRawBLE(p string) (*BLEData, error) {
+	payload, err := hex.DecodeString(p)
+	if err != nil {
+		return nil, err
+	}
+	var data BLEData
+	data.ServiceData = make(map[string][]byte)
+
+	offset := 0
+	for offset < len(payload) {
+		// 1. Читаем длину структуры. Если 0 — пакет закончился
+		length := int(payload[offset])
+		if length == 0 {
+			break
 		}
+		// Защита от битых пакетов и выхода за границы слайса
+		if offset+length+1 > len(payload) {
+			break
+		}
+		// Извлекаем тип и сами данные структуры
+		adType := payload[offset+1]
+		adData := payload[offset+2 : offset+length+1]
 
-	case DataTypeManufacturer:
-		if len(ad.Data) >= 2 {
-			// Первые два байта данных изготовителя — это Company ID (Little Endian)
-			companyID := uint16(ad.Data[0]) | uint16(ad.Data[1])<<8
-			companyData := ad.Data[2:]
-			fmt.Printf("   [Данные изготовителя (0xFF)]: Company ID: 0x%04X, Payload: %X\n", companyID, companyData)
+		// Переходим к следующей GAP-структуре
+		offset += length + 1
+		switch adType {
+		case DataTypeLocalNameShort, DataTypeLocalNameFull:
+			data.LocalName = string(adData)
 
-			// Пример: Разбор iBeacon от Apple
-			if companyID == 0x004C && len(companyData) >= 21 && companyData[0] == 0x02 {
-				uuid := hex.EncodeToString(companyData[2:18])
-				major := uint16(companyData[18])<<8 | uint16(companyData[19])
-				minor := uint16(companyData[20])<<8 | uint16(companyData[21])
-				fmt.Printf("      -> Обнаружен iBeacon! UUID: %s, Major: %d, Minor: %d\n", uuid, major, minor)
+		case DataTypeTxPower:
+			if len(adData) >= 1 {
+				data.TxPower = int8(adData[0])
+			}
+
+		case 0x02, DataTypeServiceUUID16:
+			for i := 0; i+2 <= len(adData); i += 2 {
+				uuid := binary.LittleEndian.Uint16(adData[i : i+2])
+				data.ServiceUUIDs = append(data.ServiceUUIDs, fmt.Sprintf("0x%04X", uuid))
+			}
+
+		case 0x06, 0x07: // 128-bit Service UUIDs
+			for i := 0; i+16 <= len(adData); i += 16 {
+				// Реверсируем байты, так как UUID в BLE передаются в Little-Endian
+				revUUID := make([]byte, 16)
+				for b := 0; b < 16; b++ {
+					revUUID[b] = adData[i+15-b]
+				}
+				data.ServiceUUIDs = append(data.ServiceUUIDs, fmt.Sprintf("%x-%x-%x-%x-%x",
+					revUUID[0:4], revUUID[4:6], revUUID[6:8], revUUID[8:10], revUUID[10:16]))
+			}
+
+		case DataTypeServiceData16:
+			if len(adData) >= 2 {
+				uuid := fmt.Sprintf("0x%04X", binary.LittleEndian.Uint16(adData[0:2]))
+				data.ServiceData[uuid] = adData[2:]
+			}
+
+		case DataTypeManufacturer:
+			if len(adData) >= 2 {
+				// Первые 2 байта — ID компании (Apple, Microsoft, Xiaomi и т.д.)
+				data.ManufacturerID = binary.LittleEndian.Uint16(adData[0:2])
+				data.ManufacturerData = adData[2:]
+			}
+
+		case DataTypeFlags:
+			if len(adData) >= 1 {
+				flagsByte := adData[0]
+				data.Flags = &BLEFlags{
+					LELimitedDiscoverable: (flagsByte & 0x01) != 0, // Bit 0
+					LEGeneralDiscoverable: (flagsByte & 0x02) != 0, // Bit 1
+					BREDRNotSupported:     (flagsByte & 0x04) != 0, // Bit 2
+					SimultaneousLE_BR:     (flagsByte & 0x08) != 0, // Bit 3
+					SimultaneousLE_Host:   (flagsByte & 0x10) != 0, // Bit 4
+					All:                   flagsByte,
+				}
 			}
 		}
-
-	case DataTypeServiceData16:
-		if len(ad.Data) >= 2 {
-			// Первые два байта — 16-битный UUID Сервиса (Little Endian)
-			serviceUUID := uint16(ad.Data[0]) | uint16(ad.Data[1])<<8
-			servicePayload := ad.Data[2:]
-			fmt.Printf("   [Данные Сервиса 16-бит (0x16)]: UUID Сервиса: 0x%04X, Данные: %X\n", serviceUUID, servicePayload)
-		}
-
-	default:
-		fmt.Printf("   [Тип 0x%02X]: Данные (Len %d): %X\n", ad.Type, ad.Length-1, ad.Data)
 	}
 
+	return &data, nil
+}
+
+// Разбор Apple iBeacon (Manufacturer ID: 0x004C)
+func ParseIBeacon(manuData []byte) *IBeacon {
+	if len(manuData) < 23 || manuData[0] != 0x02 || manuData[1] != 0x15 {
+		return nil
+	}
+	ib := IBeacon{}
+	// Извлекаем UUID, Major, Minor, TxPower
+	ib.UUID = hex.EncodeToString(manuData[2:18])
+	ib.Major = binary.BigEndian.Uint16(manuData[18:20]) // iBeacon использует BIG endian для Major/Minor!
+	ib.Minor = binary.BigEndian.Uint16(manuData[20:22])
+	ib.TxPower = int8(manuData[22])
+	return &ib
+}
+
+type IBeacon struct {
+	UUID    string
+	Major   uint16
+	Minor   uint16
+	TxPower int8
+}
+
+func (b *IBeacon) String() string {
+	return fmt.Sprintf("iBeacon UUID: %s Major: %d Minor: %d Power at 1m: %d", b.UUID, b.Major, b.Minor, b.TxPower)
 }

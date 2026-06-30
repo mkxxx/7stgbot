@@ -288,18 +288,7 @@ esp32_ble_tracker:
             auto sr = x.get_scan_result();
             size_t total_len = sr.adv_data_len + sr.scan_rsp_len;
             
-            std::string raw_hex = "";
-            if (total_len > 0) {
-              std::string pretty_hex = format_hex_pretty(sr.ble_adv, total_len);
-              // Compress spaces
-              raw_hex.reserve(pretty_hex.length());
-              for (char c : pretty_hex) {
-                if (c != ' ') {
-                  raw_hex += c;
-                }
-              }
-            }
-            if (raw_hex.empty()) raw_hex = "00";
+            std::string raw_hex = format_hex(sr.ble_adv, total_len);
             std::string packed_data = mac + ";" + std::to_string(x.get_rssi()) + ";" + pkt_time + ";" + raw_hex;
             id(ble_queue).push_back(packed_data);
             // Dummy variable to bypass any latent validation/caching bugs

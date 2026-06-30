@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -93,67 +92,6 @@ const (
 	mattermostCommandResponseIconUrl  = "https://7slavka.ru/images/anjella.png"
 	systemBotId                       = "f1bkn94xnfyutngcbphnzt18zr"
 )
-
-var digitsRE = regexp.MustCompile(`^[0-9]+$`)
-
-// {"mac":"5B:00:DF:94:DD:1C","uuid":"","rssi":-71,"name":"iTAG  ","company_id":56604,"location":2,"time":1775136766}
-type BLETracking struct {
-	MAC       string
-	RSSI      int
-	Name      string
-	UUID      string
-	CompanyId int `json:"company_id"`
-	Location  int
-	Time      int64 // seconds
-	Count     int
-}
-
-func (t *BLETracking) timestamp() string {
-	return time.Unix(t.Time, 0).In(Location).Format("2006-01-02 15:04:05")
-}
-
-func (t *BLETracking) AsTime() time.Time {
-	return time.Unix(t.Time, 0)
-}
-
-func (t *BLETracking) String() string {
-	return t.StringNow(time.Time{})
-}
-
-func (t *BLETracking) StringNow(now time.Time) string {
-	var sb strings.Builder
-	sb.WriteString("BT-MAC ")
-	sb.WriteString(t.MAC)
-	if t.Name != "" {
-		sb.WriteString(" \"")
-		sb.WriteString(t.Name)
-		sb.WriteString("\"")
-	}
-	if t.UUID != "" {
-		sb.WriteString(" ")
-		sb.WriteString(t.UUID)
-	}
-	if t.CompanyId != 0 {
-		sb.WriteString(" Company: ")
-		sb.WriteString(strconv.Itoa(t.CompanyId))
-	}
-	sb.WriteString(" RSSI: ")
-	sb.WriteString(strconv.Itoa(t.RSSI))
-	sb.WriteString(" Location: ")
-	sb.WriteString(strconv.Itoa(t.Location))
-	sb.WriteString(" N: ")
-	sb.WriteString(strconv.Itoa(t.Count))
-	if t.Time != 0 {
-		sb.WriteString(" Time: ")
-		sb.WriteString(t.timestamp())
-		if !now.IsZero() {
-			sb.WriteString(" (")
-			sb.WriteString(now.Sub(t.AsTime()).Round(time.Millisecond).String())
-			sb.WriteString(" ago)")
-		}
-	}
-	return sb.String()
-}
 
 type PhoneCall struct {
 	Phone        string

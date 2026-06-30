@@ -549,6 +549,8 @@ func (g *Gate) userName(phone, defaultName string) string {
 	return u.name()
 }
 
+var digitsRE = regexp.MustCompile(`^[0-9]+$`)
+
 func (g *Gate) handlingSmses(abort chan struct{}) {
 Loop:
 	for {
@@ -1335,7 +1337,7 @@ func (g *Gate) logBLETrackings(p []*BLETracking, bleAggr map[string]*bleCount) {
 			continue
 		}
 		c.logCnt++
-		Logger.Debugf("%s CompanyId: %d NN: %d age: %s CompanyCnt: %s", bt.MAC, c.companyId, c.cnt,
+		Logger.Debugf("%s CompanyId: %d NN: %d age: %s CompanyCnt: %d", bt.MAC, c.companyId, c.cnt,
 			c.age().Round(time.Second).String(), c.companyCnt)
 	}
 	for k, v := range bleAggr {

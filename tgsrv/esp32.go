@@ -61,7 +61,7 @@ func (t *BLETracking) StringNow(now time.Time) string {
 	}
 	if t.CompanyId != 0 {
 		sb.WriteString(" Company: ")
-		sb.WriteString(strconv.FormatInt(int64(t.CompanyId), 16))
+		sb.WriteString(strconv.Itoa(t.CompanyId))
 	}
 	sb.WriteString(" RSSI: ")
 	sb.WriteString(strconv.Itoa(t.RSSI))

@@ -1239,7 +1239,10 @@ Loop:
 				continue
 			}
 			if btbt[0].Location == cfg.TestLocation {
-				g.logBLETrackings(btbt, bleAggr)
+				g.logTestBLETrackings(btbt, bleAggr)
+			}
+			if cfg.LogLocations[btbt[0].Location] {
+				g.logBLETrackings(btbt)
 			}
 			// ignore if system location is unknown or not from system location
 			if btbt[0].Location != 100 {
@@ -1318,7 +1321,7 @@ Loop:
 	}
 }
 
-func (g *Gate) logBLETrackings(p []*BLETracking, bleAggr map[string]*bleCount) {
+func (g *Gate) logTestBLETrackings(p []*BLETracking, bleAggr map[string]*bleCount) {
 	now := time.Now()
 	for _, bt := range p {
 		c := bleAggr[bt.MAC]
@@ -1345,6 +1348,18 @@ func (g *Gate) logBLETrackings(p []*BLETracking, bleAggr map[string]*bleCount) {
 			delete(bleAggr, k)
 		}
 	}
+}
+
+func (g *Gate) logBLETrackings(p []*BLETracking) {
+	for _, bt := range p {
+		bt.initRawData()
+	}
+	go func() {
+		now := time.Now()
+		for _, bt := range p {
+			Logger.Debugf(bt.StringNow(now))
+		}
+	}()
 }
 
 func filterOut(p []*BLETracking, rem map[string]string) []*BLETracking {

@@ -78,7 +78,7 @@ func (t *BLETracking) StringNow(now time.Time) string {
 			sb.WriteString(" ago)")
 		}
 	}
-	t.ParseRaw()
+	t.initRawData()
 	if t.RawData != nil {
 		sb.WriteString(" Raw[")
 		sb.WriteString(t.RawData.String())
@@ -87,7 +87,7 @@ func (t *BLETracking) StringNow(now time.Time) string {
 	return sb.String()
 }
 
-func (t *BLETracking) ParseRaw() {
+func (t *BLETracking) initRawData() {
 	if t.Raw == "" || t.RawData != nil {
 		return
 	}

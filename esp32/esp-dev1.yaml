@@ -75,13 +75,6 @@ sensor:
 
 
 globals:
-  - id: my_value
-    type: float
-    initial_value: "0.0"
-  - id: gate_busy
-    type: bool
-    restore_value: no
-    initial_value: "false"
   - id: last_call_time
     type: std::map<std::string, unsigned long>
     restore_value: no
@@ -291,15 +284,18 @@ esp32_ble_tracker:
             device["name"] = x.get_name();
             device["location"] = id(current_location);
             device["count"] = std::to_string(total_count);
+
             auto ibeacon = x.get_ibeacon();
             if (ibeacon.has_value()) {
               device["uuid"] = ibeacon->get_uuid().to_string();
             }
-            // Извлечение Company ID (Manufacturer Data)
             auto m_datas = x.get_manufacturer_datas();
-            if (!m_datas.empty() && m_datas[0].data.size() >= 2) {
-              // В ESPHome data — это std::vector<uint8_t>
-              uint16_t cid = (m_datas[0].data[1] << 8) | m_datas[0].data[0];
+            if (!m_datas.empty()) {
+              // 1. Получаем базовую структуру ESP-IDF из объекта ESPBTUUID
+              esp_bt_uuid_t raw_uuid = m_datas[0].uuid.get_uuid();
+              
+              // 2. Безопасно извлекаем 16-битное значение
+              uint16_t cid = raw_uuid.uuid.uuid16;
               device["company_id"] = std::to_string(cid);
             } else {
               device["company_id"] = "0";
@@ -307,6 +303,18 @@ esp32_ble_tracker:
             if (id(sntp_time).now().is_valid()) {
               device["time"] = std::to_string(id(sntp_time).now().timestamp);
             }
+            auto sr = x.get_scan_result();
+            size_t packet_len = 0;
+
+            // Определяем, какой именно пакет пришел, и берем его реальную длину
+            if (sr.scan_rsp_len > 0) {
+              packet_len = sr.scan_rsp_len;
+            } else {
+              packet_len = sr.adv_data_len;
+            }
+            // Формируем hex-строку строго по размеру полезных GAP-данных
+            std::string raw_hex = format_hex(sr.ble_adv, packet_len);
+            device["raw"] = raw_hex;
 
             id(ble_queue).push_back(device);
 

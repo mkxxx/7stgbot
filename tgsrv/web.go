@@ -565,10 +565,6 @@ func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(bleTrackings) != 0 {
 			s.gate.bleTrackings <- bleTrackings
-			now := time.Now()
-			for _, bt := range bleTrackings {
-				Logger.Debugf(bt.StringNow(now))
-			}
 		}
 		w.WriteHeader(http.StatusOK)
 		return

@@ -1238,10 +1238,11 @@ Loop:
 			if len(btbt) == 0 {
 				continue
 			}
-			if btbt[0].Location == cfg.TestLocation {
+			loc := btbt[0].Location
+			if loc == cfg.TestLocation {
 				g.logTestBLETrackings(btbt, bleAggr)
 			}
-			if cfg.LogLocations[btbt[0].Location] {
+			if cfg.LogLocations[strconv.Itoa(loc)] {
 				g.logBLETrackings(btbt)
 			}
 			// ignore if system location is unknown or not from system location

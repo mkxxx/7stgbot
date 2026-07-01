@@ -57,7 +57,7 @@ type Config struct {
 	MaskedPhones                  map[string]string
 	LogsTikerMinutes              int64
 	TestLocation                  int
-	LogLocations                  map[int]bool
+	LogLocations                  map[string]bool
 }
 
 func (c *Config) GateRelayTextGetURL(name string) string {

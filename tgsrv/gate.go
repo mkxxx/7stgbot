@@ -54,12 +54,14 @@ const (
 	Open GateCommand = iota
 	KeepOpenBegin
 	KeepOpenEnd
+	Lock
 )
 
 type GateCommandAndText struct {
 	command            GateCommand
 	text               string
 	systemNotification string
+	args               any
 }
 
 type Gate struct {
@@ -713,6 +715,10 @@ func (g *Gate) endKeepOpenGate() {
 	g.GateCommands <- &GateCommandAndText{command: KeepOpenEnd}
 }
 
+func (g *Gate) lock(d time.Duration) {
+	g.GateCommands <- &GateCommandAndText{command: Lock, args: d}
+}
+
 /*
 GET /switch/Main%20Relay -> {"name_id":"switch/Main Relay","id":"switch-main_relay","value":true,"state":"ON"} | ..."value":false,"state":"OFF"}
 direct: POST /switch/Main%20Relay/turn_on
@@ -752,6 +758,7 @@ func (g *Gate) handlingGateState(abort <-chan struct{}, cfg *config.Config, cfgS
 	reset := false
 	lastOpenedTimeNano := g.lastOpenedTime.Load()
 	var lastGateOpenCommand *GateCommandAndText
+	var lockedUntil time.Time
 
 Loop:
 	for {
@@ -766,6 +773,10 @@ Loop:
 					if cmd.systemNotification == "" {
 						Logger.Infof("ignoring open command in opened state for: %q", cmd.text)
 					}
+					continue
+				}
+				if now.Before(lockedUntil) {
+					g.sendSystemNotification(fmt.Sprintf("IGNORED open command %q %q", cmd.systemNotification, cmd.text))
 					continue
 				}
 				lastGateOpenCommand = cmd
@@ -810,6 +821,15 @@ Loop:
 					Logger.Errorf("error saving to db %q: %v", s.Key, err)
 				}
 				g.sendCommandToGate(cmd.text, now, cmd.command)
+
+			case Lock:
+				minutes := cmd.args.(time.Duration)
+				if minutes == 0 {
+					lockedUntil = time.Time{}
+				} else {
+					lockedUntil = time.Now().Add(minutes)
+				}
+
 			}
 
 		case <-tenSecAfterErrorChan:
@@ -2544,6 +2564,18 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 	case "/7_keep_open_cancel":
 		g.endKeepOpenGate()
 		return "gate state changed to normal", nil
+
+	case "/7_lock":
+		text := strings.TrimSpace(args)
+		minutes := 0
+		if text != "" {
+			minutes, err = strconv.Atoi(text)
+			if err != nil {
+				return "number of minutes expected. 0 - unlock immediately", nil
+			}
+		}
+		g.lock(time.Duration(minutes) * time.Minute)
+		return "gate locked", nil
 
 	case "/7_set":
 		text := strings.TrimSpace(args)

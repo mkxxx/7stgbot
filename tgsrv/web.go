@@ -930,6 +930,8 @@ func mattermostToken(cmd string) string {
 		return "5c6nsgpkpj837fmd5o63pxopge"
 	case "/7_set":
 		return "pgxynxmuobbmudhfwgge7tyhxy"
+	case "/7_lock":
+		return "zf6jfxwextyg8prjippciocdur"
 	}
 	return ""
 }

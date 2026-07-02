@@ -89,7 +89,7 @@ globals:
     restore_value: no
   - id: current_location
     type: std::string
-    initial_value: '"1"'
+    initial_value: '"100"'
 
 
 substitutions:

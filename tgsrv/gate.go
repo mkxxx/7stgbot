@@ -1290,6 +1290,9 @@ Loop:
 			switch ci := v.(type) {
 			case *PALESLogInfo:
 				now := time.Now()
+				if now.Sub(ci.Time) > 5*time.Minute {
+					break
+				}
 				var conn []*NetworkClientInfo
 				for _, v := range wifiConnections {
 					if now.Sub(v.Time) < 5*time.Minute {
@@ -1313,8 +1316,9 @@ Loop:
 					sb.WriteString(c.Hostname)
 					sb.WriteString(" ")
 					sb.WriteString(c.IP)
-					sb.WriteString(" ")
+					sb.WriteString(" connected ")
 					sb.WriteString(now.Sub(c.Time).Round(time.Second).String())
+					sb.WriteString(" ago")
 				}
 				g.sendSystemNotification(sb.String())
 
@@ -1765,7 +1769,7 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 			Logger.Debug(string(bb))
 		}
 		if l.isInet() {
-			g.wifiClients <- &PALESLogInfo{Phone: phone, Firstname: l.Firstname, Lastname: l.Lastname}
+			g.wifiClients <- &PALESLogInfo{Phone: phone, Firstname: l.Firstname, Lastname: l.Lastname, Time: l.Time()}
 		}
 	}
 	if n == 0 {

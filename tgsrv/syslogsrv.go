@@ -68,6 +68,7 @@ type PALESLogInfo struct {
 	Phone     string
 	Firstname string
 	Lastname  string
+	Time      time.Time
 }
 
 type NetworkClientInfo struct {

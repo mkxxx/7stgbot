@@ -1319,6 +1319,15 @@ Loop:
 					sb.WriteString(" connected ")
 					sb.WriteString(now.Sub(c.Time).Round(time.Second).String())
 					sb.WriteString(" ago")
+					phone, name := phoneAndName(cfg, c)
+					if phone != "" {
+						sb.WriteString(" ")
+						sb.WriteString(phone)
+					}
+					if name != "" {
+						sb.WriteString(" ")
+						sb.WriteString(name)
+					}
 				}
 				g.sendSystemNotification(sb.String())
 
@@ -1335,20 +1344,10 @@ Loop:
 					}
 				}
 				wifiConnections[ci.MAC] = ci
-
-				name, ok := cfg.WiFiMacNames[ci.MAC]
-				if !ok && ci.Hostname != "" {
-					name, _ = cfg.WiFiMacNames[ci.Hostname]
-				}
+				phone, name := phoneAndName(cfg, ci)
 				g.sendSystemNotification(fmt.Sprintf("WiFi: %s %s %s (%s) %s", ci.MAC, ci.IP, ci.Hostname, ci.Time, name))
-				phone, ok := cfg.WiFiMACAutoOpenGate[ci.MAC]
-				if !ok {
-					if ci.Hostname != "" {
-						phone, ok = cfg.WiFiMACAutoOpenGate[ci.Hostname]
-					}
-					if !ok {
-						continue
-					}
+				if phone == "" {
+					continue
 				}
 				u, ok := g.Phones[phone]
 				if !ok {
@@ -1403,6 +1402,20 @@ Loop:
 			break Loop
 		}
 	}
+}
+
+func phoneAndName(cfg *config.Config, nci *NetworkClientInfo) (string, string) {
+	name, ok := cfg.WiFiMacNames[nci.MAC]
+	if !ok && nci.Hostname != "" {
+		name, _ = cfg.WiFiMacNames[nci.Hostname]
+	}
+	phone, ok := cfg.WiFiMACAutoOpenGate[nci.MAC]
+	if !ok {
+		if nci.Hostname != "" {
+			phone, ok = cfg.WiFiMACAutoOpenGate[nci.Hostname]
+		}
+	}
+	return phone, name
 }
 
 func (g *Gate) logTestBLETrackings(p []*BLETracking, bleAggr map[string]*bleCount) {

@@ -491,6 +491,8 @@ Loop:
 			if call.CalledNumber == g.GateOpenNumber {
 				if !ok {
 					g.sendSystemNotification(fmt.Sprintf("%s %s uknown", call.timestamp(), phone))
+					g.sendSMS(phone, "Ваш номер не зарегистрирован в реестре шлагбаума. Обратитесь в правление.",
+						time.Now().Add(24*time.Hour))
 					continue
 				}
 				if !g.allowedNow(phone) {
@@ -572,16 +574,8 @@ Loop:
 					Logger.Errorf("Encrypt(%s, now): %v", phone, err)
 					continue
 				}
-				m := gate.NewSMS(sms.Phone, time.Now().Add(24*time.Hour))
-				m.Msg = fmt.Sprintf("https://7slavka.ru/totp/%s/ откройте ссылку, добавьте QR код в Google Authenticator", secret)
-				err = g.SMSes.Insert(m)
-				if err != nil {
-					Logger.Errorf("save sms error: %v", err)
-					continue
-				}
-				g.Stored <- struct{}{}
-				Logger.Debugf("pending SMS: %s %q", m.Phone, m.Msg)
-
+				msg := fmt.Sprintf("https://7slavka.ru/totp/%s/ откройте ссылку, добавьте QR код в Google Authenticator", secret)
+				g.sendSMS(sms.Phone, msg, time.Now().Add(24*time.Hour))
 				continue
 			}
 			name := phone
@@ -612,6 +606,17 @@ Loop:
 			break Loop
 		}
 	}
+}
+
+func (g *Gate) sendSMS(phone string, msg string, deadline time.Time) {
+	m := gate.NewSMS(phone, deadline)
+	m.Msg = msg
+	err := g.SMSes.Insert(m)
+	if err != nil {
+		return
+	}
+	g.Stored <- struct{}{}
+	Logger.Debugf("pending SMS: %s %q", m.Phone, m.Msg)
 }
 
 func (g *Gate) readingSMSesForSend(abort chan struct{}) {
@@ -1508,28 +1513,22 @@ Loop:
 					length = 5
 				}
 				code := generateCode(length, badKeys, codes)
-				m := gate.NewSMS(sms.Phone, now.Add(20*time.Minute))
 				kpCode := &gate.KeypadCode{Code: code, RequesterPhone: sms.Phone, CreatedTimeMilli: time.Now().UnixMilli()}
 				hours := sms.tempCodeTTLHours()
+				smsText := ""
 				if hours != 0 {
 					kpCode.TTLMinutes = hours * 60
-					m.Msg = fmt.Sprintf("код для шлагбаума %s. действителен %d ч с первого ввода", code, hours)
+					smsText = fmt.Sprintf("код для шлагбаума %s. действителен %d ч с первого ввода", code, hours)
 				} else {
 					kpCode.EndTimeMilli = now.Add(30 * time.Minute).UnixMilli()
-					m.Msg = fmt.Sprintf("код для шлагбаума %s. действителен 30 мин", code)
+					smsText = fmt.Sprintf("код для шлагбаума %s. действителен 30 мин", code)
 				}
 				err = g.KeypadCodes.Insert(kpCode)
 				if err != nil {
 					Logger.Errorf("error saving to db kpcodes: %v", err)
 					continue
 				}
-				err = g.SMSes.Insert(m)
-				if err != nil {
-					Logger.Errorf("error saving to db kpcodes: %v", err)
-					continue
-				}
-				g.Stored <- struct{}{}
-				Logger.Debugf("pending SMS: %s %q", m.Phone, m.Msg)
+				g.sendSMS(sms.Phone, smsText, now.Add(20*time.Minute))
 				continue
 			}
 		case <-abort:
@@ -2048,20 +2047,20 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			} else {
 				phone = "7" + c.Code[1:11]
 			}
-			return g.phoneAsCodeEntered(phone, c)
+			return g.phoneAsCodeEntered(phone, c, true)
 		}
 		if n == 12 && (strings.HasPrefix(c.Code, "79") || strings.HasPrefix(c.Code, "89")) {
 			for i := 2; i < n; i++ {
 				phone := "7" + c.Code[1:i] + c.Code[i+1:n]
 				if _, ok := g.Phones[phone]; ok {
-					return g.phoneAsCodeEntered(phone, c)
+					return g.phoneAsCodeEntered(phone, c, true)
 				}
 			}
 		}
 		if n == 10 && (strings.HasPrefix(c.Code, "79") || strings.HasPrefix(c.Code, "89")) {
 			phone := findPhoneWithMissingDigit(g.Phones, c.Code)
 			if phone != "" {
-				return g.phoneAsCodeEntered(phone, c)
+				return g.phoneAsCodeEntered(phone, c, true)
 			}
 		}
 	}
@@ -2096,7 +2095,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			if strings.HasPrefix(code, "79") && len(code) >= 7 {
 				phone := findPhoneWithFailingKeys(g.Phones, badKeys, code)
 				if phone != "" {
-					return g.phoneAsCodeEntered(phone, c)
+					return g.phoneAsCodeEntered(phone, c, false)
 				}
 			}
 		}
@@ -2198,7 +2197,7 @@ func equalsMissingDigit2(s1, s2 string) bool {
 	return true
 }
 
-func (g *Gate) phoneAsCodeEntered(phone string, c KeypadCode) error {
+func (g *Gate) phoneAsCodeEntered(phone string, c KeypadCode, smsIfNotFound bool) error {
 	for _, v := range g.Cfg.MaskedPhones {
 		if phone == v {
 			g.sendSystemNotification(fmt.Sprintf("SOMEONE TRIED ENTER MASKED PHONE %s", phone))
@@ -2208,6 +2207,8 @@ func (g *Gate) phoneAsCodeEntered(phone string, c KeypadCode) error {
 	u, ok := g.Phones[phone]
 	if !ok {
 		g.sendSystemNotification(fmt.Sprintf("keypad code !OK %s . phone is not found in gate register", phone))
+		g.sendSMS(phone, "Ваш номер ввели на шлагбауме, не зарегистрирован в реестре. Обратитесь в правление.",
+			time.Now().Add(24*time.Hour))
 		return Err403Forbidden
 	}
 	if !g.allowedNow(phone) {

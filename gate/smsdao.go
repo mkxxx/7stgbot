@@ -70,6 +70,7 @@ func (s *SMSes) Insert(p *SMS) error {
 	_, err := s.db.Exec("INSERT INTO sms (phone, created_at_ms, deadline_ms, msg) VALUES(?,?,?,?);",
 		p.Phone, p.CreatedAtMilli, p.DeadlineMilli, p.Msg)
 	if err != nil {
+		Logger.Errorf("insertig into sms table (%q, %q) error: %v", p.Phone, p.Msg, err)
 		return err
 	}
 	return nil
@@ -119,9 +120,8 @@ func (s *NullSMSes) Update(p *SMS) error {
 	return nil
 }
 
-func NewSMS(phone string, dl time.Time) *SMS {
+func NewSMS(phone string, deadline time.Time) *SMS {
 	m := &SMS{Phone: phone, CreatedAtMilli: time.Now().UnixMilli(),
-		DeadlineMilli: dl.UnixMilli()}
+		DeadlineMilli: deadline.UnixMilli()}
 	return m
 }
-

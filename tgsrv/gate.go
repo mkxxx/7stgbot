@@ -75,7 +75,7 @@ type Gate struct {
 	phoneCalls             chan *PhoneCall
 	phoneSmses             chan *PhoneSms
 	bleTrackings           chan []*BLETracking
-	wifiClients            chan *NetworkClientInfo
+	wifiClients            chan any
 	openedEvets            chan OpenTime
 	PalesPortalUser        string
 	PalesPortalPwd         string
@@ -173,6 +173,10 @@ func (u *PalesLogUser) typeName() string {
 		return "bluetooth"
 	}
 	return fmt.Sprintf("unknown %d", u.Type)
+}
+
+func (u *PalesLogUser) isInet() bool {
+	return u.Type == 100
 }
 
 func (u *PalesLogUser) isRemote() bool {
@@ -323,7 +327,7 @@ func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
 	g.phoneCalls = make(chan *PhoneCall)
 	g.phoneSmses = make(chan *PhoneSms)
 	g.bleTrackings = make(chan []*BLETracking, 8)
-	g.wifiClients = make(chan *NetworkClientInfo, 8)
+	g.wifiClients = make(chan any, 8)
 	g.openedEvets = make(chan OpenTime, 8)
 	g.palesLastLog = &PalesLogUser{}
 	g.lastOpenCommandTime = atomic.Int64{}
@@ -1251,6 +1255,7 @@ func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgS
 		}
 	}
 	bleAggr := make(map[string]*bleCount)
+	wifiConnections := make(map[string]*NetworkClientInfo)
 Loop:
 	for {
 		select {
@@ -1281,23 +1286,77 @@ Loop:
 			aggr.sendSystemNotification(btbt)
 			bleTimer.openAfterPeriodOfActivity(btbt, time.Duration(sch.period(time.Now()))*time.Minute)
 
-		case c := <-g.wifiClients:
-			name, _ := cfg.WiFiMacNames[c.MAC]
-			g.sendSystemNotification(fmt.Sprintf("WiFi: %s %s %s (%s) %s", c.MAC, c.IP, c.Hostname, c.Timestamp, name))
-			phone, ok := cfg.WiFiMACAutoOpenGate[c.MAC]
-			if !ok {
-				continue
+		case v := <-g.wifiClients:
+			switch ci := v.(type) {
+			case *PALESLogInfo:
+				now := time.Now()
+				var conn []*NetworkClientInfo
+				for _, v := range wifiConnections {
+					if now.Sub(v.Time) < 5*time.Minute {
+						conn = append(conn, v)
+					}
+				}
+				if len(conn) == 0 {
+					break
+				}
+				var sb strings.Builder
+				sb.WriteString("WiFi connections when opened by inet by ")
+				sb.WriteString(ci.Phone)
+				sb.WriteString(" ")
+				sb.WriteString(ci.Firstname)
+				sb.WriteString(" ")
+				sb.WriteString(ci.Lastname)
+				for _, c := range conn {
+					sb.WriteString("\n")
+					sb.WriteString(c.MAC)
+					sb.WriteString(" ")
+					sb.WriteString(c.Hostname)
+					sb.WriteString(" ")
+					sb.WriteString(c.IP)
+					sb.WriteString(" ")
+					sb.WriteString(now.Sub(c.Time).Round(time.Second).String())
+				}
+				g.sendSystemNotification(sb.String())
+
+			case *NetworkClientInfo:
+				if !ci.connected {
+					delete(wifiConnections, ci.MAC)
+					break
+				}
+				if prev, ok := wifiConnections[ci.MAC]; ok && ci.IP != prev.IP && prev.IP != "" {
+					for k, v := range wifiConnections {
+						if v.IP == ci.IP {
+							delete(wifiConnections, k)
+						}
+					}
+				}
+				wifiConnections[ci.MAC] = ci
+
+				name, ok := cfg.WiFiMacNames[ci.MAC]
+				if !ok && ci.Hostname != "" {
+					name, _ = cfg.WiFiMacNames[ci.Hostname]
+				}
+				g.sendSystemNotification(fmt.Sprintf("WiFi: %s %s %s (%s) %s", ci.MAC, ci.IP, ci.Hostname, ci.Time, name))
+				phone, ok := cfg.WiFiMACAutoOpenGate[ci.MAC]
+				if !ok {
+					if ci.Hostname != "" {
+						phone, ok = cfg.WiFiMACAutoOpenGate[ci.Hostname]
+					}
+					if !ok {
+						continue
+					}
+				}
+				u, ok := g.Phones[phone]
+				if !ok {
+					continue
+				}
+				if !g.allowedNow(phone) {
+					g.sendSystemNotification(fmt.Sprintf("WiFi restricted %s", u.name()))
+					continue
+				}
+				g.openGate(fmt.Sprintf("WiFi %s %s", ci.MAC, phone), "")
+				g.sendSystemNotification(fmt.Sprintf("OPENED by WiFi: %s (%s)  %s %s", ci.MAC, ci.Time, phone, u.name()))
 			}
-			u, ok := g.Phones[phone]
-			if !ok {
-				continue
-			}
-			if !g.allowedNow(phone) {
-				g.sendSystemNotification(fmt.Sprintf("WiFi restricted %s", u.name()))
-				continue
-			}
-			g.openGate(fmt.Sprintf("WiFi %s %s", c.MAC, phone), "")
-			g.sendSystemNotification(fmt.Sprintf("OPENED by WiFi: %s (%s)  %s %s", c.MAC, c.Timestamp, phone, u.name()))
 
 		case m := <-g.bleSchedule:
 			sch = NewOpenSchedule(m)
@@ -1705,10 +1764,12 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 		} else {
 			Logger.Debug(string(bb))
 		}
+		if l.isInet() {
+			g.wifiClients <- &PALESLogInfo{Phone: phone, Firstname: l.Firstname, Lastname: l.Lastname}
+		}
 	}
 	if n == 0 {
 		return resp.StatusCode
-
 	}
 	g.palesLastLog = result.Log.List[len(result.Log.List)-1]
 	Logger.Infof("received %d pal-es log records", len(result.Log.List))

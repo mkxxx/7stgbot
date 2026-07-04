@@ -58,6 +58,16 @@ type Config struct {
 	LogsTikerMinutes              int64
 	TestLocation                  int
 	LogLocations                  map[string]bool
+	MQTT                          struct {
+		F struct {
+			URL             string
+			TopicsHex       string
+			Username        string
+			ClientID        string
+			ClientIDPostfix string
+		}
+		Headers map[string]string
+	}
 }
 
 func (c *Config) GateRelayTextGetURL(name string) string {

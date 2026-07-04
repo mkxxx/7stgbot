@@ -71,7 +71,7 @@ func TestPalEsTimeGroupsFromJson(t *testing.T) {
                 "_id": "19292",
                 "createdAt": "2026-03-31T05:52:41.993Z",
                 "orgId": "15479",
-                "deviceId": "4G600211776",
+                "deviceId": "4G600215575",
                 "groupName": "shop",
                 "timeArray": [
                     {

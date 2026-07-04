@@ -1707,7 +1707,7 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	url := "https://portal.pal-es.com/api1/device/4G600211776/log?skip=0&limit=10&filter=&startDate=%s&endDate=&approved=&reasons=&rly=&type="
+	url := "https://portal.pal-es.com/api1/device/4G600215575/log?skip=0&limit=10&filter=&startDate=%s&endDate=&approved=&reasons=&rly=&type="
 	//url = fmt.Sprintf(url, strconv.Itoa(int(g.palesLastLog.Tm)))
 	url = fmt.Sprintf(url, "")
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -1835,7 +1835,7 @@ func (g *Gate) loadPalesTimeGroups() int {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://portal.pal-es.com/api1/device/4G600211776/groups", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://portal.pal-es.com/api1/device/4G600215575/groups", nil)
 
 	if err != nil {
 		Logger.Errorf("%v", err)
@@ -1876,7 +1876,7 @@ func (g *Gate) loadPalesUsers() int {
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET",
-		"https://portal.pal-es.com/api1/device/4G600211776/users?skip=0&limit=10000&filter=", nil)
+		"https://portal.pal-es.com/api1/device/4G600215575/users?skip=0&limit=10000&filter=", nil)
 
 	if err != nil {
 		Logger.Errorf("%v", err)

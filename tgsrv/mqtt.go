@@ -177,7 +177,7 @@ func buildConnectPacket(clientID, username, jwtToken string) []byte {
 
 /*
 returns topic,data
-topic ex: org/15479/evt/device/4G600211776/update, org/15479/evt/device/4G600211776/log
+topic ex: org/15479/evt/device/4G600215575/update, org/15479/evt/device/4G600215575/log
 */
 func parsePublish(message []byte) (string, []byte) {
 	if len(message) < 4 || message[0] != 0x30 {

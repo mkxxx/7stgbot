@@ -55,6 +55,7 @@ const (
 	KeepOpenBegin
 	KeepOpenEnd
 	Lock
+	OpenedEvent
 )
 
 type GateCommandAndText struct {
@@ -728,6 +729,36 @@ func (g *Gate) lock(d time.Duration) {
 	g.GateCommands <- &GateCommandAndText{command: Lock, args: d}
 }
 
+type OpenMonitor struct {
+	secondToLast time.Time
+	last         time.Time
+	doubling     bool
+}
+
+func (m *OpenMonitor) opened(t time.Time) {
+	if t.Before(m.secondToLast) {
+		return
+	}
+	if t.Before(m.last) {
+		m.secondToLast = t
+		dist := m.last.Sub(m.secondToLast)
+		m.doubling = dist >= 7*time.Second && dist < 17*time.Second
+	} else {
+		m.secondToLast = m.last
+		m.last = t
+		if m.doubling {
+			m.doubling = false
+		} else {
+			dist := m.last.Sub(m.secondToLast)
+			m.doubling = dist >= 7*time.Second && dist < 17*time.Second
+		}
+	}
+}
+
+func (m *OpenMonitor) isDoubling() bool {
+	return m.doubling
+}
+
 /*
 GET /switch/Main%20Relay -> {"name_id":"switch/Main Relay","id":"switch-main_relay","value":true,"state":"ON"} | ..."value":false,"state":"OFF"}
 direct: POST /switch/Main%20Relay/turn_on
@@ -768,6 +799,7 @@ func (g *Gate) handlingGateState(abort <-chan struct{}, cfg *config.Config, cfgS
 	lastOpenedTimeNano := g.lastOpenedTime.Load()
 	var lastGateOpenCommand *GateCommandAndText
 	var lockedUntil time.Time
+	var openMonitor OpenMonitor
 
 Loop:
 	for {
@@ -791,6 +823,7 @@ Loop:
 				lastGateOpenCommand = cmd
 				err := g.sendCommandToGate(cmd.text, now, cmd.command)
 				g.updateLastOpenedTime(now)
+				openMonitor.opened(now)
 				if err != nil {
 					tenSecAfterErrorChan = time.NewTicker(10 * time.Second).C
 				}
@@ -839,15 +872,28 @@ Loop:
 					lockedUntil = time.Now().Add(minutes)
 				}
 
+			case OpenedEvent:
+				openMonitor.opened(now)
+
 			}
 
 		case <-tenSecAfterErrorChan:
-			now := time.Now()
-			ok, _ := g.resendAfterCheckCommandToGate(lastGateOpenCommand.text, now, lastGateOpenCommand.command)
-			g.updateLastOpenedTime(now)
-			if ok {
-				tenSecAfterErrorChan = nil
+			gateText, err := g.getGateTextValue(lastGateOpenCommand.command)
+			if err != nil {
+				break
 			}
+			if gateText == lastGateOpenCommand.text {
+				tenSecAfterErrorChan = nil
+				break
+			}
+			now := time.Now()
+			err = g.sendCommandToGate(lastGateOpenCommand.text, now, lastGateOpenCommand.command)
+			if err != nil {
+				break
+			}
+			tenSecAfterErrorChan = nil
+			g.updateLastOpenedTime(now)
+			openMonitor.opened(now)
 
 		case <-minuteTicker.C:
 			if reset {
@@ -868,16 +914,21 @@ Loop:
 				g.Settings.Update(&s)
 			}
 			if !inOpenedState {
-				minutes := sch.period(time.Now())
-				remaining := time.Duration(minutes)*time.Minute - now.Sub(lot)
-				if remaining < time.Minute {
-					if remaining >= 5*time.Second {
-						minuteTicker.Reset(remaining)
-						reset = true
-					} else {
-						// assert: remaining < 5*time.Second
-						g.openGate("timer", "")
-						g.sendSystemNotification(fmt.Sprintf("OPENED by timer %s", time.Now().In(Location).Format("15:04:05")))
+				if openMonitor.isDoubling() {
+					g.openGate("freeze-prevention", "")
+					g.sendSystemNotification(fmt.Sprintf("OPENED by freeze-prevention %s", time.Now().In(Location).Format("15:04:05")))
+				} else {
+					minutes := sch.period(time.Now())
+					remaining := time.Duration(minutes)*time.Minute - now.Sub(lot)
+					if remaining < time.Minute {
+						if remaining >= 5*time.Second {
+							minuteTicker.Reset(remaining)
+							reset = true
+						} else {
+							// assert: remaining < 5*time.Second
+							g.openGate("timer", "")
+							g.sendSystemNotification(fmt.Sprintf("OPENED by timer %s", time.Now().In(Location).Format("15:04:05")))
+						}
 					}
 				}
 			}
@@ -1067,18 +1118,6 @@ func (g *Gate) getGateTextValue(cmd GateCommand) (string, error) {
 		return "", err
 	}
 	return result.Value, nil
-}
-
-func (g *Gate) resendAfterCheckCommandToGate(text string, now time.Time, cmd GateCommand) (bool, error) {
-	gateText, err := g.getGateTextValue(cmd)
-	if err != nil {
-		return false, err
-	}
-	if gateText == text {
-		return true, nil
-	}
-	err = g.sendCommandToGate(text, now, cmd)
-	return err == nil, err
 }
 
 func (g *Gate) gateESP32TextSensorName(cmd GateCommand) string {
@@ -1752,12 +1791,12 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 			continue
 		}
 		n++
-		if l.Approved {
-			g.updateLastOpenedTime(l.Time())
-		}
 		var opened string
 		var approved string
 		if l.Approved {
+			t := l.Time()
+			g.updateLastOpenedTime(t)
+			g.GateCommands <- &GateCommandAndText{command: OpenedEvent, args: t}
 			opened = "OPENED "
 		} else {
 			approved = fmt.Sprintf("!OK %d", l.Reason)

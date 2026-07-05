@@ -610,6 +610,9 @@ Loop:
 }
 
 func (g *Gate) sendSMS(phone string, msg string, deadline time.Time) {
+	if strings.HasPrefix(phone, "7") {
+		phone = "+" + phone
+	}
 	m := gate.NewSMS(phone, deadline)
 	m.Msg = msg
 	err := g.SMSes.Insert(m)

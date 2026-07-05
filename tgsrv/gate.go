@@ -755,8 +755,8 @@ func (m *OpenMonitor) opened(t time.Time) {
 	}
 }
 
-func (m *OpenMonitor) isDoubling() bool {
-	return m.doubling
+func (m *OpenMonitor) isDoublingBefore(before time.Time) bool {
+	return m.doubling && m.last.Before(before)
 }
 
 /*
@@ -914,7 +914,7 @@ Loop:
 				g.Settings.Update(&s)
 			}
 			if !inOpenedState {
-				if openMonitor.isDoubling() {
+				if openMonitor.isDoublingBefore(now.Add(-time.Minute)) {
 					g.openGate("freeze-prevention", "")
 					g.sendSystemNotification(fmt.Sprintf("OPENED by freeze-prevention %s", time.Now().In(Location).Format("15:04:05")))
 				} else {

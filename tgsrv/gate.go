@@ -2650,12 +2650,11 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 
 	case "/7_open_after_m":
 		text := strings.TrimSpace(args)
-		if text == "" {
-			return "n of minutes expected", nil
-		}
-		n, err := strconv.Atoi(text)
-		if err != nil {
-			return "", err
+		n := 0
+		if text != "" {
+			if n, err = strconv.Atoi(text); err != nil {
+				return "", err
+			}
 		}
 		go func() {
 			wait := time.Duration(n) * time.Minute

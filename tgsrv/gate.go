@@ -2747,7 +2747,7 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 		}
 		return "updated", nil
 
-	case "7_sms":
+	case "/7_sms":
 		args := strings.TrimSpace(args)
 		aa := strings.SplitN(args, " ", 3)
 		if len(aa) != 3 && len(aa) != 2 {

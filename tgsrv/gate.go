@@ -58,6 +58,8 @@ const (
 	OpenedEvent
 )
 
+var phoneRegex = regexp.MustCompile(`^(\+7|7|8)\d{10}$`)
+
 type GateCommandAndText struct {
 	command            GateCommand
 	text               string
@@ -2609,19 +2611,19 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 		return atts, nil
 
 	case "/7_timer":
-		text := strings.TrimSpace(args)
+		args := strings.TrimSpace(args)
 		var sch map[string]int
-		if text == "" {
+		if args == "" {
 			g.schedule <- sch
 			return "schedule is canceled", nil
 		}
 		var err error
-		if strings.Contains(text, ":") {
-			err = json.Unmarshal([]byte("{"+text+"}"), &sch)
+		if strings.Contains(args, ":") {
+			err = json.Unmarshal([]byte("{"+args+"}"), &sch)
 		} else {
 			sch = make(map[string]int)
 			var n int
-			n, err = strconv.Atoi(text)
+			n, err = strconv.Atoi(args)
 			sch["00:00"] = n
 		}
 		if err != nil {
@@ -2632,17 +2634,17 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 		return fmt.Sprintf("%s schedule is set", strings.Trim(string(bytes), "{}")), nil
 
 	case "/7_ble_timer":
-		text := strings.TrimSpace(args)
+		args := strings.TrimSpace(args)
 		var sch map[string]int
-		if text == "" {
+		if args == "" {
 			g.bleSchedule <- sch
 			return "BLE schedule is canceled", nil
 		}
-		if strings.Contains(text, ":") {
-			return "", json.Unmarshal([]byte("{"+text+"}"), &sch)
+		if strings.Contains(args, ":") {
+			return "", json.Unmarshal([]byte("{"+args+"}"), &sch)
 		}
 		sch = make(map[string]int)
-		n, err := strconv.Atoi(text)
+		n, err := strconv.Atoi(args)
 		if err != nil {
 			return "", err
 		}
@@ -2652,10 +2654,10 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 		return fmt.Sprintf("%s BLE schedule is set", strings.Trim(string(bytes), "{}")), nil
 
 	case "/7_open_after_m":
-		text := strings.TrimSpace(args)
+		args := strings.TrimSpace(args)
 		n := 0
-		if text != "" {
-			if n, err = strconv.Atoi(text); err != nil {
+		if args != "" {
+			if n, err = strconv.Atoi(args); err != nil {
 				return "", err
 			}
 		}
@@ -2686,10 +2688,10 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 		return "gate state changed to normal", nil
 
 	case "/7_lock":
-		text := strings.TrimSpace(args)
+		args := strings.TrimSpace(args)
 		minutes := 0
-		if text != "" {
-			minutes, err = strconv.Atoi(text)
+		if args != "" {
+			minutes, err = strconv.Atoi(args)
 			if err != nil {
 				return "number of minutes expected. 0 - unlock immediately", nil
 			}
@@ -2698,9 +2700,9 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 		return "gate locked", nil
 
 	case "/7_set":
-		text := strings.TrimSpace(args)
-		if text == "" || !strings.Contains(text, " ") {
-			ss, err := g.Settings.FindN(text)
+		args := strings.TrimSpace(args)
+		if args == "" || !strings.Contains(args, " ") {
+			ss, err := g.Settings.FindN(args)
 			if err != nil {
 				return "", err
 			}
@@ -2718,9 +2720,9 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 			}
 			return msg.String(), nil
 		}
-		i := strings.Index(text, " ")
-		key := text[:i]
-		value := strings.TrimSpace(text[i+1:])
+		i := strings.Index(args, " ")
+		key := args[:i]
+		value := strings.TrimSpace(args[i+1:])
 		n := len(value)
 		value = strings.Trim(value, `"`)
 		if len(value) == n {
@@ -2744,6 +2746,37 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 			return "", err
 		}
 		return "updated", nil
+
+	case "7_sms":
+		args := strings.TrimSpace(args)
+		aa := strings.SplitN(args, " ", 3)
+		if len(aa) != 3 && len(aa) != 2 {
+			return "usage: /7_sms [<duration>] <phone> <text>", nil
+		}
+		var phone, sms string
+		relevance := 24 * time.Hour
+		if len(aa) == 3 {
+			d, err := time.ParseDuration(aa[0])
+			if err == nil {
+				relevance = d
+				phone = aa[1]
+				sms = aa[2]
+			} else {
+				phone = aa[0]
+				sms = aa[1]
+			}
+		} else {
+			phone = aa[0]
+			sms = aa[1]
+		}
+		if !phoneRegex.MatchString(phone) {
+			return fmt.Sprintf("phone must start with +7,7,8, and be exactly 11 digits long. %q is invalid.", phone), nil
+		}
+		if len(sms) > 160 {
+			return "text is too long", nil
+		}
+		g.sendSMS(phone, sms, time.Now().Add(relevance))
+		return "saved for sending", nil
 
 	default:
 		return "", ErrNotFound

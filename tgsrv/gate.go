@@ -2763,7 +2763,7 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 				sms = aa[2]
 			} else {
 				phone = aa[0]
-				sms = aa[1]
+				sms = aa[1] + " " + aa[2]
 			}
 		} else {
 			phone = aa[0]

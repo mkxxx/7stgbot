@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Go WebAuthn Демо</title>
+    <style>
+        body { font-family: sans-serif; max-width: 500px; margin: 50px auto; text-align: center; }
+        button { background: #28a745; color: white; border: none; padding: 10px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; margin: 10px; }
+        button#loginBtn { background: #007bff; }
+        #status { margin-top: 20px; padding: 10px; border-radius: 5px; font-weight: bold; background: #eee; }
+    </style>
+</head>
+<body>
+
+    <h2>Интеграция WebAuthn + Go</h2>
+    <button id="registerBtn">1. Зарегистрировать Passkey</button>
+    <button id="loginBtn">2. Войти по Passkey</button>
+    <div id="status">Ожидание действий...</div>
+
+    <script>
+        const statusDiv = document.getElementById('status');
+
+        // Утилиты для конвертации бинарных данных, так как WebAuthn API работает с ArrayBuffer, а JSON с Base64
+        function bufferToBase64URL(buffer) {
+            const bytes = new Uint8Array(buffer);
+            let string = '';
+            for (const b of bytes) string += String.fromCharCode(b);
+            return btoa(string).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+        }
+
+        function base64URLToBuffer(base64url) {
+            const padding = '='.repeat((4 - base64url.length % 4) % 4);
+            const base64 = (base64url + padding).replace(/\-/g, '+').replace(/_/g, '/');
+            const string = atob(base64);
+            const buffer = new ArrayBuffer(string.length);
+            const view = new Uint8Array(buffer);
+            for (let i = 0; i < string.length; i++) view[i] = string.charCodeAt(i);
+            return buffer;
+        }
+
+        // РЕГИСТРАЦИЯ
+        document.getElementById('registerBtn').addEventListener('click', async () => {
+            try {
+                statusDiv.innerText = "Запрос опций у Go сервера...";
+                const res = await fetch('/register/begin');
+                const options = await res.json();
+
+                // Превращаем Base64 строки от сервера в ArrayBuffer для браузера
+                options.publicKey.challenge = base64URLToBuffer(options.publicKey.challenge);
+                options.publicKey.user.id = base64URLToBuffer(options.publicKey.user.id);
+                if (options.publicKey.excludeCredentials) {
+                    options.publicKey.excludeCredentials.forEach(c => c.id = base64URLToBuffer(c.id));
+                }
+
+                statusDiv.innerText = "Подтвердите биометрию на устройстве...";
+                const credential = await navigator.credentials.create({ publicKey: options.publicKey });
+
+                // Формируем ответ для сервера, конвертируя буферы обратно в Base64
+                const credentialJSON = {
+                    id: credential.id,
+                    rawId: bufferToBase64URL(credential.rawId),
+                    type: credential.type,
+                    response: {
+                        clientDataJSON: bufferToBase64URL(credential.response.clientDataJSON),
+                        attestationObject: bufferToBase64URL(credential.response.attestationObject)
+                    }
+                };
+
+                statusDiv.innerText = "Проверка ключа на сервере...";
+                const finishRes = await fetch('/register/finish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(credentialJSON)
+                });
+
+                if (finishRes.ok) {
+                    statusDiv.innerText = "🎉 Успешно! Устройство связано на бэкенде Go.";
+                } else {
+                    statusDiv.innerText = "Ошибка сервера: " + await finishRes.text();
+                }
+            } catch (err) {
+                statusDiv.innerText = "Ошибка: " + err.message;
+            }
+        });
+
+        // ВХОД
+        document.getElementById('loginBtn').addEventListener('click', async () => {
+            try {
+                statusDiv.innerText = "Запрос вызова на вход у Go...";
+                const res = await fetch('/login/begin');
+                if (!res.ok) throw new Error(await res.text());
+                const options = await res.json();
+
+                options.publicKey.challenge = base64URLToBuffer(options.publicKey.challenge);
+                if (options.publicKey.allowCredentials) {
+                    options.publicKey.allowCredentials.forEach(c => c.id = base64URLToBuffer(c.id));
+                }
+
+                statusDiv.innerText = "Сканирование биометрии для входа...";
+                const assertion = await navigator.credentials.get({ publicKey: options.publicKey });
+
+                const assertionJSON = {
+                    id: assertion.id,
+                    rawId: bufferToBase64URL(assertion.rawId),
+                    type: assertion.type,
+                    response: {
+                        clientDataJSON: bufferToBase64URL(assertion.response.clientDataJSON),
+                        authenticatorData: bufferToBase64URL(assertion.response.authenticatorData),
+                        signature: bufferToBase64URL(assertion.response.signature),
+                        userHandle: assertion.response.userHandle ? bufferToBase64URL(assertion.response.userHandle) : null
+                    }
+                };
+
+                statusDiv.innerText = "Проверка криптографической подписи...";
+                const finishRes = await fetch('/login/finish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(assertionJSON)
+                });
+
+                if (finishRes.ok) {
+                    statusDiv.innerText = "🔒 Успешный вход! Бэкенд Go подтвердил вашу личность.";
+                } else {
+                    statusDiv.innerText = "Ошибка проверки подписи: " + await finishRes.text();
+                }
+            } catch (err) {
+                statusDiv.innerText = "Ошибка: " + err.message;
+            }
+        });
+    </script>
+</body>
+</html>
+

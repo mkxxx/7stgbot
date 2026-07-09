@@ -55,10 +55,10 @@ func RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
 		return
 	}
 	//http.HandleFunc("/", serveIndex)
-	http.HandleFunc("/gate/app/register/begin", registerBegin)
-	http.HandleFunc("/gate/app/register/finish", registerFinish)
-	http.HandleFunc("/gate/app/login/begin", loginBegin)
-	http.HandleFunc("/gate/app/login/finish", loginFinish)
+	mux.HandleFunc("/gate/app/register/begin", registerBegin)
+	mux.HandleFunc("/gate/app/register/finish", registerFinish)
+	mux.HandleFunc("/gate/app/login/begin", loginBegin)
+	mux.HandleFunc("/gate/app/login/finish", loginFinish)
 
 }
 

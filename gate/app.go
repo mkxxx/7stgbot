@@ -50,22 +50,21 @@ func RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
 		return
 	}
 	//http.HandleFunc("/", serveIndex)
-	http.HandleFunc("/gate/app/sms/send", handleSmsSend)
-	http.HandleFunc("/gate/app/sms/verify", handleSmsVerify)
+	mux.HandleFunc("/gate/app/sms/send", handleSmsSend)
+	mux.HandleFunc("/gate/app/sms/verify", handleSmsVerify)
 	
 	// API Проверки состояния и выхода
-	http.HandleFunc("/gate/app/check-session", handleCheckSession)
-	http.HandleFunc("/gate/app/logout", handleLogout)
+	mux.HandleFunc("/gate/app/check-session", handleCheckSession)
+	mux.HandleFunc("/gate/app/logout", handleLogout)
 	
 	// API WebAuthn (Passkeys)
-	http.HandleFunc("/gate/app/register/begin", handleRegisterBegin)
-	http.HandleFunc("/gate/app/register/finish", handleRegisterFinish)
-	http.HandleFunc("/gate/app/login/begin", handleLoginBegin)
-	http.HandleFunc("/gate/app/login/finish", handleLoginFinish)
+	mux.HandleFunc("/gate/app/register/begin", handleRegisterBegin)
+	mux.HandleFunc("/gate/app/register/finish", handleRegisterFinish)
+	mux.HandleFunc("/gate/app/login/begin", handleLoginBegin)
+	mux.HandleFunc("/gate/app/login/finish", handleLoginFinish)
 	
 	// Главное исполнительное действие
-	http.HandleFunc("/gate/app/gate/open", handleGateOpen)
-
+	mux.HandleFunc("/gate/app/gate/open", handleGateOpen)
 }
 
 func getPhoneFromSession(r *http.Request) (string, bool) {

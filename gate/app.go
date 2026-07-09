@@ -64,7 +64,7 @@ func RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
 	mux.HandleFunc("/gate/app/login/finish", handleLoginFinish)
 	
 	// Главное исполнительное действие
-	mux.HandleFunc("/gate/app/gate/open", handleGateOpen)
+	mux.HandleFunc("/gate/app/open", handleGateOpen)
 }
 
 func getPhoneFromSession(r *http.Request) (string, bool) {

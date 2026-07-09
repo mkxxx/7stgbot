@@ -2,132 +2,203 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Go WebAuthn Демо</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ворота СНТ «Семиславка»</title>
     <style>
-        body { font-family: sans-serif; max-width: 500px; margin: 50px auto; text-align: center; }
-        button { background: #28a745; color: white; border: none; padding: 10px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; margin: 10px; }
-        button#loginBtn { background: #007bff; }
-        #status { margin-top: 20px; padding: 10px; border-radius: 5px; font-weight: bold; background: #eee; }
+        :root { --primary: #007bff; --success: #28a745; --bg: #f8f9fa; --text: #212529; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        body { background: var(--bg); color: var(--text); display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+        .card { background: white; width: 100%; max-width: 400px; padding: 30px 24px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.05); text-align: center; }
+        h2 { margin-bottom: 8px; font-size: 22px; font-weight: 600; }
+        p { color: #6c757d; font-size: 14px; margin-bottom: 24px; }
+        .step { display: none; }
+        .step.active { display: block; }
+        input { width: 100%; padding: 14px; font-size: 16px; border: 1px solid #ced4da; border-radius: 8px; margin-bottom: 16px; text-align: center; -webkit-appearance: none; }
+        input:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 3px rgba(0,123,255,0.25); }
+        button { width: 100%; padding: 14px; font-size: 16px; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; transition: background 0.2s; margin-bottom: 12px; -webkit-tap-highlight-color: transparent; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: #0056b3; }
+        .btn-outline { background: transparent; border: 1px solid var(--primary); color: var(--primary); }
+        .btn-gate { background: var(--success); color: white; font-size: 24px; padding: 40px 20px; border-radius: 50%; width: 160px; height: 160px; margin: 20px auto; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px rgba(40,167,69,0.3); }
+        .btn-gate:active { transform: scale(0.96); box-shadow: 0 4px 10px rgba(40,167,69,0.2); }
+        #status { font-size: 14px; margin-top: 12px; font-weight: 500; }
+        .error-text { color: #dc3545; }
+        .success-text { color: var(--success); }
     </style>
 </head>
 <body>
 
-    <h2>Интеграция WebAuthn + Go</h2>
-    <button id="registerBtn">1. Зарегистрировать Passkey</button>
-    <button id="loginBtn">2. Войти по Passkey</button>
-    <div id="status">Ожидание действий...</div>
+<div class="card">
+    <!-- Шаг 1: Ввод номера телефона -->
+    <div id="stepPhone" class="step active">
+        <h2>Вход в систему</h2>
+        <p>Введите номер телефона для получения кода доступа</p>
+        <input type="tel" id="phoneInput" placeholder="+7 (999) 000-00-00" value="+7">
+        <button class="btn-primary" onclick="sendPhone()">Получить СМС код</button>
+        <button class="btn-outline" id="biometricBtn" style="display:none;" onclick="loginWebAuthn()">Войти по отпечатку/лицу</button>
+    </div>
 
-    <script>
-        const statusDiv = document.getElementById('status');
+    <!-- Шаг 2: Ввод СМС-кода -->
+    <div id="stepCode" class="step">
+        <h2>Подтверждение</h2>
+        <p>Мы отправили проверочный код на ваш номер</p>
+        <input type="number" id="codeInput" placeholder="Код из СМС" pattern="\d*">
+        <button class="btn-primary" onclick="verifyCode()">Подтвердить</button>
+        <button class="btn-outline" onclick="changeStep('stepPhone')">Назад</button>
+    </div>
 
-        // Утилиты для конвертации бинарных данных, так как WebAuthn API работает с ArrayBuffer, а JSON с Base64
-        function bufferToBase64URL(buffer) {
-            const bytes = new Uint8Array(buffer);
-            let string = '';
-            for (const b of bytes) string += String.fromCharCode(b);
-            return btoa(string).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    <!-- Шаг 3: Экран управления воротами -->
+    <div id="stepGate" class="step">
+        <h2>Ворота СНТ</h2>
+        <p id="gateUserIdent">Доступ разрешен</p>
+        <button class="btn-gate" onclick="openGate()">ОТКРЫТЬ</button>
+        <button class="btn-outline" id="setupPasskeyBtn" style="display:none;" onclick="registerWebAuthn()">Включить вход по биометрии</button>
+        <button class="btn-outline" style="border-color:#dc3545; color:#dc3545;" onclick="logout()">Выйти</button>
+    </div>
+
+    <div id="status"></div>
+</div>
+
+<script>
+    const status = document.getElementById('status');
+    let userPhone = '';
+
+    // Вспомогательные крипто-утилиты для WebAuthn
+    const b64toBuf = b64 => Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)).buffer;
+    const bufToB64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
+    function changeStep(stepId) {
+        document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+        document.getElementById(stepId).classList.add('active');
+        status.className = ''; status.innerText = '';
+    }
+
+    function showStatus(text, isError = false) {
+        status.innerText = text;
+        status.className = isError ? 'error-text' : 'success-text';
+    }
+
+    // При загрузке проверяем состояние авторизации пользователя
+    window.addEventListener('load', async () => {
+        // Если биометрия поддерживается, проверяем, создавался ли ранее Passkey на этом устройстве
+        if (window.PublicKeyCredential) {
+            document.getElementById('biometricBtn').style.display = 'block';
         }
-
-        function base64URLToBuffer(base64url) {
-            const padding = '='.repeat((4 - base64url.length % 4) % 4);
-            const base64 = (base64url + padding).replace(/\-/g, '+').replace(/_/g, '/');
-            const string = atob(base64);
-            const buffer = new ArrayBuffer(string.length);
-            const view = new Uint8Array(buffer);
-            for (let i = 0; i < string.length; i++) view[i] = string.charCodeAt(i);
-            return buffer;
+        
+        const res = await fetch('/check-session');
+        if (res.ok) {
+            const data = await res.json();
+            document.getElementById('gateUserIdent').innerText = `Пользователь: ${data.phone}`;
+            changeStep('stepGate');
+            if (data.has_webauthn === false) {
+                document.getElementById('setupPasskeyBtn').style.display = 'block';
+            }
         }
+    });
 
-        // РЕГИСТРАЦИЯ
-        document.getElementById('registerBtn').addEventListener('click', async () => {
-            try {
-                statusDiv.innerText = "Запрос опций у Go сервера...";
-                const res = await fetch('/register/begin');
-                const options = await res.json();
-
-                // Превращаем Base64 строки от сервера в ArrayBuffer для браузера
-                options.publicKey.challenge = base64URLToBuffer(options.publicKey.challenge);
-                options.publicKey.user.id = base64URLToBuffer(options.publicKey.user.id);
-                if (options.publicKey.excludeCredentials) {
-                    options.publicKey.excludeCredentials.forEach(c => c.id = base64URLToBuffer(c.id));
-                }
-
-                statusDiv.innerText = "Подтвердите биометрию на устройстве...";
-                const credential = await navigator.credentials.create({ publicKey: options.publicKey });
-
-                // Формируем ответ для сервера, конвертируя буферы обратно в Base64
-                const credentialJSON = {
-                    id: credential.id,
-                    rawId: bufferToBase64URL(credential.rawId),
-                    type: credential.type,
-                    response: {
-                        clientDataJSON: bufferToBase64URL(credential.response.clientDataJSON),
-                        attestationObject: bufferToBase64URL(credential.response.attestationObject)
-                    }
-                };
-
-                statusDiv.innerText = "Проверка ключа на сервере...";
-                const finishRes = await fetch('/register/finish', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(credentialJSON)
-                });
-
-                if (finishRes.ok) {
-                    statusDiv.innerText = "🎉 Успешно! Устройство связано на бэкенде Go.";
-                } else {
-                    statusDiv.innerText = "Ошибка сервера: " + await finishRes.text();
-                }
-            } catch (err) {
-                statusDiv.innerText = "Ошибка: " + err.message;
-            }
+    async function sendPhone() {
+        userPhone = document.getElementById('phoneInput').value.trim();
+        if (userPhone.length < 10) return showStatus('Введите корректный номер', true);
+        
+        const res = await fetch('/sms/send', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ phone: userPhone })
         });
+        if (res.ok) changeStep('stepCode');
+        else showStatus('Ошибка отправки СМС', true);
+    }
 
-        // ВХОД
-        document.getElementById('loginBtn').addEventListener('click', async () => {
-            try {
-                statusDiv.innerText = "Запрос вызова на вход у Go...";
-                const res = await fetch('/login/begin');
-                if (!res.ok) throw new Error(await res.text());
-                const options = await res.json();
-
-                options.publicKey.challenge = base64URLToBuffer(options.publicKey.challenge);
-                if (options.publicKey.allowCredentials) {
-                    options.publicKey.allowCredentials.forEach(c => c.id = base64URLToBuffer(c.id));
-                }
-
-                statusDiv.innerText = "Сканирование биометрии для входа...";
-                const assertion = await navigator.credentials.get({ publicKey: options.publicKey });
-
-                const assertionJSON = {
-                    id: assertion.id,
-                    rawId: bufferToBase64URL(assertion.rawId),
-                    type: assertion.type,
-                    response: {
-                        clientDataJSON: bufferToBase64URL(assertion.response.clientDataJSON),
-                        authenticatorData: bufferToBase64URL(assertion.response.authenticatorData),
-                        signature: bufferToBase64URL(assertion.response.signature),
-                        userHandle: assertion.response.userHandle ? bufferToBase64URL(assertion.response.userHandle) : null
-                    }
-                };
-
-                statusDiv.innerText = "Проверка криптографической подписи...";
-                const finishRes = await fetch('/login/finish', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(assertionJSON)
-                });
-
-                if (finishRes.ok) {
-                    statusDiv.innerText = "🔒 Успешный вход! Бэкенд Go подтвердил вашу личность.";
-                } else {
-                    statusDiv.innerText = "Ошибка проверки подписи: " + await finishRes.text();
-                }
-            } catch (err) {
-                statusDiv.innerText = "Ошибка: " + err.message;
-            }
+    async function verifyCode() {
+        const code = document.getElementById('codeInput').value.trim();
+        const res = await fetch('/sms/verify', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ phone: userPhone, code: code })
         });
-    </script>
+        if (res.ok) {
+            document.getElementById('gateUserIdent').innerText = `Пользователь: ${userPhone}`;
+            changeStep('stepGate');
+            document.getElementById('setupPasskeyBtn').style.display = 'block';
+        } else {
+            showStatus('Неверный код из СМС', true);
+        }
+    }
+
+    async function registerWebAuthn() {
+        try {
+            const res = await fetch('/register/begin', { method: 'POST' });
+            const options = await res.json();
+
+            options.publicKey.challenge = b64toBuf(options.publicKey.challenge);
+            options.publicKey.user.id = b64toBuf(options.publicKey.user.id);
+            
+            const credential = await navigator.credentials.create({ publicKey: options.publicKey });
+            const credentialJSON = {
+                id: credential.id, rawId: bufToB64(credential.rawId), type: credential.type,
+                response: {
+                    clientDataJSON: bufToB64(credential.response.clientDataJSON),
+                    attestationObject: bufToB64(credential.response.attestationObject)
+                }
+            };
+
+            const finishRes = await fetch('/register/finish', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(credentialJSON)
+            });
+
+            if (finishRes.ok) {
+                showStatus('Биометрия успешно подключена!');
+                document.getElementById('setupPasskeyBtn').style.display = 'none';
+            }
+        } catch (e) { showStatus('Ошибка настройки биометрии: ' + e.message, true); }
+    }
+
+    async function loginWebAuthn() {
+        try {
+            const res = await fetch('/login/begin', { method: 'POST' });
+            if (!res.ok) return showStatus('Пользователь не найден или не настроил Passkey', true);
+            const options = await res.json();
+
+            options.publicKey.challenge = b64toBuf(options.publicKey.challenge);
+            if (options.publicKey.allowCredentials) {
+                options.publicKey.allowCredentials.forEach(c => c.id = b64toBuf(c.id));
+            }
+
+            const assertion = await navigator.credentials.get({ publicKey: options.publicKey });
+            const assertionJSON = {
+                id: assertion.id, rawId: bufToB64(assertion.rawId), type: assertion.type,
+                response: {
+                    clientDataJSON: bufToB64(assertion.response.clientDataJSON),
+                    authenticatorData: bufToB64(assertion.response.authenticatorData),
+                    signature: bufToB64(assertion.response.signature)
+                }
+            };
+
+            const finishRes = await fetch('/login/finish', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(assertionJSON)
+            });
+
+            if (finishRes.ok) {
+                const data = await finishRes.json();
+                document.getElementById('gateUserIdent').innerText = `Пользователь: ${data.phone}`;
+                changeStep('stepGate');
+            }
+        } catch (e) { showStatus('Ошибка входа: ' + e.message, true); }
+    }
+
+    async function openGate() {
+        showStatus('Отправка команды на открытие ворот...');
+        const res = await fetch('/open', { method: 'POST' });
+        if (res.ok) showStatus('🟢 Ворота открываются!', false);
+        else showStatus('🔴 Отказано в доступе или ошибка реле', true);
+    }
+
+    async function logout() {
+        await fetch('/logout', { method: 'POST' });
+        window.location.reload();
+    }
+</script>
 </body>
 </html>
-

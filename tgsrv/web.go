@@ -53,23 +53,6 @@ const (
 	qreImgPath                   = "/images/qre.jpg"
 	qrcImgPath                   = "/images/qrc.jpg"
 	qrPath                       = "/docs/qr"
-	payPath                      = "/docs/оплата"
-	payElectrPath                = "/docs/оплата-эл"
-	contactsPath                 = "/docs/contacts"
-	internetPath                 = "/docs/internet"
-	internetElectrCSVPath        = "/docs/electr.csv"
-	internetDocsPath             = "/docs"
-	ble2Path                     = "/ble2"
-	gateOnCallPath               = "/gate/call"
-	gateOpenedPath               = "/gate/opened"
-	gateOnSmsPath                = "/gate/sms"
-	gateKeypadPath               = "/gate/keypad"
-	logLevelPath                 = "/app/log"
-	gateAutomateCallPath         = "/gate/automate/call"
-	gateAutomateSMSPath          = "/gate/automate/sms"
-	gateMattermostCommandPath    = "/gate/mm/cmd"
-	gateMattermostControllerPath = "/gate/mm/action"
-	totpPath                     = "/totp"
 
 	site = "https://7slavka.ru"
 
@@ -230,6 +213,31 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	go g.handlingScheduledJobs(abort, cfg)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /docs/оплата", ws.servePayTemplate)
+	mux.HandleFunc("POST /docs/оплата", handlePay)
+	mux.HandleFunc("GET /docs/оплата-эл", ws.servePayElectrTemplate)
+	mux.HandleFunc("POST /docs/оплата-эл", handlePayElectr)
+	mux.HandleFunc("GET /docs/qr", ws.serveQRTemplate)
+	mux.HandleFunc("/images/qr.jpg", ws.handleQRImg)
+	mux.HandleFunc("/images/qre.jpg", ws.handleQREImg)
+	mux.HandleFunc("/images/qrc.jpg", ws.handleQRCImg)
+	mux.HandleFunc("/{$}", ws.handleRootAndContacts)
+	mux.HandleFunc("/docs/contacts", ws.handleRootAndContacts)
+	mux.HandleFunc("/docs/internet", ws.handleInternet)
+	mux.HandleFunc("/docs/electr.csv", ws.handleElectrCSV)
+	mux.HandleFunc("/docs", ws.handleDocs)
+	mux.HandleFunc("/app/log", handleLogLevel)
+	mux.HandleFunc("/ble2", ws.handleBLE)
+	mux.HandleFunc("/gate/call", ws.handleCall)
+	mux.HandleFunc("/gate/sms", ws.handleSMS)
+	mux.HandleFunc("/gate/opened", ws.handleOpened)
+	mux.HandleFunc("/gate/keypad", ws.handleKeypad)
+	mux.HandleFunc("/gate/automate/call", ws.handleAutomateCall)
+	mux.HandleFunc("/gate/automate/sms", ws.handleAutomateSMS)
+	mux.HandleFunc("/gate/mm/cmd", ws.handleMattermostCommand)
+	mux.HandleFunc("/gate/mm/action", ws.handleMattermostAction)
+	mux.HandleFunc("/totp/{secret}", ws.handleTOTP)
+	mux.Handle("/gate/app/", http.StripPrefix("/gate/app/", http.FileServer(http.Dir(cfg.StaticGateAppDir))))
 	mux.HandleFunc("/", ws.handle)
 
 	ws.httpServer = &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: TrimSlashMiddleware(mux)}
@@ -336,560 +344,540 @@ func (s *webSrv) start(port int) {
 }
 
 func (s *webSrv) handle(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == payPath {
-		if r.Method == http.MethodGet {
-			s.servePayTemplate(w, r)
-			return
-		}
-		if r.Method == http.MethodPost {
-			// Call ParseForm() to parse the raw query and update r.PostForm and r.Form.
-			if err := r.ParseForm(); err != nil {
-				Logger.Errorf("ParseForm() err: %v", err)
-				http.Error(w, fmt.Sprintf("500 error %v", err), http.StatusInternalServerError)
-				return
-			}
-			params := url.Values{}
-			params.Add(paramNameSum, r.FormValue(paramNameSum))
-			params.Add(paramNamePurpose, r.FormValue(paramNamePurpose))
-			params.Add(paramNameFio, r.FormValue(paramNameFio))
-			http.Redirect(w, r, r.URL.Path+"?"+params.Encode(), http.StatusFound)
-			Logger.Info("POST: ", join(params))
-			return
-		}
-		return
-	}
-	if r.URL.Path == payElectrPath {
-		if r.Method == http.MethodGet {
-			s.servePayElectrTemplate(w, r)
-			return
-		}
-		if r.Method == http.MethodPost {
-			// Call ParseForm() to parse the raw query and update r.PostForm and r.Form.
-			if err := r.ParseForm(); err != nil {
-				Logger.Errorf("ParseForm() err: %v", err)
-				http.Error(w, fmt.Sprintf("500 error %v", err), http.StatusInternalServerError)
-				return
-			}
-			number := r.FormValue(paramNameNumber)
-			prevKey := r.FormValue(paramNamePrevKey)
-			prev := r.FormValue(paramNamePrevElectr)
-			curr := r.FormValue(paramNameCurrElectr)
-			debt := r.FormValue(paramNameDebt)
-			if len(number) != 0 && len(prevKey) != 0 && number != prevKey {
-				prev = ""
-				curr = ""
-				debt = ""
-			}
-			params := url.Values{}
-			params.Add(paramNameYear, r.FormValue(paramNameYear))
-			params.Add(paramNameMonth, r.FormValue(paramNameMonth))
-			params.Add(paramNameNumber, number)
-			params.Add(paramNamePrevElectr, prev)
-			params.Add(paramNameCurrElectr, curr)
-			params.Add(paramNameDebt, debt)
-			params.Add(paramNameFio, r.FormValue(paramNameFio))
-			params.Add(paramNamePrice, r.FormValue(paramNamePrice))
-			params.Add(paramNameCoef, r.FormValue(paramNameCoef))
-			http.Redirect(w, r, r.URL.Path+"?"+params.Encode(), http.StatusFound)
-			Logger.Info("POST: ", join(params))
-			return
-		}
-		return
-	}
-	if r.URL.Path == qrPath {
-		if r.Method == http.MethodGet {
-			s.serveQRTemplate(w, r)
-			return
-		}
-		return
-	}
-	if r.URL.Path == qrImgPath {
-		query := r.URL.Query()
-		s.writeImage(w,
-			query.Get(paramNameSum),
-			query.Get(paramNamePurpose),
-			query.Get(paramNameFio),
-		)
-		return
-	}
-	if r.URL.Path == qreImgPath {
-		query := r.URL.Query()
-		sum, purpose := s.calculate(
-			query.Get(paramNameYear),
-			query.Get(paramNameMonth),
-			query.Get(paramNameNumber),
-			query.Get(paramNamePrevElectr),
-			query.Get(paramNameCurrElectr),
-			query.Get(paramNameDebt),
-			query.Get(paramNamePrice),
-			query.Get(paramNameCoef),
-			query.Get(paramNameFio),
-		)
-		s.writeImage(w,
-			sum,
-			purpose,
-			query.Get(paramNameFio),
-		)
-		return
-	}
-	if r.URL.Path == qrcImgPath {
-		query := r.URL.Query()
-		year := query.Get(paramNameYear)
-		month := query.Get(paramNameMonth)
-		number := query.Get(paramNameNumber)
-		hash := query.Get(paramNameHash)
-		var sum float64
-		var purpose template.HTML
-
-		var ok bool
-		if checkHash(year, month, number, hash) {
-			purpose, sum, ok = s.purpose(year, month, number)
-		}
-		if ok {
-			s.writeImage(w,
-				fmt.Sprintf("%.2f", sum),
-				string(purpose),
-				"",
-			)
-		}
-		return
-	}
-	if r.URL.Path == "/" || r.URL.Path == contactsPath {
-		type tdataType struct {
-			DivAlignRight template.HTML
-			DivEnd        template.HTML
-		}
-		tdata := &tdataType{
-			DivAlignRight: template.HTML(`<div style="text-align: right">`),
-			DivEnd:        template.HTML(`</div>`),
-		}
-		s.serveTemplate(w, r, tdata, nil)
-		return
-	}
-	if r.URL.Path == internetPath {
-		type tdataType struct {
-			PingResult     template.HTML
-			OnlineRecently int
-			Reached        int
-		}
-		tdata := &tdataType{
-			PingResult: template.HTML(""),
-		}
-		tdata.OnlineRecently, tdata.Reached = s.pinger.onlineCount()
-		query := r.URL.Query()
-		if !query.Has("ping") {
-			s.serveTemplate(w, r, tdata, nil)
-			return
-		}
-		ip := s.pinger.bestIP(10)
-		if len(ip) == 0 {
-			s.serveTemplate(w, r, tdata, nil)
-			return
-		}
-		var buf bytes.Buffer
-		pingIp(&buf, ip)
-		tdata.PingResult = template.HTML(buf.String())
-		if query.Get("ping") == "2" {
-			tdata.PingResult += "\n\n"
-			ips := s.pinger.IPs(false)
-			sort.Sort(byIP(ips))
-			for _, ip := range ips {
-				tdata.PingResult += template.HTML(ip + "\n")
-			}
-		}
-		s.serveTemplate(w, r, tdata, nil)
-		return
-	}
-	if r.URL.Path == internetElectrCSVPath {
-		query := r.URL.Query()
-		year := query.Get(paramNameYear)
-		y, err := strconv.Atoi(year)
-		if err != nil {
-			Logger.Errorf("expected 4-digits year %s %v", year, err)
-			return
-		}
-		month := query.Get(paramNameMonth)
-		m, err := strconv.Atoi(month)
-		if err != nil {
-			Logger.Errorf("expected 2-digits month %s %v", month, err)
-			return
-		}
-		w.Header().Set("Content-Type", "text/csv")
-		w.Header().Set("Content-Disposition", "attachment;filename=electr_"+
-			year+month+".csv")
-		items := LoadElectrForMonth(s.staticDir, y, m)
-		items = anonymize(items)
-		for _, it := range items {
-			if len(it.PlotNumber) == 0 {
-				continue
-			}
-			it.QRURL = QRURL(year, month, it.PlotNumber)
-			registry := s.registry.Load().(*Registry)
-			email := registry.getEmailByPlotNumber(it.PlotNumber)
-			if len(email) != 0 {
-				it.BotURL = BotURL(email)
-			}
-		}
-		gocsv.SetCSVWriter(func(w io.Writer) *gocsv.SafeCSVWriter {
-			csvWriter := gocsv.DefaultCSVWriter(w)
-			csvWriter.Comma = ';'
-			return csvWriter
-		})
-		gocsv.Marshal(items, w)
-	}
-	if r.URL.Path == internetDocsPath {
-		s.serveTemplate(w, r, Bool(false), func(s string) string {
-			return strings.Replace(s, "<script ", "{{end}}\n <script ", 1)
-		})
-		return
-	}
-	if r.URL.Path == ble2Path {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Resource not found", http.StatusNotFound)
-			return
-		}
-		defer r.Body.Close()
-		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-
-		bodyBytes, err := io.ReadAll(r.Body)
-		if err != nil {
-			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
-			http.Error(w, "cannot read request body", http.StatusInternalServerError)
-			return
-		}
-		var bleTrackings []*BLETracking
-		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&bleTrackings); err != nil {
-			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if len(bleTrackings) != 0 {
-			s.gate.bleTrackings <- bleTrackings
-		}
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	if r.URL.Path == gateOnCallPath {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Resource not found", http.StatusNotFound)
-			return
-		}
-		defer r.Body.Close()
-		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-
-		bodyBytes, err := io.ReadAll(r.Body)
-		if err != nil {
-			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
-			http.Error(w, "cannot read request body", http.StatusInternalServerError)
-			return
-		}
-		var phoneCall PhoneCall
-		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&phoneCall); err != nil {
-			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		Logger.Infof("Call received: %s   %s", phoneCall.Phone, string(bodyBytes))
-		s.gate.phoneCalls <- &phoneCall
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	if r.URL.Path == gateOnSmsPath {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Resource not found", http.StatusNotFound)
-			return
-		}
-		defer r.Body.Close()
-		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-
-		bodyBytes, err := io.ReadAll(r.Body)
-		if err != nil {
-			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
-			http.Error(w, "cannot read request body", http.StatusInternalServerError)
-			return
-		}
-		var phoneSms PhoneSms
-		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&phoneSms); err != nil {
-			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		Logger.Infof("Sms received: %s   %s", phoneSms.Phone, string(bodyBytes))
-		s.gate.phoneSmses <- &phoneSms
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	if r.URL.Path == gateOpenedPath {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Resource not found", http.StatusNotFound)
-			return
-		}
-		defer r.Body.Close()
-		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-
-		bodyBytes, err := io.ReadAll(r.Body)
-		var openTime OpenTime
-		if err != nil {
-			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
-		} else if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&openTime); err != nil {
-			Logger.Errorf("%s cannot parse request body %v  %q", r.URL.Path, err, string(bodyBytes))
-		} else {
-			Logger.Debugf("%s  %q", r.URL.Path, string(bodyBytes))
-		}
-		w.WriteHeader(http.StatusOK)
-		s.gate.openedEvets <- openTime
-		return
-	}
-	if r.URL.Path == logLevelPath {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Resource not found", http.StatusNotFound)
-			return
-		}
-		defer r.Body.Close()
-		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-
-		bodyBytes, err := io.ReadAll(r.Body)
-		if err != nil {
-			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
-			http.Error(w, "cannot read request body", http.StatusInternalServerError)
-			return
-		}
-		l, err := strconv.Atoi(string(bodyBytes))
-		if err != nil {
-			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if l < -1 || l > 3 {
-			Logger.Errorf("%s bad value %s", r.URL.Path, string(bodyBytes))
-			http.Error(w, "bad value", http.StatusBadRequest)
-			return
-		}
-		AtomicLevel.SetLevel(zapcore.Level(l))
-		return
-	}
-	if r.URL.Path == gateKeypadPath {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Resource not found", http.StatusNotFound)
-			return
-		}
-		// 400 - bad format, 403 - forbidden, 429 - too many requests
-		defer r.Body.Close()
-		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-
-		bodyBytes, err := io.ReadAll(r.Body)
-		if err != nil {
-			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
-			http.Error(w, "cannot read request body", http.StatusInternalServerError)
-			return
-		}
-		var keypadCode KeypadCode
-		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&keypadCode); err != nil {
-			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		Logger.Debugf("keypad %s", string(bodyBytes))
-
-		err = s.gate.keypadCode(keypadCode)
-		switch {
-		case errors.Is(err, Err400BadFormat):
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		case errors.Is(err, Err403Forbidden):
-			http.Error(w, err.Error(), http.StatusForbidden)
-		case errors.Is(err, Err429TooManyRequests):
-			http.Error(w, err.Error(), http.StatusTooManyRequests)
-		case err != nil:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		default:
-			w.WriteHeader(http.StatusOK)
-		}
-		return
-	}
-	if r.URL.Path == gateAutomateCallPath {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Resource not found", http.StatusNotFound)
-			return
-		}
-		for {
-			select {
-			case c := <-s.gate.PendingCalls:
-				if c.Deadline < time.Now().UnixMilli() {
-					continue
-				}
-				fmt.Fprintf(w, `{"phone": "%s"}`, c.Phone)
-				return
-			case <-s.abort:
-				return
-			}
-		}
-	}
-	if r.URL.Path == gateAutomateSMSPath {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Resource not found", http.StatusNotFound)
-			return
-		}
-		defer r.Body.Close()
-		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-
-		bodyBytes, err := io.ReadAll(r.Body)
-		if err != nil {
-			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
-			http.Error(w, "cannot read request body", http.StatusInternalServerError)
-			return
-		}
-		timer55s := time.NewTimer(time.Second * 55)
-		var automateReq AutomateReq
-		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&automateReq); err != nil {
-			Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			select {
-			case <-timer55s.C:
-			case <-s.abort:
-			}
-			return
-		}
-		for {
-			select {
-			case m := <-s.gate.PendingSMSes:
-				if m.Expired() {
-					Logger.Debugf("expired SMS: %s %q", m.Phone, m.Msg)
-					continue
-				}
-				automateSMS := &AutomateSMS{Phone: m.Phone, Text: m.Msg}
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				text := fmt.Sprintf("phone: %s, text: %q", m.Phone, m.Msg)
-				err := json.NewEncoder(w).Encode(automateSMS)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					Logger.Errorf("%s error serializing response %v  %s", r.URL.Path, err, text)
-				} else {
-					Logger.Infof("%s <- %s", r.URL.Path, text)
-				}
-				m.Sent()
-				s.gate.SMSes.Update(m)
-				s.gate.sendSystemNotification(fmt.Sprintf("sent SMS: %s %q", m.Phone, m.Msg))
-				return
-
-			case <-timer55s.C:
-				w.WriteHeader(http.StatusRequestTimeout)
-				return
-
-			case <-s.abort:
-				w.WriteHeader(http.StatusServiceUnavailable)
-				return
-			}
-		}
-	}
-	if strings.HasPrefix(r.URL.Path, totpPath) {
-		secret := strings.TrimSuffix(r.URL.Path[len(totpPath):], "/")
-		phone, tm, err := DecryptPhone(secret)
-		if err != nil {
-			http.Error(w, "wtf", http.StatusBadRequest)
-			Logger.Debugf("%s decrypt error: %v", r.URL.Path, err)
-			return
-		}
-		if time.Since(tm) > time.Hour {
-			http.Error(w, "ссылка просрочена (срок 1 час). запросите новую", http.StatusBadRequest)
-			msg := fmt.Sprintf("%s ссылка просрочена (срок 1 час) %s %s", r.URL.Path, phone, tm)
-			Logger.Debugf(msg)
-			s.gate.sendSystemNotification(msg)
-			return
-		}
-		s.gate.TOTPPhones.Insert(&gate.TOTPPhone{Phone: phone, CreatedAtMilli: time.Now().UnixMilli()})
-		s.generateTOTPQRCodeImage(w, phone)
-		return
-	}
-	if r.URL.Path == gateMattermostCommandPath {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Resource not found", http.StatusNotFound)
-			return
-		}
-		defer r.Body.Close()
-
-		err := r.ParseForm()
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		encoder := json.NewEncoder(w)
-
-		if err != nil {
-			Logger.Errorf("%s cannot read form %v", r.URL.Path, err)
-			encoder.Encode(NewMattermostResponse("произошла ошибка"))
-			return
-		}
-		Logger.Infof("%s POST: %s", r.URL.Path, r.PostForm.Encode())
-		var req MattermostRequest
-		err = decoder.Decode(&req, r.PostForm)
-		if err != nil {
-			Logger.Errorf("%s cannot read form %v", r.URL.Path, err)
-			encoder.Encode(NewMattermostResponse("произошла ошибка"))
-			return
-		}
-		s.handleMattermostCommand(w, r, req, encoder)
-		return
-	}
-	if r.URL.Path == gateMattermostControllerPath {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Resource not found", http.StatusNotFound)
-			return
-		}
-		defer r.Body.Close()
-		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-
-		bodyBytes, err := io.ReadAll(r.Body)
-		var mmReq MattermostActionRequest
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		encoder := json.NewEncoder(w)
-		if err != nil {
-			Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
-			encoder.Encode(NewMattermostActionResponse("произошла ошибка"))
-			return
-		}
-		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&mmReq); err != nil {
-			Logger.Errorf("%s cannot parse request body %v  %q", r.URL.Path, err, string(bodyBytes))
-			encoder.Encode(NewMattermostActionResponse("произошла ошибка"))
-			return
-		}
-		Logger.Debugf("%s  %q", r.URL.Path, string(bodyBytes))
-		if mmReq.Context.Action == UIActionOpen {
-			if !mmReq.Context.Value {
-				encoder.Encode(NewMattermostActionResponse("👍 ресурс шлагбаума не безграниичный"))
-				return
-			}
-			mmUser, err := s.gate.MattermostUsers.Find(mmReq.UserId)
-			if err != nil {
-				Logger.Errorf("error finding user %s: %v", mmReq.UserId, err)
-				encoder.Encode(NewMattermostActionResponse("произошла ошибка"))
-				return
-			}
-			phone := mmUser.Phone
-			u, ok := s.gate.Phones[phone]
-			if !ok {
-				s.gate.sendSystemNotification(fmt.Sprintf("mattermost: phone %s is not found in gate register", phone))
-				encoder.Encode(NewMattermostActionResponse(fmt.Sprintf("%s не найден в реестре. Отправить заявку можно так: /7_ask прошу внести в реестр шлагбаума уч. <номер участка> <ФИО>. Например: /7_gate прошу внести в реестр шлагбаума уч. 123 Иванов Иван Иванович", phone)))
-				return
-			}
-			info := fmt.Sprintf("%s %s %s", phone, u.Firstname, u.Lastname)
-			if !s.gate.allowedNow(phone) {
-				s.gate.sendSystemNotification(fmt.Sprintf("mattermost: user restricted %s", info))
-				encoder.Encode(NewMattermostActionResponse("нет доступа к шлагбауму"))
-				return
-			}
-			encoder.Encode(NewMattermostActionResponse("✅ шлагбаум открывается..."))
-		} else {
-			encoder.Encode(NewMattermostActionResponse("неизвестная команда"))
-		}
-		return
-	}
 	Logger.Debugf("static resource %s", r.URL.Path)
 	s.staticHandler.ServeHTTP(w, r)
 }
 
-func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request, req MattermostRequest, encoder *json.Encoder) {
+func (s *webSrv) handleMattermostAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Resource not found", http.StatusNotFound)
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	var mmReq MattermostActionRequest
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	encoder := json.NewEncoder(w)
+	if err != nil {
+		Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+		encoder.Encode(NewMattermostActionResponse("произошла ошибка"))
+		return
+	}
+	if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&mmReq); err != nil {
+		Logger.Errorf("%s cannot parse request body %v  %q", r.URL.Path, err, string(bodyBytes))
+		encoder.Encode(NewMattermostActionResponse("произошла ошибка"))
+		return
+	}
+	Logger.Debugf("%s  %q", r.URL.Path, string(bodyBytes))
+	if mmReq.Context.Action == UIActionOpen {
+		if !mmReq.Context.Value {
+			encoder.Encode(NewMattermostActionResponse("👍 ресурс шлагбаума не безграниичный"))
+			return
+		}
+		mmUser, err := s.gate.MattermostUsers.Find(mmReq.UserId)
+		if err != nil {
+			Logger.Errorf("error finding user %s: %v", mmReq.UserId, err)
+			encoder.Encode(NewMattermostActionResponse("произошла ошибка"))
+			return
+		}
+		phone := mmUser.Phone
+		u, ok := s.gate.Phones[phone]
+		if !ok {
+			s.gate.sendSystemNotification(fmt.Sprintf("mattermost: phone %s is not found in gate register", phone))
+			encoder.Encode(NewMattermostActionResponse(fmt.Sprintf("%s не найден в реестре. Отправить заявку можно так: /7_ask прошу внести в реестр шлагбаума уч. <номер участка> <ФИО>. Например: /7_gate прошу внести в реестр шлагбаума уч. 123 Иванов Иван Иванович", phone)))
+			return
+		}
+		info := fmt.Sprintf("%s %s %s", phone, u.Firstname, u.Lastname)
+		if !s.gate.allowedNow(phone) {
+			s.gate.sendSystemNotification(fmt.Sprintf("mattermost: user restricted %s", info))
+			encoder.Encode(NewMattermostActionResponse("нет доступа к шлагбауму"))
+			return
+		}
+		encoder.Encode(NewMattermostActionResponse("✅ шлагбаум открывается..."))
+	} else {
+		encoder.Encode(NewMattermostActionResponse("неизвестная команда"))
+	}
+}
+
+func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Resource not found", http.StatusNotFound)
+		return
+	}
+	defer r.Body.Close()
+
+	err := r.ParseForm()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	encoder := json.NewEncoder(w)
+
+	if err != nil {
+		Logger.Errorf("%s cannot read form %v", r.URL.Path, err)
+		encoder.Encode(NewMattermostResponse("произошла ошибка"))
+		return
+	}
+	Logger.Infof("%s POST: %s", r.URL.Path, r.PostForm.Encode())
+	var req MattermostRequest
+	err = decoder.Decode(&req, r.PostForm)
+	if err != nil {
+		Logger.Errorf("%s cannot read form %v", r.URL.Path, err)
+		encoder.Encode(NewMattermostResponse("произошла ошибка"))
+		return
+	}
+	s.handleMattermostCommandEncoder(w, r, req, encoder)
+}
+
+func (s *webSrv) handleTOTP(w http.ResponseWriter, r *http.Request) {
+	secret := r.PathValue("secret")
+	phone, tm, err := DecryptPhone(secret)
+	if err != nil {
+		http.Error(w, "wtf", http.StatusBadRequest)
+		Logger.Debugf("%s decrypt error: %v", r.URL.Path, err)
+		return
+	}
+	if time.Since(tm) > time.Hour {
+		http.Error(w, "ссылка просрочена (срок 1 час). запросите новую", http.StatusBadRequest)
+		msg := fmt.Sprintf("%s ссылка просрочена (срок 1 час) %s %s", r.URL.Path, phone, tm)
+		Logger.Debugf(msg)
+		s.gate.sendSystemNotification(msg)
+		return
+	}
+	s.gate.TOTPPhones.Insert(&gate.TOTPPhone{Phone: phone, CreatedAtMilli: time.Now().UnixMilli()})
+	s.generateTOTPQRCodeImage(w, phone)
+}
+
+func (s *webSrv) handleAutomateSMS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Resource not found", http.StatusNotFound)
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+		http.Error(w, "cannot read request body", http.StatusInternalServerError)
+		return
+	}
+	timer55s := time.NewTimer(time.Second * 55)
+	var automateReq AutomateReq
+	if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&automateReq); err != nil {
+		Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		select {
+		case <-timer55s.C:
+		case <-s.abort:
+		}
+		return
+	}
+	for {
+		select {
+		case m := <-s.gate.PendingSMSes:
+			if m.Expired() {
+				Logger.Debugf("expired SMS: %s %q", m.Phone, m.Msg)
+				continue
+			}
+			automateSMS := &AutomateSMS{Phone: m.Phone, Text: m.Msg}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			text := fmt.Sprintf("phone: %s, text: %q", m.Phone, m.Msg)
+			err := json.NewEncoder(w).Encode(automateSMS)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				Logger.Errorf("%s error serializing response %v  %s", r.URL.Path, err, text)
+			} else {
+				Logger.Infof("%s <- %s", r.URL.Path, text)
+			}
+			m.Sent()
+			s.gate.SMSes.Update(m)
+			s.gate.sendSystemNotification(fmt.Sprintf("sent SMS: %s %q", m.Phone, m.Msg))
+			return
+
+		case <-timer55s.C:
+			w.WriteHeader(http.StatusRequestTimeout)
+			return
+
+		case <-s.abort:
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+	}
+}
+
+func (s *webSrv) handleAutomateCall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Resource not found", http.StatusNotFound)
+		return
+	}
+	for {
+		select {
+		case c := <-s.gate.PendingCalls:
+			if c.Deadline < time.Now().UnixMilli() {
+				continue
+			}
+			fmt.Fprintf(w, `{"phone": "%s"}`, c.Phone)
+			return
+		case <-s.abort:
+			return
+		}
+	}
+}
+
+func (s *webSrv) handleKeypad(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Resource not found", http.StatusNotFound)
+		return
+	}
+	// 400 - bad format, 403 - forbidden, 429 - too many requests
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+		http.Error(w, "cannot read request body", http.StatusInternalServerError)
+		return
+	}
+	var keypadCode KeypadCode
+	if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&keypadCode); err != nil {
+		Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	Logger.Debugf("keypad %s", string(bodyBytes))
+
+	err = s.gate.keypadCode(keypadCode)
+	switch {
+	case errors.Is(err, Err400BadFormat):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, Err403Forbidden):
+		http.Error(w, err.Error(), http.StatusForbidden)
+	case errors.Is(err, Err429TooManyRequests):
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
+	case err != nil:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	default:
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func handleLogLevel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Resource not found", http.StatusNotFound)
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+		http.Error(w, "cannot read request body", http.StatusInternalServerError)
+		return
+	}
+	l, err := strconv.Atoi(string(bodyBytes))
+	if err != nil {
+		Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if l < -1 || l > 3 {
+		Logger.Errorf("%s bad value %s", r.URL.Path, string(bodyBytes))
+		http.Error(w, "bad value", http.StatusBadRequest)
+		return
+	}
+	AtomicLevel.SetLevel(zapcore.Level(l))
+}
+
+func (s *webSrv) handleOpened(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Resource not found", http.StatusNotFound)
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	var openTime OpenTime
+	if err != nil {
+		Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+	} else if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&openTime); err != nil {
+		Logger.Errorf("%s cannot parse request body %v  %q", r.URL.Path, err, string(bodyBytes))
+	} else {
+		Logger.Debugf("%s  %q", r.URL.Path, string(bodyBytes))
+	}
+	w.WriteHeader(http.StatusOK)
+	s.gate.openedEvets <- openTime
+}
+
+func (s *webSrv) handleSMS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Resource not found", http.StatusNotFound)
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+		http.Error(w, "cannot read request body", http.StatusInternalServerError)
+		return
+	}
+	var phoneSms PhoneSms
+	if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&phoneSms); err != nil {
+		Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	Logger.Infof("Sms received: %s   %s", phoneSms.Phone, string(bodyBytes))
+	s.gate.phoneSmses <- &phoneSms
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *webSrv) handleCall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Resource not found", http.StatusNotFound)
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+		http.Error(w, "cannot read request body", http.StatusInternalServerError)
+		return
+	}
+	var phoneCall PhoneCall
+	if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&phoneCall); err != nil {
+		Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	Logger.Infof("Call received: %s   %s", phoneCall.Phone, string(bodyBytes))
+	s.gate.phoneCalls <- &phoneCall
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *webSrv) handleBLE(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Resource not found", http.StatusNotFound)
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		Logger.Errorf("%s cannot read request body %v", r.URL.Path, err)
+		http.Error(w, "cannot read request body", http.StatusInternalServerError)
+		return
+	}
+	var bleTrackings []*BLETracking
+	if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&bleTrackings); err != nil {
+		Logger.Errorf("%s cannot read request body %v  %s", r.URL.Path, err, string(bodyBytes))
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(bleTrackings) != 0 {
+		s.gate.bleTrackings <- bleTrackings
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *webSrv) handleDocs(w http.ResponseWriter, r *http.Request) {
+	s.serveTemplate(w, r, Bool(false), func(s string) string {
+		return strings.Replace(s, "<script ", "{{end}}\n <script ", 1)
+	})
+}
+
+func (s *webSrv) handleElectrCSV(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	year := query.Get(paramNameYear)
+	y, err := strconv.Atoi(year)
+	if err != nil {
+		Logger.Errorf("expected 4-digits year %s %v", year, err)
+		return
+	}
+	month := query.Get(paramNameMonth)
+	m, err := strconv.Atoi(month)
+	if err != nil {
+		Logger.Errorf("expected 2-digits month %s %v", month, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", "attachment;filename=electr_"+
+		year+month+".csv")
+	items := LoadElectrForMonth(s.staticDir, y, m)
+	items = anonymize(items)
+	for _, it := range items {
+		if len(it.PlotNumber) == 0 {
+			continue
+		}
+		it.QRURL = QRURL(year, month, it.PlotNumber)
+		registry := s.registry.Load().(*Registry)
+		email := registry.getEmailByPlotNumber(it.PlotNumber)
+		if len(email) != 0 {
+			it.BotURL = BotURL(email)
+		}
+	}
+	gocsv.SetCSVWriter(func(w io.Writer) *gocsv.SafeCSVWriter {
+		csvWriter := gocsv.DefaultCSVWriter(w)
+		csvWriter.Comma = ';'
+		return csvWriter
+	})
+	gocsv.Marshal(items, w)
+}
+
+func (s *webSrv) handleInternet(w http.ResponseWriter, r *http.Request) {
+	type tdataType struct {
+		PingResult     template.HTML
+		OnlineRecently int
+		Reached        int
+	}
+	tdata := &tdataType{
+		PingResult: template.HTML(""),
+	}
+	tdata.OnlineRecently, tdata.Reached = s.pinger.onlineCount()
+	query := r.URL.Query()
+	if !query.Has("ping") {
+		s.serveTemplate(w, r, tdata, nil)
+		return
+	}
+	ip := s.pinger.bestIP(10)
+	if len(ip) == 0 {
+		s.serveTemplate(w, r, tdata, nil)
+		return
+	}
+	var buf bytes.Buffer
+	pingIp(&buf, ip)
+	tdata.PingResult = template.HTML(buf.String())
+	if query.Get("ping") == "2" {
+		tdata.PingResult += "\n\n"
+		ips := s.pinger.IPs(false)
+		sort.Sort(byIP(ips))
+		for _, ip := range ips {
+			tdata.PingResult += template.HTML(ip + "\n")
+		}
+	}
+	s.serveTemplate(w, r, tdata, nil)
+}
+
+func (s *webSrv) handleRootAndContacts(w http.ResponseWriter, r *http.Request) {
+	type tdataType struct {
+		DivAlignRight template.HTML
+		DivEnd        template.HTML
+	}
+	tdata := &tdataType{
+		DivAlignRight: template.HTML(`<div style="text-align: right">`),
+		DivEnd:        template.HTML(`</div>`),
+	}
+	s.serveTemplate(w, r, tdata, nil)
+}
+
+func (s *webSrv) handleQRCImg(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	year := query.Get(paramNameYear)
+	month := query.Get(paramNameMonth)
+	number := query.Get(paramNameNumber)
+	hash := query.Get(paramNameHash)
+	var sum float64
+	var purpose template.HTML
+
+	var ok bool
+	if checkHash(year, month, number, hash) {
+		purpose, sum, ok = s.purpose(year, month, number)
+	}
+	if ok {
+		s.writeImage(w,
+			fmt.Sprintf("%.2f", sum),
+			string(purpose),
+			"",
+		)
+	}
+}
+
+func (s *webSrv) handleQREImg(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	sum, purpose := s.calculate(
+		query.Get(paramNameYear),
+		query.Get(paramNameMonth),
+		query.Get(paramNameNumber),
+		query.Get(paramNamePrevElectr),
+		query.Get(paramNameCurrElectr),
+		query.Get(paramNameDebt),
+		query.Get(paramNamePrice),
+		query.Get(paramNameCoef),
+		query.Get(paramNameFio),
+	)
+	s.writeImage(w,
+		sum,
+		purpose,
+		query.Get(paramNameFio),
+	)
+}
+
+func (s *webSrv) handleQRImg(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	s.writeImage(w,
+		query.Get(paramNameSum),
+		query.Get(paramNamePurpose),
+		query.Get(paramNameFio),
+	)
+}
+
+func handlePayElectr(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		Logger.Errorf("ParseForm() err: %v", err)
+		http.Error(w, fmt.Sprintf("500 error %v", err), http.StatusInternalServerError)
+		return
+	}
+	number := r.FormValue(paramNameNumber)
+	prevKey := r.FormValue(paramNamePrevKey)
+	prev := r.FormValue(paramNamePrevElectr)
+	curr := r.FormValue(paramNameCurrElectr)
+	debt := r.FormValue(paramNameDebt)
+	if len(number) != 0 && len(prevKey) != 0 && number != prevKey {
+		prev = ""
+		curr = ""
+		debt = ""
+	}
+	params := url.Values{}
+	params.Add(paramNameYear, r.FormValue(paramNameYear))
+	params.Add(paramNameMonth, r.FormValue(paramNameMonth))
+	params.Add(paramNameNumber, number)
+	params.Add(paramNamePrevElectr, prev)
+	params.Add(paramNameCurrElectr, curr)
+	params.Add(paramNameDebt, debt)
+	params.Add(paramNameFio, r.FormValue(paramNameFio))
+	params.Add(paramNamePrice, r.FormValue(paramNamePrice))
+	params.Add(paramNameCoef, r.FormValue(paramNameCoef))
+	http.Redirect(w, r, r.URL.Path+"?"+params.Encode(), http.StatusFound)
+	Logger.Info("POST: ", join(params))
+}
+
+func handlePay(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		Logger.Errorf("ParseForm() err: %v", err)
+		http.Error(w, fmt.Sprintf("500 error %v", err), http.StatusInternalServerError)
+		return
+	}
+	params := url.Values{}
+	params.Add(paramNameSum, r.FormValue(paramNameSum))
+	params.Add(paramNamePurpose, r.FormValue(paramNamePurpose))
+	params.Add(paramNameFio, r.FormValue(paramNameFio))
+	http.Redirect(w, r, r.URL.Path+"?"+params.Encode(), http.StatusFound)
+	Logger.Info("POST: ", join(params))
+}
+
+func (s *webSrv) handleMattermostCommandEncoder(w http.ResponseWriter, r *http.Request, req MattermostRequest, encoder *json.Encoder) {
 	mmUser, err := s.gate.MattermostUsers.Find(req.UserId)
 	if err != nil {
 		Logger.Errorf("db error: %v", err)

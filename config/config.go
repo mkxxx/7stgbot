@@ -8,6 +8,7 @@ import (
 type Config struct {
 	Port                   int
 	StaticDir              string
+	StaticGateAppDir       string
 	TgToken                string
 	Price                  map[string]float64
 	Coef                   map[string]float64

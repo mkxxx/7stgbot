@@ -6,9 +6,10 @@ import (
 
 const createEntities string = `
   CREATE TABLE IF NOT EXISTS entities (
-  tp TEXT PRIMARY KEY,
-  id TEXT PRIMARY KEY,
-  data TEXT NOT NULL
+  tp TEXT NOT NULL,
+  id TEXT NOT NULL,
+  data TEXT NOT NULL,
+  PRIMARY KEY (tp, id)
   );`
 
 type Entities struct {

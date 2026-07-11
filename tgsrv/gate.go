@@ -100,6 +100,7 @@ type Gate struct {
 	KeypadCodes            gate.KeypadCodesDAO
 	TOTPPhones             gate.TOTPPhonesDAO
 	MattermostUsers        gate.MattermostUsersDAO
+	Entities               gate.EntitiesDAO
 	Settings               gate.SettingsDAO
 	SMSSession             map[int]*gate.SMS
 	Stored                 chan struct{}
@@ -321,6 +322,7 @@ func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
 	g.KeypadCodes = gate.NewKeypadCodes(db)
 	g.TOTPPhones = gate.NewTOTPPhones(db)
 	g.MattermostUsers = gate.NewMattermostUsers(db)
+	g.Entities = gate.NewEntities(db)
 	g.Settings = gate.NewSettings(db)
 	g.Stored = make(chan struct{}, 8)
 	g.TelegramNotification = make(chan *Notification, 128)

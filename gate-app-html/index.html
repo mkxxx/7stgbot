@@ -78,13 +78,9 @@
         status.className = isError ? 'error-text' : 'success-text';
     }
 
-    // При загрузке проверяем состояние авторизации пользователя
+    // Автоматическая проверка при загрузке страницы
     window.addEventListener('load', async () => {
-        // Если биометрия поддерживается, проверяем, создавался ли ранее Passkey на этом устройстве
-        if (window.PublicKeyCredential) {
-            document.getElementById('biometricBtn').style.display = 'block';
-        }
-        
+        // 1. Сначала проверяем, есть ли уже активная сессия на сервере (HttpOnly Cookie)
         const res = await fetch('/check-session');
         if (res.ok) {
             const data = await res.json();
@@ -93,6 +89,19 @@
             if (data.has_webauthn === false) {
                 document.getElementById('setupPasskeyBtn').style.display = 'block';
             }
+            return;
+        }
+
+        // 2. Если сессии нет, проверяем, заходил ли этот телефон ранее с данного смартфона
+        const savedPhone = localStorage.getItem('gate_saved_phone');
+        if (savedPhone && window.PublicKeyCredential) {
+            userPhone = savedPhone;
+            const bioBtn = document.getElementById('biometricBtn');
+            bioBtn.innerText = `Войти как ${savedPhone} (Биометрия)`;
+            bioBtn.style.display = 'block';
+            
+            // Опционально: предустанавливаем сохраненный номер в инпут на случай, если пользователь захочет войти под другим номером
+            document.getElementById('phoneInput').value = savedPhone;
         }
     });
 
@@ -117,6 +126,9 @@
             body: JSON.stringify({ phone: userPhone, code: code })
         });
         if (res.ok) {
+            // Сохраняем телефон в память смартфона для будущих быстрых входов
+            localStorage.setItem('gate_saved_phone', userPhone);
+            
             document.getElementById('gateUserIdent').innerText = `Пользователь: ${userPhone}`;
             changeStep('stepGate');
             document.getElementById('setupPasskeyBtn').style.display = 'block';
@@ -156,15 +168,25 @@
 
     async function loginWebAuthn() {
         try {
-            const res = await fetch('/login/begin', { method: 'POST' });
-            if (!res.ok) return showStatus('Пользователь не найден или не настроил Passkey', true);
+            status.innerText = "Инициализация входа...";
+            
+            // ОТПРАВЛЯЕМ ТЕЛЕФОН НА СЕРВЕР, чтобы получить challenge именно для этого пользователя
+            const res = await fetch('/login/begin', { 
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ phone: userPhone })
+            });
+            
+            if (!res.ok) return showStatus('Пользователь не найден на сервере или Passkey не настроен', true);
             const options = await res.json();
+            const loginStateKey = res.headers.get('X-Login-State');
 
             options.publicKey.challenge = b64toBuf(options.publicKey.challenge);
             if (options.publicKey.allowCredentials) {
                 options.publicKey.allowCredentials.forEach(c => c.id = b64toBuf(c.id));
             }
 
+            // Запуск FaceID / TouchID / PIN смартфона
             const assertion = await navigator.credentials.get({ publicKey: options.publicKey });
             const assertionJSON = {
                 id: assertion.id, rawId: bufToB64(assertion.rawId), type: assertion.type,
@@ -176,7 +198,11 @@
             };
 
             const finishRes = await fetch('/login/finish', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                method: 'POST', 
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-Login-State': loginStateKey
+                },
                 body: JSON.stringify(assertionJSON)
             });
 
@@ -184,18 +210,22 @@
                 const data = await finishRes.json();
                 document.getElementById('gateUserIdent').innerText = `Пользователь: ${data.phone}`;
                 changeStep('stepGate');
+            } else {
+                showStatus('Ошибка проверки биометрии на сервере', true);
             }
         } catch (e) { showStatus('Ошибка входа: ' + e.message, true); }
     }
 
     async function openGate() {
         showStatus('Отправка команды на открытие ворот...');
-        const res = await fetch('/open', { method: 'POST' });
+        const res = await fetch('/gate/open', { method: 'POST' });
         if (res.ok) showStatus('🟢 Ворота открываются!', false);
-        else showStatus('🔴 Отказано в доступе или ошибка реле', true);
+        else showStatus('🔴 Отказано в доступе или ошибка сессии', true);
     }
 
     async function logout() {
+        // При выходе очищаем и куки сервера, и сохраненный телефон из localStorage устройства
+        localStorage.removeItem('gate_saved_phone');
         await fetch('/logout', { method: 'POST' });
         window.location.reload();
     }

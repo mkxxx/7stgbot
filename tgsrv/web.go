@@ -239,7 +239,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	mux.HandleFunc("/totp/{secret}", ws.handleTOTP)
 	mux.HandleFunc("/", ws.handle)
 
-    gate.RegisterGateAppHTTP(mux, cfg.StaticGateAppDir)
+    g.RegisterGateAppHTTP(mux, cfg.StaticGateAppDir)
 
 	ws.httpServer = &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: TrimSlashMiddleware(mux)}
 	return ws

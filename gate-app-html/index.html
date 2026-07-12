@@ -51,8 +51,8 @@
     <div id="stepGate" class="step">
         <h2>Ворота СНТ</h2>
         <p id="gateUserIdent">Доступ разрешен</p>
-        <button class="btn-gate" onclick="openGate()">ОТКРЫТЬ</button>
-        <button class="btn-outline" id="setupPasskeyBtn" style="display:none;" onclick="registerWebAuthn()">Включить вход по биометрии</button>
+        <button class="btn-gate" onclick="openGate()">ОТКРЫТЬ</button><!-- 
+        <button class="btn-outline" id="setupPasskeyBtn" style="display:none;" onclick="registerWebAuthn()">Включить вход по биометрии</button> -->
         <button class="btn-outline" style="border-color:#dc3545; color:#dc3545;" onclick="logout()">Выйти</button>
     </div>
 
@@ -80,27 +80,20 @@
 
     // Автоматическая проверка при загрузке страницы
     window.addEventListener('load', async () => {
-        // 1. Сначала проверяем, есть ли уже активная сессия на сервере (HttpOnly Cookie)
         const res = await fetch('/check-session');
         if (res.ok) {
             const data = await res.json();
             document.getElementById('gateUserIdent').innerText = `Пользователь: ${data.phone}`;
             changeStep('stepGate');
-            if (data.has_webauthn === false) {
-                document.getElementById('setupPasskeyBtn').style.display = 'block';
-            }
             return;
         }
 
-        // 2. Если сессии нет, проверяем, заходил ли этот телефон ранее с данного смартфона
         const savedPhone = localStorage.getItem('gate_saved_phone');
         if (savedPhone && window.PublicKeyCredential) {
             userPhone = savedPhone;
             const bioBtn = document.getElementById('biometricBtn');
             bioBtn.innerText = `Войти как ${savedPhone} (Биометрия)`;
             bioBtn.style.display = 'block';
-            
-            // Опционально: предустанавливаем сохраненный номер в инпут на случай, если пользователь захочет войти под другим номером
             document.getElementById('phoneInput').value = savedPhone;
         }
     });
@@ -126,18 +119,23 @@
             body: JSON.stringify({ phone: userPhone, code: code })
         });
         if (res.ok) {
-            // Сохраняем телефон в память смартфона для будущих быстрых входов
             localStorage.setItem('gate_saved_phone', userPhone);
-            
             document.getElementById('gateUserIdent').innerText = `Пользователь: ${userPhone}`;
-            changeStep('stepGate');
-            document.getElementById('setupPasskeyBtn').style.display = 'block';
+            
+            // Если браузер поддерживает WebAuthn, запускаем принудительную привязку пальца/лица
+            if (window.PublicKeyCredential) {
+                showStatus('СМС подтверждено. Настраиваем быстрый доступ по биометрии...');
+                await registerWebAuthn();
+            } else {
+                // Если биометрии на устройстве нет (старый ПК), просто пускаем к воротам
+                changeStep('stepGate');
+            }
         } else {
             showStatus('Неверный код из СМС', true);
         }
     }
 
-    async function registerWebAuthn() {
+   async function registerWebAuthn() {
         try {
             const res = await fetch('/register/begin', { method: 'POST' });
             const options = await res.json();
@@ -145,6 +143,7 @@
             options.publicKey.challenge = b64toBuf(options.publicKey.challenge);
             options.publicKey.user.id = b64toBuf(options.publicKey.user.id);
             
+            // Смартфон покажет системную шторку FaceID/TouchID сразу поверх экрана ввода СМС
             const credential = await navigator.credentials.create({ publicKey: options.publicKey });
             const credentialJSON = {
                 id: credential.id, rawId: bufToB64(credential.rawId), type: credential.type,
@@ -160,10 +159,19 @@
             });
 
             if (finishRes.ok) {
-                showStatus('Биометрия успешно подключена!');
-                document.getElementById('setupPasskeyBtn').style.display = 'none';
+                // Успешно привязали, переходим на экран ворот
+                changeStep('stepGate');
+                showStatus('Устройство успешно добавлено! В следующий раз СМС не потребуется.', false);
+            } else {
+                throw new Error(await finishRes.text());
             }
-        } catch (e) { showStatus('Ошибка настройки биометрии: ' + e.message, true); }
+        } catch (e) { 
+            // Если пользователь отменил биометрию или произошла ошибка, мы ВСЁ РАВНО 
+            // пускаем его к воротам (так как СМС-то он ввел верно), но выводим предупреждение
+            console.error('WebAuthn Ошибка/Отмена:', e);
+            changeStep('stepGate');
+            showStatus('Вход выполнен, но биометрия не была привязана.', true); 
+        }
     }
 
     async function loginWebAuthn() {

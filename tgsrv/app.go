@@ -153,11 +153,11 @@ func (g *Gate) handleCheckSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	u := WebUser{Phone: phone}
-	g.Entities.Load(&u)
+
+	// Просто возвращаем номер телефона авторизованного пользователя
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"phone":        phone,
-		"has_webauthn": len(u.Credentials) > 0,
+		"phone": phone,
 	})
 }
 

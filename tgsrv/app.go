@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/crc64"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -39,6 +40,16 @@ func (s *HTTPSession) ID() string                      { return s.Token }
 func (s *HTTPSession) MarshalData() (string, error)    { return s.Phone, nil }
 func (s *HTTPSession) UnmarshalData(data string) error { s.Phone = data; return nil }
 
+type CodeSMS struct {
+	Phone string
+	Code  string
+}
+
+func (s *CodeSMS) Type() string                    { return "CodeSMS" }
+func (s *CodeSMS) ID() string                      { return s.Phone }
+func (s *CodeSMS) MarshalData() (string, error)    { return s.Code, nil }
+func (s *CodeSMS) UnmarshalData(data string) error { s.Code = data; return nil }
+
 // Реализация интерфейса webauthn.User
 func (u *WebUser) WebAuthnID() []byte                         { return []byte(u.Phone) }
 func (u *WebUser) WebAuthnName() string                       { return u.Phone }
@@ -52,7 +63,10 @@ var (
 	mu             sync.Mutex
 )
 
-const sessionCookieName = "gate_session"
+const (
+	sessionCookieName = "gate_session"
+	appDomain         = "gate.7slavka.ru"
+)
 
 func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
 	mux.Handle("/gate/app", http.StripPrefix("/gate/app", http.FileServer(http.Dir(staticDir))))
@@ -63,7 +77,7 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
 		RPID:          "7slavka.ru",
 		RPOrigins: []string{
 			"https://7slavka.ru",
-			"https://gate.7slavka.ru",
+			"https://" + appDomain,
 		},
 	})
 	if err != nil {
@@ -71,7 +85,7 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
 		return
 	}
 	//http.HandleFunc("/", serveIndex)
-	mux.HandleFunc("POST /gate/app/sms/send", handleSmsSend)
+	mux.HandleFunc("POST /gate/app/sms/send", g.handleSmsSend)
 	mux.HandleFunc("POST /gate/app/sms/verify", g.handleSmsVerify)
 
 	// API Проверки состояния и выхода
@@ -117,7 +131,7 @@ func (g *Gate) createSession(w http.ResponseWriter, phone string) {
 	}
 }
 
-func handleSmsSend(w http.ResponseWriter, r *http.Request) {
+func (g *Gate) handleSmsSend(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Phone string `json:"phone"`
 	}
@@ -125,9 +139,13 @@ func handleSmsSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	// Имитация отправки СМС. Код подтверждения жестко задан как "1234"
-	Logger.Infof("[SMS-ШЛЮЗ] Отправлен код 1234 на номер %s\n", req.Phone)
+	bb := make([]byte, 4)
+	rand.Read(bb)
+	code := strconv.Itoa((int(bb[0]) + int(bb[1])<<8 + int(bb[2])<<16 + int(bb[3])<<24) % 10000)
+	g.sendSMS(req.Phone, fmt.Sprintf("%s: введите код подтверждения %s", appDomain, code), time.Now().Add(time.Minute))
 	w.WriteHeader(http.StatusOK)
+	s := CodeSMS{Phone: req.Phone, Code: code}
+	g.Entities.Insert(&s)
 }
 
 func (g *Gate) handleSmsVerify(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +153,13 @@ func (g *Gate) handleSmsVerify(w http.ResponseWriter, r *http.Request) {
 		Phone string `json:"phone"`
 		Code  string `json:"code"`
 	}
-	if json.NewDecoder(r.Body).Decode(&req) != nil || req.Code != "1234" {
+	if json.NewDecoder(r.Body).Decode(&req) != nil {
+		http.Error(w, "Неверный код", http.StatusUnauthorized)
+		return
+	}
+	sms := CodeSMS{Phone: req.Phone}
+	ok, _ := g.Entities.Load(&sms)
+	if !ok || req.Code != sms.Code {
 		http.Error(w, "Неверный код", http.StatusUnauthorized)
 		return
 	}

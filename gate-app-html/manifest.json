@@ -1,0 +1,17 @@
+{
+  "short_name": "Шлагбаум",
+  "name": "Шлагбаум СНТ Семиславка",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#f8f9fa",
+  "theme_color": "#007bff",
+  "display": "standalone",
+  "orientation": "portrait"
+}

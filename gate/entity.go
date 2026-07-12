@@ -2,6 +2,7 @@ package gate
 
 import (
 	"database/sql"
+	"time"
 )
 
 const createEntities string = `
@@ -9,6 +10,8 @@ const createEntities string = `
   tp TEXT NOT NULL,
   id TEXT NOT NULL,
   data TEXT NOT NULL,
+  created INT NOT NULL,
+  updated INT NOT NULL,
   PRIMARY KEY (tp, id)
   );`
 
@@ -48,8 +51,9 @@ func (s *Entities) Insert(p Entity) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec("INSERT OR IGNORE INTO entities (tp, id, data) VALUES(?,?,?);",
-		p.Type(), p.ID(), data)
+	created := time.Now().Unix()
+	_, err = s.db.Exec("INSERT OR IGNORE INTO entities (tp, id, data, created, updated) VALUES(?,?,?,?,?);",
+		p.Type(), p.ID(), data, created, created)
 	return err
 }
 
@@ -58,8 +62,9 @@ func (s *Entities) Update(p Entity) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec("UPDATE entities SET data = ? WHERE tp = ? AND id = ?;",
-		data, p.Type(), p.ID())
+	updated := time.Now().Unix()
+	_, err = s.db.Exec("UPDATE entities SET data = ?, updated = ? WHERE tp = ? AND id = ?;",
+		data, updated, p.Type(), p.ID())
 	if err != nil {
 		return err
 	}

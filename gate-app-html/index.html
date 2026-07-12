@@ -3,6 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#007bff">
+    <!-- Иконка для старых версий iOS iOS -->
+    <link rel="apple-touch-icon" href="/icon.png">
     <title>Ворота СНТ «Семиславка»</title>
     <style>
         :root { --primary: #007bff; --success: #28a745; --bg: #f8f9fa; --text: #212529; }
@@ -237,6 +241,50 @@
         await fetch('/logout', { method: 'POST' });
         window.location.reload();
     }
+
+    // 1. Регистрация Service Worker
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js')
+            .then(() => console.log('Service Worker успешно зарегистрирован!'))
+            .catch(err => console.error('Ошибка SW:', err));
+    }
+
+    // 2. Логика кнопки добавления на рабочий стол (только для Android/Chrome)
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e) => {
+        // Блокируем стандартное появление баннера Chrome
+        e.preventDefault();
+        deferredPrompt = e;
+
+        // Показываем пользователю подсказку. 
+        // Например, выведем плашку на статус-бар через 2 секунды после входа на экран ворот
+        setTimeout(() => {
+            if (document.getElementById('stepGate').classList.contains('active')) {
+                showInstallBanner();
+            }
+        }, 2000);
+    });
+
+    function showInstallBanner() {
+        // Создаем аккуратную кнопку-подсказку на экране ворот
+        const gateStep = document.getElementById('stepGate');
+        const installBtn = document.createElement('button');
+        installBtn.className = 'btn-outline';
+        installBtn.style.borderColor = '#007bff';
+        installBtn.innerText = '📲 Добавить иконку на рабочий стол';
+        installBtn.onclick = async () => {
+            if (!deferredPrompt) return;
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            if (outcome === 'accepted') {
+                installBtn.remove();
+            }
+            deferredPrompt = null;
+        };
+        // Вставляем кнопку перед кнопкой Выйти
+        gateStep.insertBefore(installBtn, gateStep.lastElementChild);
+    }
+
 </script>
 </body>
 </html>

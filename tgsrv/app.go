@@ -8,6 +8,7 @@ import (
 	"hash/crc64"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -340,6 +341,7 @@ func (g *Gate) handleGateOpen(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Доступ запрещен. Авторизуйтесь.", http.StatusForbidden)
 		return
 	}
+	phone = normalizePhone(phone)
 	u, ok := g.Phones[phone]
 	if !ok {
 		http.Error(w, "Вы не зарегестрированы в реестре шлагбаума. Обратитесь в правление.", http.StatusForbidden)
@@ -353,6 +355,15 @@ func (g *Gate) handleGateOpen(w http.ResponseWriter, r *http.Request) {
 	g.sendSystemNotification(fmt.Sprintf("opened by web app %s %s", phone, u.name()))
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func normalizePhone(phone string) string {
+	if strings.HasPrefix(phone, "+") {
+		phone = phone[1:]
+	} else if strings.HasPrefix(phone, "8") {
+		phone = "7" + phone[1:]
+	}
+	return phone
 }
 
 func (g *Gate) handleLogout(w http.ResponseWriter, r *http.Request) {

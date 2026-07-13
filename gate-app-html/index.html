@@ -230,9 +230,20 @@
 
     async function openGate() {
         showStatus('Отправка команды на открытие ворот...');
-        const res = await fetch('/gate/open', { method: 'POST' });
-        if (res.ok) showStatus('🟢 Шлагбаум открываются!', false);
-        else showStatus('🔴 Отказано в доступе или ошибка сессии', true);
+        try {
+            const res = await fetch('/open', { method: 'POST' });
+            
+            if (res.ok) {
+                showStatus('🟢 Ворота открываются!', false);
+            } else {
+                // Читаем текст ошибки, который прислал Go-сервер (например, "Доступ запрещен. Авторизуйтесь.")
+                const errorText = await res.text();
+                showStatus(`🔴 Ошибка: ${errorText}`, true);
+            }
+        } catch (err) {
+            // На случай, если пропал интернет или сервер полностью недоступен
+            showStatus(`🔴 Сетевая ошибка: ${err.message}`, true);
+        }
     }
 
     async function logout() {

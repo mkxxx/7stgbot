@@ -74,7 +74,7 @@ const (
 )
 
 func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
-	mux.Handle("/gate/app/", http.StripPrefix("/gate/app/", http.FileServer(http.Dir(staticDir))))
+	mux.Handle("/gate/app/", http.StripPrefix("/gate/app", http.FileServer(http.Dir(staticDir))))
 
 	var err error
 	webAuthnConfig, err = webauthn.New(&webauthn.Config{

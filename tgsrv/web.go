@@ -36,23 +36,23 @@ import (
 )
 
 const (
-	paramNameSum                 = "sum"
-	paramNameYear                = "yyyy"
-	paramNameMonth               = "mm"
-	paramNamePrevElectr          = "prev"
-	paramNameCurrElectr          = "curr"
-	paramNameDebt                = "debt"
-	paramNameFio                 = "fio"
-	paramNameNumber              = "n"
-	paramNameHash                = "h"
-	paramNamePrevKey             = "prevyyyymmnumber"
-	paramNamePurpose             = "purpose"
-	paramNamePrice               = "price"
-	paramNameCoef                = "coef"
-	qrImgPath                    = "/images/qr.jpg"
-	qreImgPath                   = "/images/qre.jpg"
-	qrcImgPath                   = "/images/qrc.jpg"
-	qrPath                       = "/docs/qr"
+	paramNameSum        = "sum"
+	paramNameYear       = "yyyy"
+	paramNameMonth      = "mm"
+	paramNamePrevElectr = "prev"
+	paramNameCurrElectr = "curr"
+	paramNameDebt       = "debt"
+	paramNameFio        = "fio"
+	paramNameNumber     = "n"
+	paramNameHash       = "h"
+	paramNamePrevKey    = "prevyyyymmnumber"
+	paramNamePurpose    = "purpose"
+	paramNamePrice      = "price"
+	paramNameCoef       = "coef"
+	qrImgPath           = "/images/qr.jpg"
+	qreImgPath          = "/images/qre.jpg"
+	qrcImgPath          = "/images/qrc.jpg"
+	qrPath              = "/docs/qr"
 
 	site = "https://7slavka.ru"
 
@@ -239,7 +239,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	mux.HandleFunc("/totp/{secret}", ws.handleTOTP)
 	mux.HandleFunc("/", ws.handle)
 
-    g.RegisterGateAppHTTP(mux, cfg.StaticGateAppDir)
+	g.RegisterGateAppHTTP(mux, cfg.StaticGateAppDir)
 
 	ws.httpServer = &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: TrimSlashMiddleware(mux)}
 	return ws
@@ -247,7 +247,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 
 func TrimSlashMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
+		if r.URL.Path != "/" && r.URL.Path != "/gate/app/" {
 			r.URL.Path = strings.TrimSuffix(r.URL.Path, "/")
 		}
 		next.ServeHTTP(w, r)

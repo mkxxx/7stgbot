@@ -10,7 +10,6 @@ const createEntities string = `
   tp TEXT NOT NULL,
   id TEXT NOT NULL,
   data TEXT NOT NULL,
-  created INT NOT NULL,
   updated INT NOT NULL,
   PRIMARY KEY (tp, id)
   );`
@@ -24,6 +23,10 @@ type Entity interface {
 	ID() string
 	MarshalData() (string, error)
 	UnmarshalData(data string) error
+}
+
+type UpdatedRef interface {
+	Updated() *int64
 }
 
 type EntitiesDAO interface {
@@ -51,9 +54,14 @@ func (s *Entities) Insert(p Entity) error {
 	if err != nil {
 		return err
 	}
-	created := time.Now().Unix()
-	_, err = s.db.Exec("INSERT OR IGNORE INTO entities (tp, id, data, created, updated) VALUES(?,?,?,?,?);",
-		p.Type(), p.ID(), data, created, created)
+	var updated int64
+	if ur, ok := p.(UpdatedRef); ok {
+		updated = *ur.Updated()
+	} else {
+		updated = time.Now().Unix()
+	}
+	_, err = s.db.Exec("INSERT OR IGNORE INTO entities (tp, id, data, updated) VALUES(?,?,?,?);",
+		p.Type(), p.ID(), data, updated)
 	return err
 }
 
@@ -62,7 +70,12 @@ func (s *Entities) Update(p Entity) error {
 	if err != nil {
 		return err
 	}
-	updated := time.Now().Unix()
+	var updated int64
+	if ur, ok := p.(UpdatedRef); ok {
+		updated = *ur.Updated()
+	} else {
+		updated = time.Now().Unix()
+	}
 	_, err = s.db.Exec("UPDATE entities SET data = ?, updated = ? WHERE tp = ? AND id = ?;",
 		data, updated, p.Type(), p.ID())
 	if err != nil {
@@ -78,7 +91,7 @@ func (s *Entities) Delete(p Entity) error {
 }
 
 func (s *Entities) Load(p Entity) (ok bool, err error) {
-	rows, err := s.db.Query("SELECT data FROM entities WHERE tp = ? AND id = ?", p.Type(), p.ID())
+	rows, err := s.db.Query("SELECT data, updated FROM entities WHERE tp = ? AND id = ?", p.Type(), p.ID())
 	if err != nil {
 		return false, err
 	}
@@ -86,7 +99,8 @@ func (s *Entities) Load(p Entity) (ok bool, err error) {
 
 	for rows.Next() {
 		var data string
-		err = rows.Scan(&data)
+		var updated int64
+		err = rows.Scan(&data, &updated)
 		if err != nil {
 			Logger.Errorf("scan %s:%s error: %v", p.Type(), p.ID(), err)
 			return false, err
@@ -95,6 +109,9 @@ func (s *Entities) Load(p Entity) (ok bool, err error) {
 		if err != nil {
 			Logger.Errorf("unmarshal %s:%s %s error: %v", p.Type(), p.ID(), data, err)
 			return false, err
+		}
+		if ur, ok := p.(UpdatedRef); ok {
+			*ur.Updated() = updated
 		}
 		return true, nil //lint:ignore
 	}

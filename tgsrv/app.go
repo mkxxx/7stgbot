@@ -41,14 +41,19 @@ func (s *HTTPSession) MarshalData() (string, error)    { return s.Phone, nil }
 func (s *HTTPSession) UnmarshalData(data string) error { s.Phone = data; return nil }
 
 type CodeSMS struct {
-	Phone string
-	Code  string
+	Phone   string
+	Code    string
+	Updated int64
 }
 
 func (s *CodeSMS) Type() string                    { return "CodeSMS" }
 func (s *CodeSMS) ID() string                      { return s.Phone }
 func (s *CodeSMS) MarshalData() (string, error)    { return s.Code, nil }
 func (s *CodeSMS) UnmarshalData(data string) error { s.Code = data; return nil }
+func (s *CodeSMS) UpdatedRef() *int64              { return &s.Updated }
+func (s *CodeSMS) Actual(now time.Time) bool {
+	return time.Duration(now.Unix()-s.Updated) <= 10*time.Minute
+}
 
 // Реализация интерфейса webauthn.User
 func (u *WebUser) WebAuthnID() []byte                         { return []byte(u.Phone) }
@@ -69,7 +74,7 @@ const (
 )
 
 func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
-	mux.Handle("/gate/app", http.StripPrefix("/gate/app", http.FileServer(http.Dir(staticDir))))
+	mux.Handle("/gate/app/", http.StripPrefix("/gate/app/", http.FileServer(http.Dir(staticDir))))
 
 	var err error
 	webAuthnConfig, err = webauthn.New(&webauthn.Config{
@@ -139,13 +144,26 @@ func (g *Gate) handleSmsSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
+	now := time.Now()
+	sms := CodeSMS{Phone: req.Phone}
+	exists, _ := g.Entities.Load(&sms)
+	if !exists || !sms.Actual(now) {
+		sms.Code = generateSMSCode()
+		sms.Updated = now.Unix()
+	}
+	g.sendSMS(req.Phone, fmt.Sprintf("%s: введите код подтверждения %s", appDomain, sms.Code), time.Now().Add(time.Minute))
+	w.WriteHeader(http.StatusOK)
+	if exists {
+		g.Entities.Update(&sms)
+	} else {
+		g.Entities.Insert(&sms)
+	}
+}
+
+func generateSMSCode() string {
 	bb := make([]byte, 4)
 	rand.Read(bb)
-	code := strconv.Itoa((int(bb[0]) + int(bb[1])<<8 + int(bb[2])<<16 + int(bb[3])<<24) % 10000)
-	g.sendSMS(req.Phone, fmt.Sprintf("%s: введите код подтверждения %s", appDomain, code), time.Now().Add(time.Minute))
-	w.WriteHeader(http.StatusOK)
-	s := CodeSMS{Phone: req.Phone, Code: code}
-	g.Entities.Insert(&s)
+	return strconv.Itoa((int(bb[0]) + int(bb[1])<<8 + int(bb[2])<<16 + int(bb[3])<<24) % 10000)
 }
 
 func (g *Gate) handleSmsVerify(w http.ResponseWriter, r *http.Request) {

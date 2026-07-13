@@ -2663,20 +2663,23 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 				return "", err
 			}
 		}
-		go func() {
-			wait := time.Duration(n) * time.Minute
-			time.Sleep(wait)
-			lastTime := g.lastOpenedTime.Load()
-			closedTime := time.Since(time.Unix(0, lastTime))
-			if closedTime > wait {
-				g.openGate(cmd, "")
-				agoStr := "unknown"
-				if lastTime != 0 {
-					agoStr = (time.Duration(closedTime.Seconds()) * time.Second).String()
+		if n > 0 {
+			go func() {
+				wait := time.Duration(n) * time.Minute
+				time.Sleep(wait)
+				lastTime := g.lastOpenedTime.Load()
+				closedTime := time.Since(time.Unix(0, lastTime))
+				cancel := closedTime < wait // if was opened while waiting then cancel
+				if !cancel {
+					g.openGate(cmd, "")
+					g.sendSystemNotification(fmt.Sprintf("opened by %s %s (minutes). previously opened %s ago", cmd, args,
+						closedTime.Round(time.Second)))
 				}
-				g.sendSystemNotification(fmt.Sprintf("opened by %s. previously opened %s ago", cmd, agoStr))
-			}
-		}()
+			}()
+		} else {
+			g.openGate(cmd, "")
+			g.sendSystemNotification(fmt.Sprintf("opened by %s", cmd))
+		}
 		return fmt.Sprintf(
 			"opening after %d minutes at %s", n,
 			time.Now().Add(time.Duration(n)*time.Minute).In(Location).Format("15:04:05")), nil

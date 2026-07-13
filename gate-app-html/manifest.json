@@ -1,6 +1,6 @@
 {
-  "short_name": "Шлагбаум",
-  "name": "Шлагбаум СНТ Семиславка",
+  "short_name": "Ворота",
+  "name": "Ворота СНТ Семиславка",
   "start_url": "/",
   "background_color": "#f8f9fa",
   "theme_color": "#007bff",
@@ -8,29 +8,35 @@
   "orientation": "portrait",
   "icons": [
     {
+      "src": "/icon192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
       "src": "/icon.png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any"
     },
     {
-      "src": "/icon192.png",
+      "src": "/icon.png",
       "type": "image/png",
-      "sizes": "192x192",
-      "purpose": "any"
+      "sizes": "512x512",
+      "purpose": "maskable"
     }
   ],
   "screenshots": [
     {
       "src": "/screenshot-mobile.png",
-      "sizes": "750x1334",
+      "sizes": "1080x1920",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Мобильный интерфейс управления шлагбаумом"
+      "label": "Мобильный интерфейс управления воротами"
     },
     {
       "src": "/screenshot-desktop.png",
-      "sizes": "1280x720",
+      "sizes": "1920x1080",
       "type": "image/png",
       "form_factor": "wide",
       "label": "Интерфейс для ПК и планшетов"

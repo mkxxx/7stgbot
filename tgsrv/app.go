@@ -340,8 +340,17 @@ func (g *Gate) handleGateOpen(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Доступ запрещен. Авторизуйтесь.", http.StatusForbidden)
 		return
 	}
-	// Логика физического открытия ворот
-	Logger.Debugf(" [!] СИГНАЛ НА РЕЛЕ: Пользователь %s нажал кнопку ОТКРЫТЬ ВОРОТА в %v\n", phone, time.Now().Format("15:04:05"))
+	u, ok := g.Phones[phone]
+	if !ok {
+		http.Error(w, "Вы не зарегестрированы в реестре шлагбаума. Обратитесь в правление.", http.StatusForbidden)
+		return
+	}
+	if !g.allowedNow(phone) {
+		http.Error(w, "В данный момент у вас не прав на проезд.", http.StatusForbidden)
+		return
+	}
+	g.openGate(phone+" web app", "")
+	g.sendSystemNotification(fmt.Sprintf("opened by web app %s %s", phone, u.name()))
 
 	w.WriteHeader(http.StatusOK)
 }

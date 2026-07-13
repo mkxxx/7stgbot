@@ -52,7 +52,7 @@ func (s *CodeSMS) MarshalData() (string, error)    { return s.Code, nil }
 func (s *CodeSMS) UnmarshalData(data string) error { s.Code = data; return nil }
 func (s *CodeSMS) UpdatedRef() *int64              { return &s.Updated }
 func (s *CodeSMS) Actual(now time.Time) bool {
-	return time.Duration(now.Unix()-s.Updated) <= 10*time.Minute
+	return time.Duration(now.Unix()-s.Updated)*time.Second <= 10*time.Minute
 }
 
 // Реализация интерфейса webauthn.User

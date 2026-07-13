@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#007bff">
     <!-- Иконка для старых версий iOS iOS -->
     <link rel="apple-touch-icon" href="/icon.png">
-    <title>Ворота СНТ «Семиславка»</title>
+    <title>Шлагбаум СНТ «Семиславка»</title>
     <style>
         :root { --primary: #007bff; --success: #28a745; --bg: #f8f9fa; --text: #212529; }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -51,9 +51,9 @@
         <button class="btn-outline" onclick="changeStep('stepPhone')">Назад</button>
     </div>
 
-    <!-- Шаг 3: Экран управления воротами -->
+    <!-- Шаг 3: Экран управления шлагбаумом -->
     <div id="stepGate" class="step">
-        <h2>Ворота СНТ</h2>
+        <h2>Шлагбаум СНТ</h2>
         <p id="gateUserIdent">Доступ разрешен</p>
         <button class="btn-gate" onclick="openGate()">ОТКРЫТЬ</button><!-- 
         <button class="btn-outline" id="setupPasskeyBtn" style="display:none;" onclick="registerWebAuthn()">Включить вход по биометрии</button> -->
@@ -131,7 +131,7 @@
                 showStatus('СМС подтверждено. Настраиваем быстрый доступ по биометрии...');
                 await registerWebAuthn();
             } else {
-                // Если биометрии на устройстве нет (старый ПК), просто пускаем к воротам
+                // Если биометрии на устройстве нет (старый ПК), просто пускаем шлагбаум
                 changeStep('stepGate');
             }
         } else {
@@ -171,7 +171,7 @@
             }
         } catch (e) { 
             // Если пользователь отменил биометрию или произошла ошибка, мы ВСЁ РАВНО 
-            // пускаем его к воротам (так как СМС-то он ввел верно), но выводим предупреждение
+            // пускаем его к шлагбауму (так как СМС-то он ввел верно), но выводим предупреждение
             console.error('WebAuthn Ошибка/Отмена:', e);
             changeStep('stepGate');
             showStatus('Вход выполнен, но биометрия не была привязана.', true); 
@@ -231,7 +231,7 @@
     async function openGate() {
         showStatus('Отправка команды на открытие ворот...');
         const res = await fetch('/gate/open', { method: 'POST' });
-        if (res.ok) showStatus('🟢 Ворота открываются!', false);
+        if (res.ok) showStatus('🟢 Шлагбаум открываются!', false);
         else showStatus('🔴 Отказано в доступе или ошибка сессии', true);
     }
 

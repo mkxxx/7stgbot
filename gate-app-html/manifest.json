@@ -1,6 +1,6 @@
 {
-  "short_name": "Ворота",
-  "name": "Ворота СНТ Семиславка",
+  "short_name": "Шлагбаум",
+  "name": "Шлагбаум СНТ Семиславка",
   "start_url": "/",
   "background_color": "#f8f9fa",
   "theme_color": "#007bff",
@@ -32,7 +32,7 @@
       "sizes": "1080x1920",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Мобильный интерфейс управления воротами"
+      "label": "Мобильный интерфейс управления шлагбаумом"
     },
     {
       "src": "/screenshot-desktop.png",

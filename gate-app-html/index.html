@@ -255,7 +255,7 @@
             const res = await fetch('/open', { method: 'POST' });
             
             if (res.ok) {
-                showStatus('🟢 Ворота открываются!', false);
+                showStatus('🟢 Шлагбаум открываются!', false);
             } else {
                 // Читаем текст ошибки, который прислал Go-сервер (например, "Доступ запрещен. Авторизуйтесь.")
                 const errorText = await res.text();

@@ -28,6 +28,15 @@
         #status { font-size: 14px; margin-top: 12px; font-weight: 500; }
         .error-text { color: #dc3545; }
         .success-text { color: var(--success); }
+        .chat-container { border: 1px solid #dee2e6; border-radius: 12px; margin: 20px 0; display: flex; flex-direction: column; background: #f8f9fa; max-height: 350px; }
+        .chat-messages { padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; max-height: 280px; text-align: left; scroll-behavior: smooth; }
+        .message-bubble { padding: 8px 12px; border-radius: 12px; max-width: 85%; font-size: 14px; word-break: break-word; line-height: 1.4; }
+        .message-bubble.incoming { background: #e9ecef; align-self: flex-start; color: #212529; }
+        .message-bubble.outgoing { background: #007bff; align-self: flex-end; color: white; }
+        .message-meta { font-size: 10px; opacity: 0.7; margin-bottom: 2px; display: block; font-weight: bold; }
+        .chat-input-area { display: flex; gap: 8px; padding: 8px; border-top: 1px solid #dee2e6; background: white; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
+        .chat-input-area input { margin-bottom: 0; padding: 10px; font-size: 14px; text-align: left; }
+        .btn-send { width: auto; padding: 10px 16px; font-size: 14px; margin-bottom: 0; white-space: nowrap; }
     </style>
 </head>
 <body>
@@ -55,9 +64,19 @@
     <div id="stepGate" class="step">
         <h2>Шлагбаум СНТ</h2>
         <p id="gateUserIdent">Доступ разрешен</p>
-        <button class="btn-gate" onclick="openGate()">ОТКРЫТЬ</button><!-- 
-        <button class="btn-outline" id="setupPasskeyBtn" style="display:none;" onclick="registerWebAuthn()">Включить вход по биометрии</button> -->
+        <button class="btn-gate" onclick="openGate()">ОТКРЫТЬ</button>
+        <!-- <button class="btn-outline" id="setupPasskeyBtn" style="display:none;" onclick="registerWebAuthn()">Включить вход по биометрии</button> -->
         <button class="btn-outline" style="border-color:#dc3545; color:#dc3545;" onclick="logout()">Выйти</button>
+    </div>
+               <!-- Блок Мессенджера -->
+    <div class="chat-container">
+        <div class="chat-messages" id="chatMessages">
+            <!-- Сообщения будут добавляться сюда динамически -->
+        </div>
+        <div class="chat-input-area">
+            <input type="text" id="chatInput" placeholder="Напишите сообщение..." onkeypress="handleChatKey(event)">
+            <button class="btn-primary btn-send" onclick="sendChatMessage()">Отправить</button>
+        </div>
     </div>
 
     <div id="status"></div>
@@ -84,6 +103,8 @@
 
     // Автоматическая проверка при загрузке страницы
     window.addEventListener('load', async () => {
+        initChat();
+
         const res = await fetch('/check-session');
         if (res.ok) {
             const data = await res.json();
@@ -294,6 +315,70 @@
         };
         // Вставляем кнопку перед кнопкой Выйти
         gateStep.insertBefore(installBtn, gateStep.lastElementChild);
+    }
+
+    let eventSource = null;
+
+    // Запускаем прослушивание чата при успешной авторизации
+    function initChat() {
+        if (eventSource) eventSource.close();
+        
+        // Открываем постоянное SSE-соединение с сервером
+        eventSource = new EventSource('/chat/stream');
+        
+        eventSource.onmessage = function(event) {
+            const msg = JSON.parse(event.data);
+            appendMessage(msg);
+        };
+
+        eventSource.onerror = function() {
+            console.log("Потеря связи с чатом. Переподключение...");
+        };
+    }
+
+    function appendMessage(msg) {
+        const container = document.getElementById('chatMessages');
+        const bubble = document.createElement('div');
+        
+        // Сверяем автора. Если у пользователя еще нет номера телефона (он не вошел),
+        // он будет видеть свои сообщения под именем, которое присвоил сервер.
+        // Чтобы упростить это, бэкенд может присылать признак, но пока сделаем простую сверку строк:
+        const isMyMessage = (userPhone && msg.phone === userPhone);
+        
+        bubble.className = `message-bubble ${isMyMessage ? 'outgoing' : 'incoming'}`;
+        
+        const sender = isMyMessage ? 'Вы' : msg.phone;
+        bubble.innerHTML = `<span class="message-meta">${sender}</span>${escapeHTML(msg.text)}`;
+        
+        container.appendChild(bubble);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    async function sendChatMessage() {
+        const input = document.getElementById('chatInput');
+        const text = input.value.trim();
+        if (!text) return;
+
+        const res = await fetch('/chat/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text })
+        });
+
+        if (res.ok) {
+            input.value = '';
+        } else {
+            const err = await res.text();
+            alert('Не удалось отправить: ' + err);
+        }
+    }
+
+    function handleChatKey(e) {
+        if (e.key === 'Enter') sendChatMessage();
+    }
+
+    function escapeHTML(str) {
+        return str.replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag));
     }
 
 </script>

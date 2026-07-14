@@ -106,6 +106,11 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
 
 	// Главное исполнительное действие
 	mux.HandleFunc("POST /gate/app/open", g.handleGateOpen)
+
+	go broker.run()
+
+	http.HandleFunc("/chat/send", g.handleChatSend)
+	http.HandleFunc("/chat/stream", g.handleChatStream)
 }
 
 func (g *Gate) getPhoneFromSession(r *http.Request) (string, bool) {
@@ -390,4 +395,98 @@ func generateUUID() string {
 	checksum := crc64.Checksum(buf, table)
 	binary.BigEndian.PutUint64(buf, checksum)
 	return fmt.Sprintf("%x", buf)
+}
+
+type Message struct {
+	Phone string `json:"phone"`
+	Text  string `json:"text"`
+}
+
+// Простейший Pub/Sub брокер для отправки сообщений всем подключенным клиентам
+type ChatBroker struct {
+	clients   map[chan Message]bool
+	newClient chan chan Message
+	defClient chan chan Message
+	messages  chan Message
+}
+
+var broker = &ChatBroker{
+	clients:   make(map[chan Message]bool),
+	newClient: make(chan chan Message),
+	defClient: make(chan chan Message),
+	messages:  make(chan Message),
+}
+
+// Запуск брокера в отдельной горутине (вызвать в func main)
+func (b *ChatBroker) run() {
+	for {
+		select {
+		case s := <-b.newClient:
+			b.clients[s] = true
+		case s := <-b.defClient:
+			delete(b.clients, s)
+			close(s)
+		case msg := <-b.messages:
+			for clientChan := range b.clients {
+				clientChan <- msg
+			}
+		}
+	}
+}
+
+func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
+	// Пытаемся получить телефон из сессии
+	phone, authorized := g.getPhoneFromSession(r)
+
+	// Если пользователь не авторизован, временно называем его Гостем
+	if !authorized {
+		// Генерируем простой хэш на основе IP или времени для отличия гостей
+		// Для простоты возьмем последние 4 цифры текущего наносекундного времени
+		guestID := time.Now().UnixMilli() % 10000
+		phone = fmt.Sprintf("Гость #%04d", guestID)
+	}
+	var req struct {
+		Text string `json:"text"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil || req.Text == "" {
+		http.Error(w, "Пустое сообщение", http.StatusBadRequest)
+		return
+	}
+	broker.messages <- Message{
+		Phone: phone,
+		Text:  req.Text,
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Transfer-Encoding", "chunked")
+
+	messageChan := make(chan Message)
+	broker.newClient <- messageChan
+
+	defer func() {
+		broker.defClient <- messageChan
+	}()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintf(w, ": ok\n\n")
+	flusher.Flush()
+	for {
+		select {
+		case msg := <-messageChan:
+			jsonBytes, _ := json.Marshal(msg)
+			fmt.Fprintf(w, "data: %s\n\n", string(jsonBytes))
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }

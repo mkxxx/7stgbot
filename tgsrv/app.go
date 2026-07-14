@@ -109,8 +109,8 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
 
 	go broker.run()
 
-	http.HandleFunc("/chat/send", g.handleChatSend)
-	http.HandleFunc("/chat/stream", g.handleChatStream)
+	http.HandleFunc("/gate/app/chat/send", g.handleChatSend)
+	http.HandleFunc("/gate/app/chat/stream", g.handleChatStream)
 }
 
 func (g *Gate) getPhoneFromSession(r *http.Request) (string, bool) {

@@ -342,11 +342,14 @@
 
     let eventSource = null;
 
-    // Запускаем прослушивание чата при успешной авторизации
     function initChat() {
-        if (eventSource) eventSource.close();
+        // Если соединение уже открыто, принудительно закрываем старый мертвый сокет
+        if (eventSource) {
+            console.log("Закрытие старого соединения чата перед перезапуском...");
+            eventSource.close();
+            eventSource = null;
+        }
         
-        // Открываем постоянное SSE-соединение с сервером
         eventSource = new EventSource('/chat/stream');
         
         eventSource.onmessage = function(event) {
@@ -355,9 +358,40 @@
         };
 
         eventSource.onerror = function() {
-            console.log("Потеря связи с чатом. Переподключение...");
+            console.log("Потеря связи с чатом. Попытка автоматического переподключения браузером...");
+        };
+        
+        eventSource.onopen = function() {
+            console.log("🟢 Соединение с чатом успешно установлено!");
         };
     }
+
+    // --- МАГИЯ ДЛЯ МАКБУКОВ: Отслеживание пробуждения устройства ---
+
+    // Способ 1: Отслеживание фонового режима вкладки (когда крышку открывают, вкладка становится visible)
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            console.log("Вкладка снова активна после сна. Мгновенно перезапускаем чат...");
+            // Очищаем старые сообщения (опционально), так как сервер сейчас выгрузит свежую историю за час
+            document.getElementById('chatMessages').innerHTML = '';
+            initChat();
+        }
+    });
+
+    // Способ 2: Защита от "тихого засыпания" через проверку разницы во времени
+    // Встроенный интервал должен срабатывать каждые 2 секунды. Если ноутбук заснул, 
+    // таймер замрет. При просыпании разница во времени окажется большой, и мы поймем, что был сон.
+    let lastHeartbeat = Date.now();
+    setInterval(() => {
+        const now = Date.now();
+        if (now - lastHeartbeat > 8000) { // Если прошло более 8 секунд вместо 2 — ноутбук спал
+            console.log("Обнаружен выход из режима сна операционной системы. Перезапуск...");
+            document.getElementById('chatMessages').innerHTML = '';
+            initChat();
+        }
+        lastHeartbeat = now;
+    }, 2000);
+
 
     function appendMessage(msg) {
         const container = document.getElementById('chatMessages');

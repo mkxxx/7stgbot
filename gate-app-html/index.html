@@ -38,6 +38,11 @@
         .chat-input-area { display: flex; gap: 8px; padding: 8px; border-top: 1px solid #dee2e6; background: white; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
         .chat-input-area input { margin-bottom: 0; padding: 10px; font-size: 14px; text-align: left; }
         .btn-send { width: auto; padding: 10px 16px; font-size: 14px; margin-bottom: 0; white-space: nowrap; }
+        #gateStatus { font-size: 18px; font-weight: bold; margin: 15px 0; min-height: 24px; text-align: center; }
+        .gate-opening { color: #28a745; animation: blink 1.5s infinite; }
+        .gate-error { color: #dc3545; }
+        @keyframes blink { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
+
     </style>
 </head>
 <body>
@@ -66,6 +71,7 @@
         <h2>Шлагбаум СНТ</h2>
         <p id="gateUserIdent">Доступ разрешен</p>
         <button class="btn-gate" onclick="openGate()">ОТКРЫТЬ</button>
+        <div id="gateStatus"></div>
         <!-- <button class="btn-outline" id="setupPasskeyBtn" style="display:none;" onclick="registerWebAuthn()">Включить вход по биометрии</button> -->
         <button class="btn-outline" style="border-color:#dc3545; color:#dc3545;" onclick="logout()">Выйти</button>
     </div>
@@ -185,7 +191,7 @@
             });
 
             if (finishRes.ok) {
-                // Успешно привязали, переходим на экран ворот
+                // Успешно привязали, переходим на экран шлагбаума
                 changeStep('stepGate');
                 showStatus('Устройство успешно добавлено! В следующий раз СМС не потребуется.', false);
             } else {
@@ -250,21 +256,37 @@
         } catch (e) { showStatus('Ошибка входа: ' + e.message, true); }
     }
 
+    let gateTimeout = null;
+
     async function openGate() {
-        showStatus('Отправка команды на открытие ворот...');
+        const gateStatus = document.getElementById('gateStatus');
+        
+        // Сбрасываем старый таймер очистки текста, если он был
+        if (gateTimeout) clearTimeout(gateTimeout);
+        
+        gateStatus.innerText = 'Отправка команды...';
+        gateStatus.className = '';
+
         try {
             const res = await fetch('/open', { method: 'POST' });
             
             if (res.ok) {
-                showStatus('🟢 Шлагбаум открываются!', false);
+                gateStatus.innerText = '🟢 Шлагбаум открывается!';
+                gateStatus.className = 'gate-opening';
+                
+                // Спустя 7 секунд убираем надпись, возвращая экран в исходное состояние
+                gateTimeout = setTimeout(() => {
+                    gateStatus.innerText = '';
+                    gateStatus.className = '';
+                }, 7000);
             } else {
-                // Читаем текст ошибки, который прислал Go-сервер (например, "Доступ запрещен. Авторизуйтесь.")
                 const errorText = await res.text();
-                showStatus(`🔴 Ошибка: ${errorText}`, true);
+                gateStatus.innerText = `🔴 Ошибка: ${errorText}`;
+                gateStatus.className = 'gate-error';
             }
         } catch (err) {
-            // На случай, если пропал интернет или сервер полностью недоступен
-            showStatus(`🔴 Сетевая ошибка: ${err.message}`, true);
+            gateStatus.innerText = `🔴 Сетевая ошибка: ${err.message}`;
+            gateStatus.className = 'gate-error';
         }
     }
 
@@ -290,7 +312,7 @@
         deferredPrompt = e;
 
         // Показываем пользователю подсказку. 
-        // Например, выведем плашку на статус-бар через 2 секунды после входа на экран ворот
+        // Например, выведем плашку на статус-бар через 2 секунды после входа на экран шлагбаума
         setTimeout(() => {
             if (document.getElementById('stepGate').classList.contains('active')) {
                 showInstallBanner();
@@ -299,7 +321,7 @@
     });
 
     function showInstallBanner() {
-        // Создаем аккуратную кнопку-подсказку на экране ворот
+        // Создаем аккуратную кнопку-подсказку на экране шлагбаума
         const gateStep = document.getElementById('stepGate');
         const installBtn = document.createElement('button');
         installBtn.className = 'btn-outline';

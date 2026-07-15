@@ -398,53 +398,85 @@ func generateUUID() string {
 }
 
 type Message struct {
-	Phone string `json:"phone"`
-	Text  string `json:"text"`
+	Phone     string    `json:"phone"`
+	Text      string    `json:"text"`
+	Time      time.Time `json:"time"`
+	Formatted string    `json:"formatted_time"` // ЧЧ:ММ для фронтенда
 }
 
-// Простейший Pub/Sub брокер для отправки сообщений всем подключенным клиентам
+// Брокер чата с историей сообщений
 type ChatBroker struct {
-	clients   map[chan Message]bool
-	newClient chan chan Message
-	defClient chan chan Message
-	messages  chan Message
+	clients        map[chan Message]bool
+	newClient      chan chan Message
+	defClient      chan chan Message
+	messages       chan Message
+	messageHistory []Message // Хранилище сообщений за последний час
 }
 
 var broker = &ChatBroker{
-	clients:   make(map[chan Message]bool),
-	newClient: make(chan chan Message),
-	defClient: make(chan chan Message),
-	messages:  make(chan Message),
+	clients:        make(map[chan Message]bool),
+	newClient:      make(chan chan Message),
+	defClient:      make(chan chan Message),
+	messages:       make(chan Message),
+	messageHistory: make([]Message, 0),
 }
 
 // Запуск брокера в отдельной горутине (вызвать в func main)
 func (b *ChatBroker) run() {
+	cleanupTicker := time.NewTicker(1 * time.Minute)
 	for {
 		select {
 		case s := <-b.newClient:
 			b.clients[s] = true
+
+			// При подключении нового клиента (или обновлении страницы)
+			// отправляем ему всю сохраненную историю за последний час
+			historyCopy := make([]Message, len(b.messageHistory))
+			copy(historyCopy, b.messageHistory)
+			go func(c chan Message) {
+				for _, msg := range historyCopy {
+					c <- msg
+				}
+			}(s)
+
 		case s := <-b.defClient:
 			delete(b.clients, s)
 			close(s)
+
 		case msg := <-b.messages:
+			// Сохраняем сообщение в историю
+			b.messageHistory = append(b.messageHistory, msg)
+
+			// Рассылаем всем активным клиентам
 			for clientChan := range b.clients {
-				clientChan <- msg
+				select {
+				case clientChan <- msg:
+				default:
+					// Защита от зависших каналов
+				}
 			}
+
+		case <-cleanupTicker.C:
+			// Удаляем сообщения старше 1 часа
+			now := time.Now()
+			validMessages := make([]Message, 0)
+			for _, msg := range b.messageHistory {
+				if now.Sub(msg.Time) < 1*time.Hour {
+					validMessages = append(validMessages, msg)
+				}
+			}
+			b.messageHistory = validMessages
 		}
 	}
 }
 
 func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
-	// Пытаемся получить телефон из сессии
 	phone, authorized := g.getPhoneFromSession(r)
-
-	// Если пользователь не авторизован, временно называем его Гостем
 	if !authorized {
-		// Генерируем простой хэш на основе IP или времени для отличия гостей
-		// Для простоты возьмем последние 4 цифры текущего наносекундного времени
-		guestID := time.Now().UnixMilli() % 10000
+		guestID := time.Now().UnixNano() % 10000
 		phone = fmt.Sprintf("Гость #%04d", guestID)
 	}
+
 	var req struct {
 		Text string `json:"text"`
 	}
@@ -452,10 +484,16 @@ func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Пустое сообщение", http.StatusBadRequest)
 		return
 	}
-	broker.messages <- Message{
-		Phone: phone,
-		Text:  req.Text,
+
+	now := time.Now()
+	msg := Message{
+		Phone:     phone,
+		Text:      req.Text,
+		Time:      now,
+		Formatted: now.Format("15:04"), // Форматируем время в ЧЧ:ММ по серверу
 	}
+
+	broker.messages <- msg
 	w.WriteHeader(http.StatusOK)
 }
 

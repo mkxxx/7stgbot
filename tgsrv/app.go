@@ -502,7 +502,9 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Transfer-Encoding", "chunked")
-	w.Header().Set("X-Accel-Buffering", "no")
+
+	// Увеличиваем таймаут для Nginx/Cloudflare на уровне заголовков, если применимо
+	w.Header().Set("X-Accel-Buffering", "no") 
 
 	messageChan := make(chan Message)
 	broker.newClient <- messageChan
@@ -516,16 +518,40 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
 		return
 	}
-	fmt.Fprintf(w, ": ok\n\n")
+	// Сразу посылаем первый пинг, чтобы подтвердить успешное открытие соединения
+	fmt.Fprintf(w, ": ping\n\n")
 	flusher.Flush()
+
+	pingTicker := time.NewTicker(15 * time.Second)
+	defer pingTicker.Stop()
+
 	for {
 		select {
 		case msg := <-messageChan:
-			jsonBytes, _ := json.Marshal(msg)
-			fmt.Fprintf(w, "data: %s\n\n", string(jsonBytes))
+			jsonBytes, err := json.Marshal(msg)
+			if err != nil {
+				continue
+			}
+			_, err = fmt.Fprintf(w, "data: %s\n\n", string(jsonBytes))
+			if err != nil {
+				return // Если клиент отключился, прерываем цикл
+			}
 			flusher.Flush()
+
+		case <-pingTicker.C:
+			// 2. Сработал таймер пинга (каждые 15 секунд)
+			// Спецификация SSE говорит: строки, начинающиеся с двоеточия, являются комментариями 
+			// и служат исключительно для удержания соединения (heartbeat)
+			_, err := fmt.Fprintf(w, ": keepalive ping\n\n")
+			if err != nil {
+				return // Браузер закрыл вкладку или пропала сеть — выходим из горутины
+			}
+			flusher.Flush()
+
 		case <-r.Context().Done():
+			// 3. Браузер явно разорвал соединение (пользователь закрыл страницу)
 			return
 		}
 	}
 }
+

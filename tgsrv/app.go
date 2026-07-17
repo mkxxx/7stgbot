@@ -428,7 +428,7 @@ type Message struct {
 }
 
 func (m *Message) isHistorical() bool {
-	return m.Phone != msgKindCliCnt
+	return m.MsgKind != msgKindCliCnt
 }
 
 // Брокер чата с историей сообщений
@@ -506,7 +506,7 @@ func (b *ChatBroker) fanoutMessage(msg Message) {
 }
 
 func (b *ChatBroker) sendClientsCounter() {
-	msg := Message{Phone: msgKindCliCnt, Text: fmt.Sprintf("%d", len(b.clients))}
+	msg := Message{MsgKind: msgKindCliCnt, Text: fmt.Sprintf("%d", len(b.clients))}
 	b.fanoutMessage(msg)
 }
 
@@ -570,7 +570,7 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 				msg.MsgKind = msgKindMsgPer
 			}
 			if len(msg.Phone) == 12 && digits(msg.Phone[1:]) {
-				msg.Phone = msg.Phone[:3] + "~" + msg.Phone[8:]
+				msg.Phone = msg.Phone[:3] + "*****" + msg.Phone[8:]
 			}
 			jsonBytes, err := json.Marshal(msg)
 			if err != nil {

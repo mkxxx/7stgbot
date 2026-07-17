@@ -462,7 +462,7 @@
     }
 
     function playNotification(msg) {
-        if (!isMyMessage && !msg.is_history) {
+        if (!msg.is_my_message && !msg.is_history) {
             // Сбрасываем дорожку на начало (на случай, если сообщения приходят быстро друг за другом)
             notificationSound.currentTime = 0; 
             notificationSound.play().catch(err => {

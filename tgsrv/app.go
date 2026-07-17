@@ -468,13 +468,7 @@ func (b *ChatBroker) run() {
 				b.messageHistory = append(b.messageHistory, msg)
 			}
 			// Рассылаем всем активным клиентам
-			for clientChan := range b.clients {
-				select {
-				case clientChan <- msg:
-				default:
-					// Защита от зависших каналов
-				}
-			}
+			b.fanoutMessage(msg)
 
 		case <-cleanupTicker.C:
 			// Удаляем сообщения старше 1 часа
@@ -490,8 +484,19 @@ func (b *ChatBroker) run() {
 	}
 }
 
+func (b *ChatBroker) fanoutMessage(msg Message) {
+	for clientChan := range b.clients {
+		select {
+		case clientChan <- msg:
+		default:
+			// Защита от зависших каналов
+		}
+	}
+}
+
 func (b *ChatBroker) sendClientsCounter() {
-	b.messages <- Message{Phone: msgSysPhoneCounter, Text: fmt.Sprintf("%d", len(b.clients))}
+	msg := Message{Phone: msgSysPhoneCounter, Text: fmt.Sprintf("%d", len(b.clients))}
+	b.fanoutMessage(msg)
 }
 
 func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {

@@ -17,6 +17,11 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
+type Pair[K, V any] struct {
+	Key   K
+	Value V
+}
+
 type WebUser struct {
 	Phone       string
 	Credentials []webauthn.Credential
@@ -72,9 +77,11 @@ var (
 )
 
 const (
-	sessionCookieName  = "gate_session"
-	appDomain          = "gate.7slavka.ru"
-	msgSysPhoneCounter = "__online_counter__"
+	sessionCookieName = "gate_session"
+	appDomain         = "gate.7slavka.ru"
+	msgKindCliCnt     = "cli_cnt"
+	msgKindMsgPer     = "msg_per"
+	msgKindGateOpened = "sys_event"
 )
 
 func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
@@ -410,15 +417,18 @@ func generateUUID() string {
 }
 
 type Message struct {
-	Phone       string    `json:"phone"`
-	Text        string    `json:"text"`
-	Time        time.Time `json:"time"`
-	Formatted   string    `json:"formatted_time"`
-	IsMyMessage bool      `json:"is_my_message"`
+	Phone       string          `json:"phone"`
+	Text        string          `json:"text"`
+	Time        time.Time       `json:"time"`
+	Formatted   string          `json:"formatted_time"`
+	IsMyMessage bool            `json:"is_my_message"`
+	IsHistory   bool            `json:"is_history"`
+	MsgKind     string          `json:"msg_kind"`
+	target      map[string]bool `json:"-"`
 }
 
-func (m *Message) isUserMessage() bool {
-	return m.Phone != msgSysPhoneCounter
+func (m *Message) isHistorical() bool {
+	return m.Phone != msgKindCliCnt
 }
 
 // Брокер чата с историей сообщений
@@ -452,6 +462,7 @@ func (b *ChatBroker) run() {
 			copy(historyCopy, b.messageHistory)
 			go func(c chan Message) {
 				for _, msg := range historyCopy {
+					msg.IsHistory = true
 					c <- msg
 				}
 			}(s)
@@ -463,7 +474,7 @@ func (b *ChatBroker) run() {
 			b.sendClientsCounter()
 
 		case msg := <-b.messages:
-			if msg.isUserMessage() {
+			if msg.isHistorical() {
 				// Сохраняем сообщение в историю
 				b.messageHistory = append(b.messageHistory, msg)
 			}
@@ -495,7 +506,7 @@ func (b *ChatBroker) fanoutMessage(msg Message) {
 }
 
 func (b *ChatBroker) sendClientsCounter() {
-	msg := Message{Phone: msgSysPhoneCounter, Text: fmt.Sprintf("%d", len(b.clients))}
+	msg := Message{Phone: msgKindCliCnt, Text: fmt.Sprintf("%d", len(b.clients))}
 	b.fanoutMessage(msg)
 }
 
@@ -555,7 +566,10 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		select {
 		case msg := <-messageChan:
 			msg.IsMyMessage = msg.Phone == currentPhone // safe due too we got а copy from channel
-			if digits(msg.Phone) && len(msg.Phone) == 12 {
+			if msg.target[currentPhone] {
+				msg.MsgKind = msgKindMsgPer
+			}
+			if len(msg.Phone) == 12 && digits(msg.Phone[1:]) {
 				msg.Phone = msg.Phone[:3] + "~" + msg.Phone[8:]
 			}
 			jsonBytes, err := json.Marshal(msg)

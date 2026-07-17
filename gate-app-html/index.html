@@ -97,6 +97,9 @@
 <script>
     const status = document.getElementById('status');
     let userPhone = '';
+    let eventSource = null;
+    const notificationSound = new Audio('/incoming-message.m4a');
+
 
     // Вспомогательные крипто-утилиты для WebAuthn
     const b64toBuf = b64 => Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)).buffer;
@@ -345,8 +348,6 @@
         gateStep.insertBefore(installBtn, gateStep.lastElementChild);
     }
 
-    let eventSource = null;
-
     function initChat() {
         if (eventSource) {
             eventSource.close();
@@ -356,16 +357,26 @@
         
         eventSource.onmessage = function(event) {
             const msg = JSON.parse(event.data);
-            if (msg.phone === "__online_counter__") {
+            if (msg.msg_kind === "cli_cnt") {
                 document.getElementById('onlineCounter').innerText = `● в сети: ${msg.text}`;
                 return;
             }
+            playNotification(msg);
             appendMessage(msg);
         };
         eventSource.onerror = function() {
             // Если сокет упал (например, Макбук уснул), обнуляем счетчик онлайна до переподключения
             document.getElementById('onlineCounter').innerText = `● в сети: 0`;
         };
+        // Магия для разблокировки звука на iOS/Android:
+        // При первом же тапе пользователя по экрану разрешаем воспроизведение аудио
+        document.body.addEventListener('click', () => {
+            notificationSound.play().then(() => {
+                notificationSound.pause(); // Сразу ставим на паузу, это просто дает браузеру одобрение
+                notificationSound.currentTime = 0;
+            }).catch(e => console.log("Аудио еще заблокировано:", e));
+        }, { once: true }); // Флаг once означает, что этот обработчик сработает всего 1 раз
+
     }
 
 
@@ -448,6 +459,16 @@
 
     function escapeHTML(str) {
         return str.replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag));
+    }
+
+    function playNotification(msg) {
+        if (!isMyMessage && !msg.is_history) {
+            // Сбрасываем дорожку на начало (на случай, если сообщения приходят быстро друг за другом)
+            notificationSound.currentTime = 0; 
+            notificationSound.play().catch(err => {
+                console.log("Браузер заблокировал автоматический звук:", err);
+            });
+        }
     }
 
 </script>

@@ -37,6 +37,8 @@
         .message-time { font-weight: normal; font-size: 10px; opacity: 0.8; }
         .chat-input-area { display: flex; gap: 8px; padding: 8px; border-top: 1px solid #dee2e6; background: white; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
         .chat-input-area input { margin-bottom: 0; padding: 10px; font-size: 14px; text-align: left; }
+        .chat-header { background: #e9ecef; padding: 10px 14px; font-size: 14px; font-weight: bold; border-top-left-radius: 11px; border-top-right-radius: 11px; display: flex; justify-content: space-between; border-bottom: 1px solid #dee2e6; color: #495057; }
+        #onlineCounter { color: #28a745; font-size: 13px; font-weight: 500; }
         .btn-send { width: auto; padding: 10px 16px; font-size: 14px; margin-bottom: 0; white-space: nowrap; }
         #gateStatus { font-size: 18px; font-weight: bold; margin: 15px 0; min-height: 24px; text-align: center; }
         .gate-opening { color: #28a745; animation: blink 1.5s infinite; }
@@ -77,6 +79,9 @@
     </div>
                <!-- Блок Мессенджера -->
     <div class="chat-container">
+        <div class="chat-header">
+            💬 Чат оповещения <span id="onlineCounter">● в сети: 0</span>
+        </div>
         <div class="chat-messages" id="chatMessages">
             <!-- Сообщения будут добавляться сюда динамически -->
         </div>
@@ -343,28 +348,26 @@
     let eventSource = null;
 
     function initChat() {
-        // Если соединение уже открыто, принудительно закрываем старый мертвый сокет
         if (eventSource) {
-            console.log("Закрытие старого соединения чата перед перезапуском...");
             eventSource.close();
             eventSource = null;
         }
-        
         eventSource = new EventSource('/chat/stream');
         
         eventSource.onmessage = function(event) {
             const msg = JSON.parse(event.data);
+            if (msg.phone === "__online_counter__") {
+                document.getElementById('onlineCounter').innerText = `● в сети: ${msg.text}`;
+                return;
+            }
             appendMessage(msg);
         };
-
         eventSource.onerror = function() {
-            console.log("Потеря связи с чатом. Попытка автоматического переподключения браузером...");
-        };
-        
-        eventSource.onopen = function() {
-            console.log("🟢 Соединение с чатом успешно установлено!");
+            // Если сокет упал (например, Макбук уснул), обнуляем счетчик онлайна до переподключения
+            document.getElementById('onlineCounter').innerText = `● в сети: 0`;
         };
     }
+
 
     // --- МАГИЯ ДЛЯ МАКБУКОВ: Отслеживание пробуждения устройства ---
 
@@ -396,19 +399,17 @@
     function appendMessage(msg) {
         const container = document.getElementById('chatMessages');
         
-        // Создаем уникальный ID для сообщения, чтобы избежать дубликатов при переподключениях SSE
+        // Защита от дубликатов при переподключениях
         const msgId = `msg-${msg.phone}-${msg.formatted_time}-${btoa(unescape(encodeURIComponent(msg.text))).slice(0,10)}`;
         if (document.getElementById(msgId)) return; 
 
         const bubble = document.createElement('div');
         bubble.id = msgId;
         
-        const isMyMessage = (userPhone && msg.phone === userPhone);
-        bubble.className = `message-bubble ${isMyMessage ? 'outgoing' : 'incoming'}`;
+        bubble.className = `message-bubble ${msg.is_my_message ? 'outgoing' : 'incoming'}`;
         
-        const sender = isMyMessage ? 'Вы' : msg.phone;
+        const sender = msg.is_my_message ? 'Вы' : msg.phone;
         
-        // Рендерим структуру: Слева имя/телефон, справа время отправки
         bubble.innerHTML = `
             <div class="message-meta">
                 <span class="message-sender">${sender}</span>
@@ -418,10 +419,9 @@
         `;
         
         container.appendChild(bubble);
-        
-        // Плавно скроллим вниз
         container.scrollTop = container.scrollHeight;
     }
+
 
     async function sendChatMessage() {
         const input = document.getElementById('chatInput');

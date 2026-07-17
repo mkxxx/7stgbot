@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/crc64"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,11 +68,13 @@ var (
 	webAuthnConfig *webauthn.WebAuthn
 	webauthnCtxDB  = make(map[string]*webauthn.SessionData) // Сессии WebAuthn: token -> data
 	mu             sync.Mutex
+	notDigitRE     = regexp.MustCompile(`[^0-9]`)
 )
 
 const (
-	sessionCookieName = "gate_session"
-	appDomain         = "gate.7slavka.ru"
+	sessionCookieName  = "gate_session"
+	appDomain          = "gate.7slavka.ru"
+	msgSysPhoneCounter = "__online_counter__"
 )
 
 func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
@@ -127,7 +130,7 @@ func (g *Gate) getPhoneFromSession(r *http.Request) (string, bool) {
 
 func (g *Gate) createSession(w http.ResponseWriter, phone string) {
 	token := generateUUID()
-	s := HTTPSession{Token: token, Phone: phone}
+	s := HTTPSession{Token: token, Phone: normalizePhone(phone)}
 	err := g.Entities.Insert(&s)
 	if err == nil {
 		http.SetCookie(w, &http.Cookie{
@@ -151,7 +154,7 @@ func (g *Gate) handleSmsSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	sms := CodeSMS{Phone: req.Phone}
+	sms := CodeSMS{Phone: normalizePhone(req.Phone)}
 	exists, _ := g.Entities.Load(&sms)
 	if !exists || !sms.Actual(now) {
 		sms.Code = generateSMSCode()
@@ -181,17 +184,18 @@ func (g *Gate) handleSmsVerify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Неверный код", http.StatusUnauthorized)
 		return
 	}
-	sms := CodeSMS{Phone: req.Phone}
+	phone := normalizePhone(req.Phone)
+	sms := CodeSMS{Phone: phone}
 	ok, _ := g.Entities.Load(&sms)
 	if !ok || req.Code != sms.Code {
 		http.Error(w, "Неверный код", http.StatusUnauthorized)
 		return
 	}
-	u := WebUser{Phone: req.Phone}
+	u := WebUser{Phone: phone}
 	if ok, _ := g.Entities.Load(&u); !ok {
 		g.Entities.Insert(&u)
 	}
-	g.createSession(w, req.Phone)
+	g.createSession(w, phone)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -279,7 +283,7 @@ func (g *Gate) handleLoginBegin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Некорректный запрос. Укажите номер телефона.", http.StatusBadRequest)
 		return
 	}
-	targetUser := WebUser{Phone: req.Phone}
+	targetUser := WebUser{Phone: normalizePhone(req.Phone)}
 	exists, _ := g.Entities.Load(&targetUser)
 	if !exists || len(targetUser.Credentials) == 0 {
 		http.Error(w, "Пользователь не найден или не настроил Passkey", http.StatusNotFound)
@@ -346,7 +350,7 @@ func (g *Gate) handleGateOpen(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Доступ запрещен. Авторизуйтесь.", http.StatusForbidden)
 		return
 	}
-	phone = normalizePhone(phone)
+	phone = normalizePhone(phone)[1:]
 	u, ok := g.Phones[phone]
 	if !ok {
 		http.Error(w, "Вы не зарегестрированы в реестре шлагбаума. Обратитесь в правление.", http.StatusForbidden)
@@ -363,12 +367,20 @@ func (g *Gate) handleGateOpen(w http.ResponseWriter, r *http.Request) {
 }
 
 func normalizePhone(phone string) string {
-	if strings.HasPrefix(phone, "+") {
-		phone = phone[1:]
-	} else if strings.HasPrefix(phone, "8") {
-		phone = "7" + phone[1:]
+	phone = notDigitRE.ReplaceAllString(phone, "")
+	if strings.HasPrefix(phone, "8") {
+		return "+7" + phone[1:]
 	}
-	return phone
+	return "+" + phone
+}
+
+func digits(s string) bool {
+	if s == "" {
+		return false
+	}
+	return !strings.ContainsFunc(s, func(r rune) bool {
+		return r < '0' || r > '9'
+	})
 }
 
 func (g *Gate) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -398,10 +410,15 @@ func generateUUID() string {
 }
 
 type Message struct {
-	Phone     string    `json:"phone"`
-	Text      string    `json:"text"`
-	Time      time.Time `json:"time"`
-	Formatted string    `json:"formatted_time"` // ЧЧ:ММ для фронтенда
+	Phone       string    `json:"phone"`
+	Text        string    `json:"text"`
+	Time        time.Time `json:"time"`
+	Formatted   string    `json:"formatted_time"`
+	IsMyMessage bool      `json:"is_my_message"`
+}
+
+func (m *Message) isUserMessage() bool {
+	return m.Phone != msgSysPhoneCounter
 }
 
 // Брокер чата с историей сообщений
@@ -438,15 +455,18 @@ func (b *ChatBroker) run() {
 					c <- msg
 				}
 			}(s)
+			b.sendClientsCounter()
 
 		case s := <-b.defClient:
 			delete(b.clients, s)
 			close(s)
+			b.sendClientsCounter()
 
 		case msg := <-b.messages:
-			// Сохраняем сообщение в историю
-			b.messageHistory = append(b.messageHistory, msg)
-
+			if msg.isUserMessage() {
+				// Сохраняем сообщение в историю
+				b.messageHistory = append(b.messageHistory, msg)
+			}
 			// Рассылаем всем активным клиентам
 			for clientChan := range b.clients {
 				select {
@@ -470,13 +490,16 @@ func (b *ChatBroker) run() {
 	}
 }
 
+func (b *ChatBroker) sendClientsCounter() {
+	b.messages <- Message{Phone: msgSysPhoneCounter, Text: fmt.Sprintf("%d", len(b.clients))}
+}
+
 func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	phone, authorized := g.getPhoneFromSession(r)
 	if !authorized {
-		guestID := time.Now().UnixNano() % 10000
+		guestID := time.Now().UnixMilli() % 10000
 		phone = fmt.Sprintf("Гость #%04d", guestID)
 	}
-
 	var req struct {
 		Text string `json:"text"`
 	}
@@ -484,7 +507,6 @@ func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Пустое сообщение", http.StatusBadRequest)
 		return
 	}
-
 	now := time.Now()
 	msg := Message{
 		Phone:     phone,
@@ -492,19 +514,19 @@ func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		Time:      now,
 		Formatted: now.Format("15:04"), // Форматируем время в ЧЧ:ММ по серверу
 	}
-
 	broker.messages <- msg
 	w.WriteHeader(http.StatusOK)
 }
 
 func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
+	// Узнаем, какой телефон слушает этот конкретный поток (если авторизован)
+	currentPhone, _ := g.getPhoneFromSession(r)
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Transfer-Encoding", "chunked")
-
-	// Увеличиваем таймаут для Nginx/Cloudflare на уровне заголовков, если применимо
-	w.Header().Set("X-Accel-Buffering", "no") 
+	w.Header().Set("X-Accel-Buffering", "no")
 
 	messageChan := make(chan Message)
 	broker.newClient <- messageChan
@@ -518,7 +540,6 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
 		return
 	}
-	// Сразу посылаем первый пинг, чтобы подтвердить успешное открытие соединения
 	fmt.Fprintf(w, ": ping\n\n")
 	flusher.Flush()
 
@@ -528,30 +549,29 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case msg := <-messageChan:
+			msg.IsMyMessage = msg.Phone == currentPhone // safe due too we got а copy from channel
+			if digits(msg.Phone) && len(msg.Phone) == 12 {
+				msg.Phone = msg.Phone[:3] + "~" + msg.Phone[8:]
+			}
 			jsonBytes, err := json.Marshal(msg)
 			if err != nil {
 				continue
 			}
 			_, err = fmt.Fprintf(w, "data: %s\n\n", string(jsonBytes))
 			if err != nil {
-				return // Если клиент отключился, прерываем цикл
+				return
 			}
 			flusher.Flush()
 
 		case <-pingTicker.C:
-			// 2. Сработал таймер пинга (каждые 15 секунд)
-			// Спецификация SSE говорит: строки, начинающиеся с двоеточия, являются комментариями 
-			// и служат исключительно для удержания соединения (heartbeat)
 			_, err := fmt.Fprintf(w, ": keepalive ping\n\n")
 			if err != nil {
-				return // Браузер закрыл вкладку или пропала сеть — выходим из горутины
+				return
 			}
 			flusher.Flush()
 
 		case <-r.Context().Done():
-			// 3. Браузер явно разорвал соединение (пользователь закрыл страницу)
 			return
 		}
 	}
 }
-

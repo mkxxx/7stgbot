@@ -132,7 +132,7 @@ func (g *Gate) getPhoneFromSession(r *http.Request) (string, bool) {
 	if ok, _ := g.Entities.Load(&s); ok {
 		return s.Phone, ok
 	}
-	return "", false
+	return cookie.Value, false
 }
 
 func (g *Gate) createSession(w http.ResponseWriter, phone string) {
@@ -424,6 +424,7 @@ type Message struct {
 	IsMyMessage bool            `json:"is_my_message"`
 	IsHistory   bool            `json:"is_history"`
 	MsgKind     string          `json:"msg_kind"`
+	authorized  bool            `json:"-"`
 	target      map[string]bool `json:"-"`
 }
 
@@ -433,16 +434,16 @@ func (m *Message) isHistorical() bool {
 
 // Брокер чата с историей сообщений
 type ChatBroker struct {
-	clients        map[chan Message]bool
-	newClient      chan chan Message
+	clients        map[chan Message]string
+	newClient      chan Pair[chan Message, string]
 	defClient      chan chan Message
 	messages       chan Message
 	messageHistory []Message // Хранилище сообщений за последний час
 }
 
 var broker = &ChatBroker{
-	clients:        make(map[chan Message]bool),
-	newClient:      make(chan chan Message),
+	clients:        make(map[chan Message]string),
+	newClient:      make(chan Pair[chan Message, string]),
 	defClient:      make(chan chan Message),
 	messages:       make(chan Message),
 	messageHistory: make([]Message, 0),
@@ -451,11 +452,16 @@ var broker = &ChatBroker{
 // Запуск брокера в отдельной горутине (вызвать в func main)
 func (b *ChatBroker) run() {
 	cleanupTicker := time.NewTicker(1 * time.Minute)
+	guestNames := make(map[string]string)
 	for {
 		select {
-		case s := <-b.newClient:
-			b.clients[s] = true
-
+		case p := <-b.newClient:
+			token := p.Value
+			b.clients[p.Key] = token
+			if token != "" {
+				guestID := time.Now().UnixMilli() % 10000
+				guestNames[token] = fmt.Sprintf("Гость #%04d", guestID)
+			}
 			// При подключении нового клиента (или обновлении страницы)
 			// отправляем ему всю сохраненную историю за последний час
 			historyCopy := make([]Message, len(b.messageHistory))
@@ -465,15 +471,25 @@ func (b *ChatBroker) run() {
 					msg.IsHistory = true
 					c <- msg
 				}
-			}(s)
+			}(p.Key)
 			b.sendClientsCounter()
 
-		case s := <-b.defClient:
-			delete(b.clients, s)
-			close(s)
+		case ch := <-b.defClient:
+			if token := b.clients[ch]; token != "" {
+				delete(guestNames, token)
+			}
+			delete(b.clients, ch)
+			close(ch)
 			b.sendClientsCounter()
 
 		case msg := <-b.messages:
+			if !msg.authorized {
+				name := guestNames[msg.Phone]
+				if name == "" {
+					name = "Неизвестный"
+				}
+				msg.Phone = name
+			}
 			if msg.isHistorical() {
 				// Сохраняем сообщение в историю
 				b.messageHistory = append(b.messageHistory, msg)
@@ -512,10 +528,6 @@ func (b *ChatBroker) sendClientsCounter() {
 
 func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	phone, authorized := g.getPhoneFromSession(r)
-	if !authorized {
-		guestID := time.Now().UnixMilli() % 10000
-		phone = fmt.Sprintf("Гость #%04d", guestID)
-	}
 	var req struct {
 		Text string `json:"text"`
 	}
@@ -525,10 +537,11 @@ func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	msg := Message{
-		Phone:     phone,
-		Text:      req.Text,
-		Time:      now,
-		Formatted: now.Format("15:04"), // Форматируем время в ЧЧ:ММ по серверу
+		Phone:      phone,
+		Text:       req.Text,
+		Time:       now,
+		Formatted:  now.Format("15:04"), // Форматируем время в ЧЧ:ММ по серверу
+		authorized: authorized,
 	}
 	broker.messages <- msg
 	w.WriteHeader(http.StatusOK)
@@ -536,7 +549,7 @@ func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
 
 func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	// Узнаем, какой телефон слушает этот конкретный поток (если авторизован)
-	currentPhone, _ := g.getPhoneFromSession(r)
+	currentPhone, authorized := g.getPhoneFromSession(r)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -544,8 +557,12 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Transfer-Encoding", "chunked")
 	w.Header().Set("X-Accel-Buffering", "no")
 
+	token := ""
+	if !authorized {
+		token = currentPhone
+	}
 	messageChan := make(chan Message)
-	broker.newClient <- messageChan
+	broker.newClient <- Pair[chan Message, string]{messageChan, token}
 
 	defer func() {
 		broker.defClient <- messageChan

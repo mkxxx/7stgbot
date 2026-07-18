@@ -487,6 +487,14 @@ func (b *ChatBroker) run() {
 				name := guestNames[msg.Phone]
 				if name == "" {
 					name = "Неизвестный"
+					mapStr := ""
+					jsonData, err := json.Marshal(guestNames)
+					if err != nil {
+						mapStr = fmt.Sprintf("error: %v", err)
+					} else {
+						mapStr = string(jsonData)
+					}
+					Logger.Debugf("client name not found for %s in %s", msg.Phone, mapStr)
 				}
 				msg.Phone = name
 			}
@@ -545,6 +553,7 @@ func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	}
 	broker.messages <- msg
 	w.WriteHeader(http.StatusOK)
+	Logger.Debugf("web message from %s: %s", msg.Phone, msg.Text)
 }
 
 func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
@@ -575,6 +584,8 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, ": ping\n\n")
 	flusher.Flush()
+
+	Logger.Debugf("event stream connected for: %s", currentPhone)
 
 	pingTicker := time.NewTicker(15 * time.Second)
 	defer pingTicker.Stop()

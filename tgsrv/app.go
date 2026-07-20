@@ -105,7 +105,7 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
 	mux.HandleFunc("POST /gate/app/sms/verify", g.handleSmsVerify)
 
 	// API Проверки состояния и выхода
-	mux.HandleFunc("/gate/app/check-session", g.handleCheckSession)
+	mux.HandleFunc("GET /gate/app/check-session", g.handleCheckSession)
 	mux.HandleFunc("POST /gate/app/logout", g.handleLogout)
 
 	// API WebAuthn (Passkeys)
@@ -120,7 +120,7 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
 	go broker.run()
 
 	mux.HandleFunc("POST /gate/app/chat/send", g.handleChatSend)
-	mux.HandleFunc("/gate/app/chat/stream", g.handleChatStream)
+	mux.HandleFunc("GET /gate/app/chat/stream", g.handleChatStream)
 }
 
 func InitSession(h http.Handler) http.Handler {

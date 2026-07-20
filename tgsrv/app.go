@@ -85,7 +85,8 @@ const (
 )
 
 func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
-	mux.Handle("/gate/app/", http.StripPrefix("/gate/app", http.FileServer(http.Dir(staticDir))))
+	mux.Handle("GET /gate/app/{$}", InitSession(http.StripPrefix("/gate/app", http.FileServer(http.Dir(staticDir)))))
+	mux.Handle("GET /gate/app/", http.StripPrefix("/gate/app", http.FileServer(http.Dir(staticDir))))
 
 	var err error
 	webAuthnConfig, err = webauthn.New(&webauthn.Config{
@@ -100,7 +101,6 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
 		Logger.Fatalf("Ошибка инициализации WebAuthn: %v", err)
 		return
 	}
-	//http.HandleFunc("/", serveIndex)
 	mux.HandleFunc("POST /gate/app/sms/send", g.handleSmsSend)
 	mux.HandleFunc("POST /gate/app/sms/verify", g.handleSmsVerify)
 
@@ -123,33 +123,37 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
 	mux.HandleFunc("/gate/app/chat/stream", g.handleChatStream)
 }
 
-func (g *Gate) getPhoneFromSession(r *http.Request) (string, bool) {
-	cookie, err := r.Cookie(sessionCookieName)
-	if err != nil {
-		return "", false
-	}
-	s := HTTPSession{Token: cookie.Value}
-	if ok, _ := g.Entities.Load(&s); ok {
-		return s.Phone, ok
-	}
-	return cookie.Value, false
-}
-
-func (g *Gate) createSession(w http.ResponseWriter, phone string) {
-	token := generateUUID()
-	s := HTTPSession{Token: token, Phone: normalizePhone(phone)}
-	err := g.Entities.Insert(&s)
-	if err == nil {
-		http.SetCookie(w, &http.Cookie{
+func InitSession(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := r.Cookie(sessionCookieName); err == nil {
+			h.ServeHTTP(w, r)
+			return
+		}
+		token := generateUUID()
+		cookie := &http.Cookie{
 			Name:     sessionCookieName,
 			Value:    token,
 			Path:     "/",
-			HttpOnly: true, // Защита от XSS атак
-			Secure:   true, // Передача только по HTTPS
+			HttpOnly: true,
+			Secure:   true,
 			SameSite: http.SameSiteStrictMode,
-			Expires:  time.Now().Add(365 * 24 * time.Hour), // Сессия на год
-		})
+			Expires:  time.Now().Add(365 * 24 * time.Hour),
+		}
+		http.SetCookie(w, cookie)
+		r.AddCookie(cookie)
+
+		h.ServeHTTP(w, r)
+	})
+}
+
+func (g *Gate) getSessionInfo(r *http.Request) (token string, phone string, authorized bool) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return "", "", false
 	}
+	s := HTTPSession{Token: cookie.Value}
+	ok, _ := g.Entities.Load(&s)
+	return s.Token, s.Phone, ok
 }
 
 func (g *Gate) handleSmsSend(w http.ResponseWriter, r *http.Request) {
@@ -183,6 +187,11 @@ func generateSMSCode() string {
 }
 
 func (g *Gate) handleSmsVerify(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		http.Error(w, "Сессия не инициализирована. Перезагрузите страницу.", http.StatusBadRequest)
+		return
+	}
 	var req struct {
 		Phone string `json:"phone"`
 		Code  string `json:"code"`
@@ -202,17 +211,17 @@ func (g *Gate) handleSmsVerify(w http.ResponseWriter, r *http.Request) {
 	if ok, _ := g.Entities.Load(&u); !ok {
 		g.Entities.Insert(&u)
 	}
-	g.createSession(w, phone)
+	s := HTTPSession{Token: cookie.Value, Phone: normalizePhone(phone)}
+	g.Entities.Insert(&s)
 	w.WriteHeader(http.StatusOK)
 }
 
 func (g *Gate) handleCheckSession(w http.ResponseWriter, r *http.Request) {
-	phone, authorized := g.getPhoneFromSession(r)
+	_, phone, authorized := g.getSessionInfo(r)
 	if !authorized {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-
 	// Просто возвращаем номер телефона авторизованного пользователя
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -221,7 +230,7 @@ func (g *Gate) handleCheckSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gate) handleRegisterBegin(w http.ResponseWriter, r *http.Request) {
-	phone, authorized := g.getPhoneFromSession(r)
+	token, phone, authorized := g.getSessionInfo(r)
 	if !authorized {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -233,9 +242,8 @@ func (g *Gate) handleRegisterBegin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	cookie, _ := r.Cookie(sessionCookieName)
 	mu.Lock()
-	webauthnCtxDB["reg_"+cookie.Value] = sessionData
+	webauthnCtxDB["reg_"+token] = sessionData
 	mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -243,14 +251,13 @@ func (g *Gate) handleRegisterBegin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gate) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
-	phone, authorized := g.getPhoneFromSession(r)
-	cookie, err := r.Cookie(sessionCookieName)
-	if !authorized || err != nil {
+	token, phone, authorized := g.getSessionInfo(r)
+	if !authorized {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 	mu.Lock()
-	sessionData, ok := webauthnCtxDB["reg_"+cookie.Value]
+	sessionData, ok := webauthnCtxDB["reg_"+token]
 	mu.Unlock()
 
 	if !ok {
@@ -276,7 +283,7 @@ func (g *Gate) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 		g.Entities.Insert(&u)
 	}
 	mu.Lock()
-	delete(webauthnCtxDB, "reg_"+cookie.Value)
+	delete(webauthnCtxDB, "reg_"+token)
 	mu.Unlock()
 
 	w.WriteHeader(http.StatusOK)
@@ -312,6 +319,11 @@ func (g *Gate) handleLoginBegin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gate) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		http.Error(w, "Сессия не инициализирована. Перезагрузите страницу.", http.StatusBadRequest)
+		return
+	}
 	loginStateKey := r.Header.Get("X-Login-State")
 
 	mu.Lock()
@@ -339,8 +351,8 @@ func (g *Gate) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Криптографическая проверка подписи провалена", http.StatusUnauthorized)
 		return
 	}
-	// Если все ок — создаем постоянную HttpOnly сессию
-	g.createSession(w, targetUser.Phone)
+	s := HTTPSession{Token: cookie.Value, Phone: targetUser.Phone}
+	g.Entities.Insert(&s)
 
 	// Подчищаем временные контексты входа
 	mu.Lock()
@@ -352,7 +364,7 @@ func (g *Gate) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gate) handleGateOpen(w http.ResponseWriter, r *http.Request) {
-	phone, authorized := g.getPhoneFromSession(r)
+	_, phone, authorized := g.getSessionInfo(r)
 	if !authorized {
 		http.Error(w, "Доступ запрещен. Авторизуйтесь.", http.StatusForbidden)
 		return
@@ -535,13 +547,16 @@ func (b *ChatBroker) sendClientsCounter() {
 }
 
 func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
-	phone, authorized := g.getPhoneFromSession(r)
+	token, phone, authorized := g.getSessionInfo(r)
 	var req struct {
 		Text string `json:"text"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil || req.Text == "" {
 		http.Error(w, "Пустое сообщение", http.StatusBadRequest)
 		return
+	}
+	if !authorized {
+		phone = token
 	}
 	now := time.Now()
 	msg := Message{
@@ -558,7 +573,7 @@ func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
 
 func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	// Узнаем, какой телефон слушает этот конкретный поток (если авторизован)
-	currentPhone, authorized := g.getPhoneFromSession(r)
+	token, currentPhone, authorized := g.getSessionInfo(r)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -566,12 +581,11 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Transfer-Encoding", "chunked")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	token := ""
 	if !authorized {
-		token = currentPhone
+		currentPhone = token
 	}
 	messageChan := make(chan Message)
-	broker.newClient <- Pair[chan Message, string]{messageChan, token}
+	broker.newClient <- Pair[chan Message, string]{messageChan, currentPhone}
 
 	defer func() {
 		broker.defClient <- messageChan

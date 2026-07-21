@@ -546,7 +546,7 @@ func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
 
 func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	// Узнаем, какой телефон слушает этот конкретный поток (если авторизован)
-	token, currentPhone, authorized := g.getSessionInfo(r)
+	token, currentPhone, _ := g.getSessionInfo(r)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -574,16 +574,16 @@ Loop:
 	for {
 		select {
 		case msg := <-messageChan:
-			msg.IsMyMessage = msg.Token == token || msg.Phone == currentPhone // safe due too we got а copy from channel
+			msg.IsMyMessage = token != "" && msg.Token == token || currentPhone != "" && msg.Phone == currentPhone // safe due too we got а copy from channel
 			if msg.target[currentPhone] {
 				msg.MsgKind = msgKindMsgPer
 			}
-			if authorized && len(msg.Phone) == 12 && digits(msg.Phone[1:]) {
+			if len(msg.Phone) == 12 && digits(msg.Phone[1:]) {
 				msg.Name = msg.Phone[:3] + "*****" + msg.Phone[8:]
 			} else if len(msg.Token) >= 4 {
 				msg.Name = "Гость " + msg.Token[len(msg.Token)-4:]
 			} else {
-				msg.Phone = "Неизвестный"
+				msg.Name = "Неизвестный"
 			}
 			jsonBytes, err := json.Marshal(msg)
 			if err != nil {

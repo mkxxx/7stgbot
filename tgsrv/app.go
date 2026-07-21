@@ -590,13 +590,16 @@ Loop:
 			}
 			jsonBytes, err := json.Marshal(msg)
 			if err != nil {
+				Logger.Debugf("message to %s error: %v", currentPhone, err)
 				continue
 			}
 			_, err = fmt.Fprintf(w, "data: %s\n\n", string(jsonBytes))
 			if err != nil {
+				Logger.Debugf("message to %s error: %v", currentPhone, err)
 				break Loop
 			}
 			flusher.Flush()
+			Logger.Debugf("message sent to %s: %s", currentPhone, string(jsonBytes))
 
 		case <-pingTicker.C:
 			_, err := fmt.Fprintf(w, ": keepalive ping\n\n")
@@ -612,4 +615,5 @@ Loop:
 	broker.defClient <- messageChan
 	for range messageChan {
 	}
+	Logger.Debugf("event stream disconnected for: %s", currentPhone)
 }

@@ -568,7 +568,7 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, ": ping\n\n")
 	flusher.Flush()
 
-	Logger.Debugf("event stream connected for: %s", currentPhone)
+	Logger.Debugf("event stream connected for: %s ch: %v", currentPhone, messageChan)
 
 	pingTicker := time.NewTicker(15 * time.Second)
 	defer pingTicker.Stop()
@@ -590,16 +590,16 @@ Loop:
 			}
 			jsonBytes, err := json.Marshal(msg)
 			if err != nil {
-				Logger.Debugf("message to %s error: %v", currentPhone, err)
+				Logger.Debugf("message to %s ch: %v error: %v", currentPhone, messageChan, err)
 				continue
 			}
 			_, err = fmt.Fprintf(w, "data: %s\n\n", string(jsonBytes))
 			if err != nil {
-				Logger.Debugf("message to %s error: %v", currentPhone, err)
+				Logger.Debugf("message to %s ch: %v error: %v", currentPhone, messageChan, err)
 				break Loop
 			}
 			flusher.Flush()
-			Logger.Debugf("message sent to %s: %s", currentPhone, string(jsonBytes))
+			Logger.Debugf("message sent to %s ch: %v - %s", currentPhone, messageChan, string(jsonBytes))
 
 		case <-pingTicker.C:
 			_, err := fmt.Fprintf(w, ": keepalive ping\n\n")
@@ -615,5 +615,5 @@ Loop:
 	broker.defClient <- messageChan
 	for range messageChan {
 	}
-	Logger.Debugf("event stream disconnected for: %s", currentPhone)
+	Logger.Debugf("event stream disconnected for %s ch: %v", currentPhone, messageChan)
 }

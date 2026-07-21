@@ -510,11 +510,7 @@ func (b *ChatBroker) run() {
 
 func (b *ChatBroker) fanoutMessage(msg Message) {
 	for clientChan := range b.clients {
-		select {
-		case clientChan <- msg:
-		default:
-			// Защита от зависших каналов
-		}
+		clientChan <- msg
 	}
 }
 
@@ -561,12 +557,8 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	if !authorized {
 		currentPhone = token
 	}
-	messageChan := make(chan Message)
+	messageChan := make(chan Message, 128)
 	broker.newClient <- Pair[chan Message, string]{messageChan, currentPhone}
-
-	defer func() {
-		broker.defClient <- messageChan
-	}()
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -581,6 +573,7 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	pingTicker := time.NewTicker(15 * time.Second)
 	defer pingTicker.Stop()
 
+Loop:
 	for {
 		select {
 		case msg := <-messageChan:
@@ -601,19 +594,22 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 			}
 			_, err = fmt.Fprintf(w, "data: %s\n\n", string(jsonBytes))
 			if err != nil {
-				return
+				break Loop
 			}
 			flusher.Flush()
 
 		case <-pingTicker.C:
 			_, err := fmt.Fprintf(w, ": keepalive ping\n\n")
 			if err != nil {
-				return
+				break Loop
 			}
 			flusher.Flush()
 
 		case <-r.Context().Done():
-			return
+			break Loop
 		}
+	}
+	broker.defClient <- messageChan
+	for range messageChan {
 	}
 }

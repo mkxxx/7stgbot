@@ -139,8 +139,8 @@ func InitSession(h http.Handler) http.Handler {
 			SameSite: http.SameSiteStrictMode,
 			Expires:  time.Now().Add(365 * 24 * time.Hour),
 		}
-		http.SetCookie(w, cookie)
 		r.AddCookie(cookie)
+		http.SetCookie(w, cookie)
 
 		h.ServeHTTP(w, r)
 	})
@@ -464,16 +464,11 @@ var broker = &ChatBroker{
 // Запуск брокера в отдельной горутине (вызвать в func main)
 func (b *ChatBroker) run() {
 	cleanupTicker := time.NewTicker(1 * time.Minute)
-	guestNames := make(map[string]string)
 	for {
 		select {
 		case p := <-b.newClient:
 			token := p.Value
 			b.clients[p.Key] = token
-			if token != "" {
-				guestID := time.Now().UnixMilli() % 10000
-				guestNames[token] = fmt.Sprintf("Гость #%04d", guestID)
-			}
 			// При подключении нового клиента (или обновлении страницы)
 			// отправляем ему всю сохраненную историю за последний час
 			historyCopy := make([]Message, len(b.messageHistory))
@@ -487,29 +482,11 @@ func (b *ChatBroker) run() {
 			b.sendClientsCounter()
 
 		case ch := <-b.defClient:
-			if token := b.clients[ch]; token != "" {
-				delete(guestNames, token)
-			}
 			delete(b.clients, ch)
 			close(ch)
 			b.sendClientsCounter()
 
 		case msg := <-b.messages:
-			if !msg.authorized {
-				name := guestNames[msg.Phone]
-				if name == "" {
-					name = "Неизвестный"
-					mapStr := ""
-					jsonData, err := json.Marshal(guestNames)
-					if err != nil {
-						mapStr = fmt.Sprintf("error: %v", err)
-					} else {
-						mapStr = string(jsonData)
-					}
-					Logger.Debugf("client name not found for %s in %s", msg.Phone, mapStr)
-				}
-				msg.Phone = name
-			}
 			if msg.isHistorical() {
 				// Сохраняем сообщение в историю
 				b.messageHistory = append(b.messageHistory, msg)
@@ -611,8 +588,12 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 			if msg.target[currentPhone] {
 				msg.MsgKind = msgKindMsgPer
 			}
-			if len(msg.Phone) == 12 && digits(msg.Phone[1:]) {
+			if authorized && len(msg.Phone) == 12 && digits(msg.Phone[1:]) {
 				msg.Phone = msg.Phone[:3] + "*****" + msg.Phone[8:]
+			} else if len(msg.Phone) >= 4 {
+				msg.Phone = "Гость " + msg.Phone[len(msg.Phone)-4:]
+			} else {
+				msg.Phone = "Неизвестный"
 			}
 			jsonBytes, err := json.Marshal(msg)
 			if err != nil {

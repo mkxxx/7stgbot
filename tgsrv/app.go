@@ -134,9 +134,10 @@ func InitSession(h http.Handler) http.Handler {
 			Name:     sessionCookieName,
 			Value:    token,
 			Path:     "/",
+			Domain:   "7slavka.ru",
 			HttpOnly: true,
 			Secure:   true,
-			SameSite: http.SameSiteStrictMode,
+			SameSite: http.SameSiteLaxMode,
 			Expires:  time.Now().Add(365 * 24 * time.Hour),
 		}
 		r.AddCookie(cookie)

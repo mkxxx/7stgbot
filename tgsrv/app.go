@@ -429,7 +429,9 @@ func generateUUID() string {
 }
 
 type Message struct {
-	Phone       string          `json:"phone"`
+	Token       string          `json:"-"`
+	Phone       string          `json:"-"`
+	Name        string          `json:"name"`
 	Text        string          `json:"text"`
 	Time        time.Time       `json:"time"`
 	Formatted   string          `json:"formatted_time"`
@@ -528,20 +530,18 @@ func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Пустое сообщение", http.StatusBadRequest)
 		return
 	}
-	if !authorized {
-		phone = token
-	}
 	now := time.Now()
 	msg := Message{
+		Token:      token,
 		Phone:      phone,
+		authorized: authorized,
 		Text:       req.Text,
 		Time:       now,
 		Formatted:  now.Format("15:04"), // Форматируем время в ЧЧ:ММ по серверу
-		authorized: authorized,
 	}
 	broker.messages <- msg
 	w.WriteHeader(http.StatusOK)
-	Logger.Debugf("web message from %s: %s", msg.Phone, msg.Text)
+	Logger.Debugf("web message from %s %s: %s", msg.Token, msg.Phone, msg.Text)
 }
 
 func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
@@ -554,11 +554,8 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Transfer-Encoding", "chunked")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	if !authorized {
-		currentPhone = token
-	}
 	messageChan := make(chan Message, 128)
-	broker.newClient <- Pair[chan Message, string]{messageChan, currentPhone}
+	broker.newClient <- Pair[chan Message, string]{messageChan, token}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -568,7 +565,7 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, ": ping\n\n")
 	flusher.Flush()
 
-	Logger.Debugf("event stream connected for: %s ch: %v", currentPhone, messageChan)
+	Logger.Debugf("event stream connected for: %s %s ch: %v", currentPhone, token, messageChan)
 
 	pingTicker := time.NewTicker(15 * time.Second)
 	defer pingTicker.Stop()
@@ -577,29 +574,29 @@ Loop:
 	for {
 		select {
 		case msg := <-messageChan:
-			msg.IsMyMessage = msg.Phone == currentPhone // safe due too we got а copy from channel
+			msg.IsMyMessage = msg.Token == token || msg.Phone == currentPhone // safe due too we got а copy from channel
 			if msg.target[currentPhone] {
 				msg.MsgKind = msgKindMsgPer
 			}
 			if authorized && len(msg.Phone) == 12 && digits(msg.Phone[1:]) {
-				msg.Phone = msg.Phone[:3] + "*****" + msg.Phone[8:]
-			} else if len(msg.Phone) >= 4 {
-				msg.Phone = "Гость " + msg.Phone[len(msg.Phone)-4:]
+				msg.Name = msg.Phone[:3] + "*****" + msg.Phone[8:]
+			} else if len(msg.Token) >= 4 {
+				msg.Name = "Гость " + msg.Token[len(msg.Token)-4:]
 			} else {
 				msg.Phone = "Неизвестный"
 			}
 			jsonBytes, err := json.Marshal(msg)
 			if err != nil {
-				Logger.Debugf("message to %s ch: %v error: %v", currentPhone, messageChan, err)
+				Logger.Debugf("message to %s %s ch: %v error: %v", currentPhone, token, messageChan, err)
 				continue
 			}
 			_, err = fmt.Fprintf(w, "data: %s\n\n", string(jsonBytes))
 			if err != nil {
-				Logger.Debugf("message to %s ch: %v error: %v", currentPhone, messageChan, err)
+				Logger.Debugf("message to %s %s ch: %v error: %v", currentPhone, token, messageChan, err)
 				break Loop
 			}
 			flusher.Flush()
-			Logger.Debugf("message sent to %s ch: %v - %s", currentPhone, messageChan, string(jsonBytes))
+			Logger.Debugf("message sent to %s %s ch: %v - %s", currentPhone, token, messageChan, string(jsonBytes))
 
 		case <-pingTicker.C:
 			_, err := fmt.Fprintf(w, ": keepalive ping\n\n")
@@ -615,5 +612,5 @@ Loop:
 	broker.defClient <- messageChan
 	for range messageChan {
 	}
-	Logger.Debugf("event stream disconnected for %s ch: %v", currentPhone, messageChan)
+	Logger.Debugf("event stream disconnected for %s %s ch: %v", currentPhone, token, messageChan)
 }

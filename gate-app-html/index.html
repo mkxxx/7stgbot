@@ -422,7 +422,7 @@
         const container = document.getElementById('chatMessages');
         
         // Защита от дубликатов при переподключениях
-        const msgId = `msg-${msg.phone}-${msg.formatted_time}-${btoa(unescape(encodeURIComponent(msg.text))).slice(0,10)}`;
+        const msgId = `msg-${msg.name}-${msg.formatted_time}-${btoa(unescape(encodeURIComponent(msg.text))).slice(0,10)}`;
         if (document.getElementById(msgId)) return; 
 
         const bubble = document.createElement('div');
@@ -430,7 +430,7 @@
         
         bubble.className = `message-bubble ${msg.is_my_message ? 'outgoing' : 'incoming'}`;
         
-        const sender = msg.is_my_message ? 'Вы' : msg.phone;
+        const sender = msg.is_my_message ? 'Вы' : msg.name;
         
         bubble.innerHTML = `
             <div class="message-meta">

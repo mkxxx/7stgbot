@@ -18,6 +18,22 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
+const (
+	sessionCookieName = "gate_session"
+	appDomain         = "gate.7slavka.ru"
+	msgKindCliCnt     = "cli_cnt"
+	msgKindMsgPer     = "msg_per"
+	msgKindGateOpened = "sys_event"
+)
+
+var (
+	webAuthnConfig *webauthn.WebAuthn
+	webauthnCtxDB  = make(map[string]*webauthn.SessionData) // Сессии WebAuthn: token -> data
+	mu             sync.Mutex
+	notDigitRE     = regexp.MustCompile(`[^0-9]`)
+	ipv4Regex      = regexp.MustCompile(`^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`)
+)
+
 type Pair[K, V any] struct {
 	Key   K
 	Value V
@@ -69,21 +85,6 @@ func (u *WebUser) WebAuthnName() string                       { return u.Phone }
 func (u *WebUser) WebAuthnDisplayName() string                { return u.Phone }
 func (u *WebUser) WebAuthnIcon() string                       { return "" }
 func (u *WebUser) WebAuthnCredentials() []webauthn.Credential { return u.Credentials }
-
-var (
-	webAuthnConfig *webauthn.WebAuthn
-	webauthnCtxDB  = make(map[string]*webauthn.SessionData) // Сессии WebAuthn: token -> data
-	mu             sync.Mutex
-	notDigitRE     = regexp.MustCompile(`[^0-9]`)
-)
-
-const (
-	sessionCookieName = "gate_session"
-	appDomain         = "gate.7slavka.ru"
-	msgKindCliCnt     = "cli_cnt"
-	msgKindMsgPer     = "msg_per"
-	msgKindGateOpened = "sys_event"
-)
 
 type ChatBroker struct {
 	clients        map[chan Message]string
@@ -542,7 +543,7 @@ func (b *ChatBroker) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := r.Header.Get("X-Client-Local-IP")
-	if ip == "" {
+	if !IsValidIPv4(ip) {
 		ip = getClientIP(r)
 	}
 	mac := b.getClientMAC(ip)
@@ -598,7 +599,7 @@ func (b *ChatBroker) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	ip := r.URL.Query().Get("local_ip")
-	if ip == "" {
+	if !IsValidIPv4(ip) {
 		ip = getClientIP(r)
 	}
 	mac := b.getClientMAC(ip)
@@ -689,4 +690,8 @@ func getClientIP(r *http.Request) string {
 		return r.RemoteAddr // Возвращаем как есть, если не удалось разделить
 	}
 	return ip
+}
+
+func IsValidIPv4(ip string) bool {
+	return ipv4Regex.MatchString(ip)
 }

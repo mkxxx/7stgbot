@@ -111,6 +111,7 @@ type Gate struct {
 	NtfyToken              string
 	schedule               chan map[string]int
 	bleSchedule            chan map[string]int
+	Abort                  chan struct{}
 }
 
 type Notification struct {
@@ -1282,7 +1283,9 @@ func (c *bleCount) age() time.Duration {
 	return c.lastTime.Sub(c.firstTime)
 }
 
-func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config) {
+func (g *Gate) handlingBLETracking(abort chan struct{}, cfg *config.Config, cfgSub chan *config.Config,
+	ipReq chan Pair[string, chan string]) {
+
 	var firstWaitIsOver <-chan time.Time
 	var nextWaitIsOver <-chan time.Time
 	const firstDuration = 3 * time.Second
@@ -1448,6 +1451,19 @@ Loop:
 			g.sendSystemNotification(fmt.Sprintf("gate opened %s", t.timestampSent()))
 
 		case cfg = <-cfgSub:
+
+		case ip := <-ipReq:
+			found := false
+			for mac, nci := range wifiConnections {
+				if nci.IP == ip.Key && nci.connected {
+					ip.Value <- mac
+					found = true
+					break
+				}
+			}
+			if !found {
+				close(ip.Value)
+			}
 
 		case <-abort:
 			break Loop

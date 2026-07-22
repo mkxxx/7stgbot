@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/crc64"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -84,7 +85,27 @@ const (
 	msgKindGateOpened = "sys_event"
 )
 
-func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
+type ChatBroker struct {
+	clients        map[chan Message]string
+	newClient      chan Pair[chan Message, string]
+	defClient      chan chan Message
+	messages       chan Message
+	messageHistory []Message // Хранилище сообщений за последний час
+	g              *Gate
+	ipReq          chan Pair[string, chan string]
+}
+
+func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq chan Pair[string, chan string]) {
+	br := &ChatBroker{
+		clients:        make(map[chan Message]string),
+		newClient:      make(chan Pair[chan Message, string]),
+		defClient:      make(chan chan Message),
+		messages:       make(chan Message),
+		messageHistory: make([]Message, 0),
+		g:              g,
+		ipReq:          ipReq,
+	}
+
 	mux.Handle("GET /gate/app/{$}", InitSession(http.StripPrefix("/gate/app", http.FileServer(http.Dir(staticDir)))))
 	mux.Handle("GET /gate/app/", http.StripPrefix("/gate/app", http.FileServer(http.Dir(staticDir))))
 
@@ -101,26 +122,26 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string) {
 		Logger.Fatalf("Ошибка инициализации WebAuthn: %v", err)
 		return
 	}
-	mux.HandleFunc("POST /gate/app/sms/send", g.handleSmsSend)
-	mux.HandleFunc("POST /gate/app/sms/verify", g.handleSmsVerify)
+	mux.HandleFunc("POST /gate/app/sms/send", br.handleSmsSend)
+	mux.HandleFunc("POST /gate/app/sms/verify", br.handleSmsVerify)
 
 	// API Проверки состояния и выхода
-	mux.HandleFunc("GET /gate/app/check-session", g.handleCheckSession)
-	mux.HandleFunc("POST /gate/app/logout", g.handleLogout)
+	mux.HandleFunc("GET /gate/app/check-session", br.handleCheckSession)
+	mux.HandleFunc("POST /gate/app/logout", br.handleLogout)
 
 	// API WebAuthn (Passkeys)
-	mux.HandleFunc("POST /gate/app/register/begin", g.handleRegisterBegin)
-	mux.HandleFunc("POST /gate/app/register/finish", g.handleRegisterFinish)
-	mux.HandleFunc("POST /gate/app/login/begin", g.handleLoginBegin)
-	mux.HandleFunc("POST /gate/app/login/finish", g.handleLoginFinish)
+	mux.HandleFunc("POST /gate/app/register/begin", br.handleRegisterBegin)
+	mux.HandleFunc("POST /gate/app/register/finish", br.handleRegisterFinish)
+	mux.HandleFunc("POST /gate/app/login/begin", br.handleLoginBegin)
+	mux.HandleFunc("POST /gate/app/login/finish", br.handleLoginFinish)
 
 	// Главное исполнительное действие
-	mux.HandleFunc("POST /gate/app/open", g.handleGateOpen)
+	mux.HandleFunc("POST /gate/app/open", br.handleGateOpen)
 
-	go broker.run()
+	go br.run(g.Abort)
 
-	mux.HandleFunc("POST /gate/app/chat/send", g.handleChatSend)
-	mux.HandleFunc("GET /gate/app/chat/stream", g.handleChatStream)
+	mux.HandleFunc("POST /gate/app/chat/send", br.handleChatSend)
+	mux.HandleFunc("GET /gate/app/chat/stream", br.handleChatStream)
 }
 
 func InitSession(h http.Handler) http.Handler {
@@ -147,17 +168,17 @@ func InitSession(h http.Handler) http.Handler {
 	})
 }
 
-func (g *Gate) getSessionInfo(r *http.Request) (token string, phone string, authorized bool) {
+func (b *ChatBroker) getSessionInfo(r *http.Request) (token string, phone string, authorized bool) {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil {
 		return "", "", false
 	}
 	s := HTTPSession{Token: cookie.Value}
-	ok, _ := g.Entities.Load(&s)
+	ok, _ := b.g.Entities.Load(&s)
 	return s.Token, s.Phone, ok
 }
 
-func (g *Gate) handleSmsSend(w http.ResponseWriter, r *http.Request) {
+func (b *ChatBroker) handleSmsSend(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Phone string `json:"phone"`
 	}
@@ -167,17 +188,17 @@ func (g *Gate) handleSmsSend(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	sms := CodeSMS{Phone: normalizePhone(req.Phone)}
-	exists, _ := g.Entities.Load(&sms)
+	exists, _ := b.g.Entities.Load(&sms)
 	if !exists || !sms.Actual(now) {
 		sms.Code = generateSMSCode()
 		sms.Updated = now.Unix()
 	}
-	g.sendSMS(req.Phone, fmt.Sprintf("%s: введите код подтверждения %s", appDomain, sms.Code), time.Now().Add(time.Minute))
+	b.g.sendSMS(req.Phone, fmt.Sprintf("%s: введите код подтверждения %s", appDomain, sms.Code), time.Now().Add(time.Minute))
 	w.WriteHeader(http.StatusOK)
 	if exists {
-		g.Entities.Update(&sms)
+		b.g.Entities.Update(&sms)
 	} else {
-		g.Entities.Insert(&sms)
+		b.g.Entities.Insert(&sms)
 	}
 }
 
@@ -187,7 +208,7 @@ func generateSMSCode() string {
 	return strconv.Itoa((int(bb[0]) + int(bb[1])<<8 + int(bb[2])<<16 + int(bb[3])<<24) % 10000)
 }
 
-func (g *Gate) handleSmsVerify(w http.ResponseWriter, r *http.Request) {
+func (b *ChatBroker) handleSmsVerify(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil {
 		http.Error(w, "Сессия не инициализирована. Перезагрузите страницу.", http.StatusBadRequest)
@@ -203,22 +224,22 @@ func (g *Gate) handleSmsVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	phone := normalizePhone(req.Phone)
 	sms := CodeSMS{Phone: phone}
-	ok, _ := g.Entities.Load(&sms)
+	ok, _ := b.g.Entities.Load(&sms)
 	if !ok || req.Code != sms.Code {
 		http.Error(w, "Неверный код", http.StatusUnauthorized)
 		return
 	}
 	u := WebUser{Phone: phone}
-	if ok, _ := g.Entities.Load(&u); !ok {
-		g.Entities.Insert(&u)
+	if ok, _ := b.g.Entities.Load(&u); !ok {
+		b.g.Entities.Insert(&u)
 	}
 	s := HTTPSession{Token: cookie.Value, Phone: normalizePhone(phone)}
-	g.Entities.Insert(&s)
+	b.g.Entities.Insert(&s)
 	w.WriteHeader(http.StatusOK)
 }
 
-func (g *Gate) handleCheckSession(w http.ResponseWriter, r *http.Request) {
-	_, phone, authorized := g.getSessionInfo(r)
+func (b *ChatBroker) handleCheckSession(w http.ResponseWriter, r *http.Request) {
+	_, phone, authorized := b.getSessionInfo(r)
 	if !authorized {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -230,14 +251,14 @@ func (g *Gate) handleCheckSession(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (g *Gate) handleRegisterBegin(w http.ResponseWriter, r *http.Request) {
-	token, phone, authorized := g.getSessionInfo(r)
+func (b *ChatBroker) handleRegisterBegin(w http.ResponseWriter, r *http.Request) {
+	token, phone, authorized := b.getSessionInfo(r)
 	if !authorized {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 	u := WebUser{Phone: phone}
-	g.Entities.Load(&u)
+	b.g.Entities.Load(&u)
 	options, sessionData, err := webAuthnConfig.BeginRegistration(&u)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -251,8 +272,8 @@ func (g *Gate) handleRegisterBegin(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(options)
 }
 
-func (g *Gate) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
-	token, phone, authorized := g.getSessionInfo(r)
+func (b *ChatBroker) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
+	token, phone, authorized := b.getSessionInfo(r)
 	if !authorized {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -271,7 +292,7 @@ func (g *Gate) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := WebUser{Phone: phone}
-	exists, _ := g.Entities.Load(&u)
+	exists, _ := b.g.Entities.Load(&u)
 	credential, err := webAuthnConfig.CreateCredential(&u, *sessionData, parsedCredential)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -279,9 +300,9 @@ func (g *Gate) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 	}
 	u.Credentials = append(u.Credentials, *credential)
 	if exists {
-		g.Entities.Update(&u)
+		b.g.Entities.Update(&u)
 	} else {
-		g.Entities.Insert(&u)
+		b.g.Entities.Insert(&u)
 	}
 	mu.Lock()
 	delete(webauthnCtxDB, "reg_"+token)
@@ -290,7 +311,7 @@ func (g *Gate) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (g *Gate) handleLoginBegin(w http.ResponseWriter, r *http.Request) {
+func (b *ChatBroker) handleLoginBegin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Phone string `json:"phone"`
 	}
@@ -299,7 +320,7 @@ func (g *Gate) handleLoginBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	targetUser := WebUser{Phone: normalizePhone(req.Phone)}
-	exists, _ := g.Entities.Load(&targetUser)
+	exists, _ := b.g.Entities.Load(&targetUser)
 	if !exists || len(targetUser.Credentials) == 0 {
 		http.Error(w, "Пользователь не найден или не настроил Passkey", http.StatusNotFound)
 		return
@@ -319,7 +340,7 @@ func (g *Gate) handleLoginBegin(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(options)
 }
 
-func (g *Gate) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
+func (b *ChatBroker) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil {
 		http.Error(w, "Сессия не инициализирована. Перезагрузите страницу.", http.StatusBadRequest)
@@ -341,7 +362,7 @@ func (g *Gate) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	targetUser := WebUser{Phone: string(sessionData.UserID)}
-	exists, _ := g.Entities.Load(&targetUser)
+	exists, _ := b.g.Entities.Load(&targetUser)
 	if !exists {
 		http.Error(w, "Пользователь, привязавший этот ключ, больше не существует", http.StatusNotFound)
 		return
@@ -353,7 +374,7 @@ func (g *Gate) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s := HTTPSession{Token: cookie.Value, Phone: targetUser.Phone}
-	g.Entities.Insert(&s)
+	b.g.Entities.Insert(&s)
 
 	// Подчищаем временные контексты входа
 	mu.Lock()
@@ -364,24 +385,24 @@ func (g *Gate) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "success", "phone": targetUser.Phone})
 }
 
-func (g *Gate) handleGateOpen(w http.ResponseWriter, r *http.Request) {
-	_, phone, authorized := g.getSessionInfo(r)
+func (b *ChatBroker) handleGateOpen(w http.ResponseWriter, r *http.Request) {
+	_, phone, authorized := b.getSessionInfo(r)
 	if !authorized {
 		http.Error(w, "Доступ запрещен. Авторизуйтесь.", http.StatusForbidden)
 		return
 	}
 	phone = normalizePhone(phone)[1:]
-	u, ok := g.Phones[phone]
+	u, ok := b.g.Phones[phone]
 	if !ok {
 		http.Error(w, "Вы не зарегестрированы в реестре шлагбаума. Обратитесь в правление.", http.StatusForbidden)
 		return
 	}
-	if !g.allowedNow(phone) {
+	if !b.g.allowedNow(phone) {
 		http.Error(w, "В данный момент у вас не прав на проезд.", http.StatusForbidden)
 		return
 	}
-	g.openGate(phone+" web app", "")
-	g.sendSystemNotification(fmt.Sprintf("opened by web app %s %s", phone, u.name()))
+	b.g.openGate(phone+" web app", "")
+	b.g.sendSystemNotification(fmt.Sprintf("opened by web app %s %s", phone, u.name()))
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -403,11 +424,11 @@ func digits(s string) bool {
 	})
 }
 
-func (g *Gate) handleLogout(w http.ResponseWriter, r *http.Request) {
+func (b *ChatBroker) handleLogout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil {
 		s := HTTPSession{Token: cookie.Value}
-		g.Entities.Delete(&s)
+		b.g.Entities.Delete(&s)
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookieName, Value: "", Path: "/", Expires: time.Unix(0, 0), HttpOnly: true,
@@ -447,25 +468,8 @@ func (m *Message) isHistorical() bool {
 	return m.MsgKind != msgKindCliCnt
 }
 
-// Брокер чата с историей сообщений
-type ChatBroker struct {
-	clients        map[chan Message]string
-	newClient      chan Pair[chan Message, string]
-	defClient      chan chan Message
-	messages       chan Message
-	messageHistory []Message // Хранилище сообщений за последний час
-}
-
-var broker = &ChatBroker{
-	clients:        make(map[chan Message]string),
-	newClient:      make(chan Pair[chan Message, string]),
-	defClient:      make(chan chan Message),
-	messages:       make(chan Message),
-	messageHistory: make([]Message, 0),
-}
-
 // Запуск брокера в отдельной горутине (вызвать в func main)
-func (b *ChatBroker) run() {
+func (b *ChatBroker) run(abort chan struct{}) {
 	cleanupTicker := time.NewTicker(1 * time.Minute)
 	for {
 		select {
@@ -507,6 +511,12 @@ func (b *ChatBroker) run() {
 				}
 			}
 			b.messageHistory = validMessages
+
+		case <-abort:
+			for clientChan := range b.clients {
+				close(clientChan)
+			}
+
 		}
 	}
 }
@@ -522,8 +532,8 @@ func (b *ChatBroker) sendClientsCounter() {
 	b.fanoutMessage(msg)
 }
 
-func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
-	token, phone, authorized := g.getSessionInfo(r)
+func (b *ChatBroker) handleChatSend(w http.ResponseWriter, r *http.Request) {
+	token, phone, authorized := b.getSessionInfo(r)
 	var req struct {
 		Text string `json:"text"`
 	}
@@ -531,6 +541,8 @@ func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Пустое сообщение", http.StatusBadRequest)
 		return
 	}
+	ip := getClientIP(r)
+	mac := b.getClientMAC(ip)
 	now := time.Now()
 	msg := Message{
 		Token:      token,
@@ -540,14 +552,27 @@ func (g *Gate) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		Time:       now,
 		Formatted:  now.Format("15:04"), // Форматируем время в ЧЧ:ММ по серверу
 	}
-	broker.messages <- msg
+	b.messages <- msg
 	w.WriteHeader(http.StatusOK)
-	Logger.Debugf("web message from %s %s: %s", msg.Token, msg.Phone, msg.Text)
+	m := fmt.Sprintf("web message from %s %s ip: %s mac: %s: %s", msg.Token, msg.Phone, ip, mac, msg.Text)
+	b.g.sendSystemNotification(m)
+	Logger.Debugf(m)
 }
 
-func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
+func (b *ChatBroker) getClientMAC(ip string) string {
+	ipCh := Pair[string, chan string]{ip, make(chan string)}
+	b.ipReq <- ipCh
+	select {
+	case mac := <-ipCh.Value:
+		return mac
+	case <-b.g.Abort:
+	}
+	return ""
+}
+
+func (b *ChatBroker) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	// Узнаем, какой телефон слушает этот конкретный поток (если авторизован)
-	token, currentPhone, _ := g.getSessionInfo(r)
+	token, currentPhone, _ := b.getSessionInfo(r)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -556,7 +581,7 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	messageChan := make(chan Message, 128)
-	broker.newClient <- Pair[chan Message, string]{messageChan, token}
+	b.newClient <- Pair[chan Message, string]{messageChan, token}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -566,7 +591,13 @@ func (g *Gate) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, ": ping\n\n")
 	flusher.Flush()
 
-	Logger.Debugf("event stream connected for: %s %s ch: %v", currentPhone, token, messageChan)
+	ip := getClientIP(r)
+	mac := b.getClientMAC(ip)
+
+	msg := fmt.Sprintf("web app: event stream connected for: %s %s ch: %v ip: %s mac: %s",
+		currentPhone, token, messageChan, ip, mac)
+	b.g.sendSystemNotification(msg)
+	Logger.Debugf(msg)
 
 	pingTicker := time.NewTicker(15 * time.Second)
 	defer pingTicker.Stop()
@@ -608,10 +639,45 @@ Loop:
 
 		case <-r.Context().Done():
 			break Loop
+
+		case <-b.g.Abort:
+			return
 		}
 	}
-	broker.defClient <- messageChan
-	for range messageChan {
+	b.defClient <- messageChan
+Loop2:
+	for {
+		select {
+		case _, ok := <-messageChan:
+			if !ok {
+				break Loop2
+			}
+		case <-b.g.Abort:
+			break Loop2
+		}
 	}
 	Logger.Debugf("event stream disconnected for %s %s ch: %v", currentPhone, token, messageChan)
+}
+
+func getClientIP(r *http.Request) string {
+	xForwardedFor := r.Header.Get("X-Forwarded-For")
+	if xForwardedFor != "" {
+		ips := strings.Split(xForwardedFor, ",")
+		// Первый IP в списке — это изначальный клиент
+		clientIP := strings.TrimSpace(ips[0])
+		if clientIP != "" {
+			return clientIP
+		}
+	}
+	xRealIP := r.Header.Get("X-Real-IP")
+	if xRealIP != "" {
+		return xRealIP
+	}
+	// Если прокси нет, берем IP из прямого сетевого соединения
+	// RemoteAddr имеет формат "IP:port" или "[IPv6]:port"
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr // Возвращаем как есть, если не удалось разделить
+	}
+	return ip
 }

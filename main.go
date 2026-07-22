@@ -140,6 +140,7 @@ func main() {
 
 	var g tgsrv.Gate
 	g.CfgDir = cfgDir
+	g.Abort = abort
 	g.Phones = make(map[string]*tgsrv.PalESUser)
 	readCsv(filepath.Join(cfgDir, "pales_users.csv"), palgateUserFunc(g.Phones))
 	g.RestrictedPhones = make(map[string]bool)

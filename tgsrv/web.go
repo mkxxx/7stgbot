@@ -199,10 +199,12 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 
 	topicEvents := make(chan string, 1)
 
+	ipReq := make(chan Pair[string, chan string], 4)
+
 	go g.palesLoginAndLoadLoop(abort, topicEvents, cfg, cfgSub.Subscribe())
 	go g.handlingCalls(abort)
 	go g.handlingSmses(abort)
-	go g.handlingBLETracking(abort, cfg, cfgSub.Subscribe())
+	go g.handlingBLETracking(abort, cfg, cfgSub.Subscribe(), ipReq)
 	go g.readingSMSesForSend(abort)
 	go g.handlingKeypadRequests(abort)
 	go g.sendingSystemNotification(abort)
@@ -239,7 +241,7 @@ func newWebServer(port int, staticDir string, dir string, QRElements map[string]
 	mux.HandleFunc("/totp/{secret}", ws.handleTOTP)
 	mux.HandleFunc("/", ws.handle)
 
-	g.RegisterGateAppHTTP(mux, cfg.StaticGateAppDir)
+	g.RegisterGateAppHTTP(mux, cfg.StaticGateAppDir, ipReq)
 
 	ws.httpServer = &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: TrimSlashMiddleware(mux)}
 	return ws

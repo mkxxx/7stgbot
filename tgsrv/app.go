@@ -513,10 +513,10 @@ func (b *ChatBroker) run(abort chan struct{}) {
 			b.messageHistory = validMessages
 
 		case <-abort:
-			for clientChan := range b.clients {
-				close(clientChan)
+			for ch := range b.clients {
+				close(ch)
 			}
-
+			return
 		}
 	}
 }
@@ -541,7 +541,10 @@ func (b *ChatBroker) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Пустое сообщение", http.StatusBadRequest)
 		return
 	}
-	ip := getClientIP(r)
+	ip := r.Header.Get("X-Client-Local-IP")
+	if ip == "" {
+		ip = getClientIP(r)
+	}
 	mac := b.getClientMAC(ip)
 	now := time.Now()
 	msg := Message{
@@ -560,6 +563,9 @@ func (b *ChatBroker) handleChatSend(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *ChatBroker) getClientMAC(ip string) string {
+	if !strings.HasPrefix(ip, "10.1.") {
+		return ""
+	}
 	ipCh := Pair[string, chan string]{ip, make(chan string)}
 	b.ipReq <- ipCh
 	select {
@@ -591,7 +597,10 @@ func (b *ChatBroker) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, ": ping\n\n")
 	flusher.Flush()
 
-	ip := getClientIP(r)
+	ip := r.URL.Query().Get("local_ip")
+	if ip == "" {
+		ip = getClientIP(r)
+	}
 	mac := b.getClientMAC(ip)
 
 	msg := fmt.Sprintf("web app: event stream connected for: %s %s ch: %v ip: %s mac: %s",

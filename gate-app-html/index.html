@@ -360,22 +360,23 @@
             eventSource.close();
             eventSource = null;
         }
-        const localIP = getLocalIP();
-        eventSource = new EventSource(`/chat/stream?local_ip=${encodeURIComponent(localIP)}`);
-        
-        eventSource.onmessage = function(event) {
-            const msg = JSON.parse(event.data);
-            if (msg.msg_kind === "cli_cnt") {
-                document.getElementById('onlineCounter').innerText = `● в сети: ${msg.text}`;
-                return;
-            }
-            playNotification(msg);
-            appendMessage(msg);
-        };
-        eventSource.onerror = function() {
-            // Если сокет упал (например, Макбук уснул), обнуляем счетчик онлайна до переподключения
-            document.getElementById('onlineCounter').innerText = `● в сети: 0`;
-        };
+        getLocalIP().then(function(localIP) {
+            eventSource = new EventSource(`/chat/stream?local_ip=${encodeURIComponent(localIP)}`);
+            
+            eventSource.onmessage = function(event) {
+                const msg = JSON.parse(event.data);
+                if (msg.msg_kind === "cli_cnt") {
+                    document.getElementById('onlineCounter').innerText = `● в сети: ${msg.text}`;
+                    return;
+                }
+                playNotification(msg);
+                appendMessage(msg);
+            };
+            eventSource.onerror = function() {
+                // Если сокет упал (например, Макбук уснул), обнуляем счетчик онлайна до переподключения
+                document.getElementById('onlineCounter').innerText = `● в сети: 0`;
+            };
+        }); 
         // Магия для разблокировки звука на iOS/Android:
         // При первом же тапе пользователя по экрану разрешаем воспроизведение аудио
         document.body.addEventListener('click', () => {

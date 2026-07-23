@@ -115,7 +115,7 @@
          if (stepId === 'stepGate' && deferredPrompt) {
             // Небольшая задержка в 1 секунду для красоты анимации
             setTimeout(() => {
-                showAndroidInstallBtn();
+                showInstallBanner();
             }, 1000);
         }
     }
@@ -330,7 +330,7 @@
         
         // Если сессия уже была активна при загрузке и мы на экране ворот, шлем кнопку
         if (document.getElementById('stepGate').classList.contains('active')) {
-            showAndroidInstallBtn();
+            showInstallBanner();
         }
     });
 

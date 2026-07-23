@@ -21,6 +21,7 @@ import (
 const (
 	sessionCookieName = "gate_session"
 	appDomain         = "gate.7slavka.ru"
+	siteDomain        = "7slavka.ru"
 	msgKindCliCnt     = "cli_cnt"
 	msgKindMsgPer     = "msg_per"
 	msgKindGateOpened = "sys_event"
@@ -113,9 +114,9 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 	var err error
 	webAuthnConfig, err = webauthn.New(&webauthn.Config{
 		RPDisplayName: "Gate",
-		RPID:          "7slavka.ru",
+		RPID:          siteDomain,
 		RPOrigins: []string{
-			"https://7slavka.ru",
+			"https://" + siteDomain,
 			"https://" + appDomain,
 		},
 	})
@@ -156,7 +157,7 @@ func InitSession(h http.Handler) http.Handler {
 			Name:     sessionCookieName,
 			Value:    token,
 			Path:     "/",
-			Domain:   "7slavka.ru",
+			Domain:   appDomain,
 			HttpOnly: true,
 			Secure:   true,
 			SameSite: http.SameSiteLaxMode,
@@ -524,7 +525,10 @@ func (b *ChatBroker) run(abort chan struct{}) {
 
 func (b *ChatBroker) fanoutMessage(msg Message) {
 	for clientChan := range b.clients {
-		clientChan <- msg
+		select {
+		case clientChan <- msg:
+		default:
+		}
 	}
 }
 
@@ -564,7 +568,7 @@ func (b *ChatBroker) handleChatSend(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *ChatBroker) getClientMAC(ip string) string {
-	if !strings.HasPrefix(ip, "10.1.") {
+	if !strings.HasPrefix(ip, "10.") {
 		return ""
 	}
 	ipCh := Pair[string, chan string]{ip, make(chan string)}
@@ -655,17 +659,6 @@ Loop:
 		}
 	}
 	b.defClient <- messageChan
-Loop2:
-	for {
-		select {
-		case _, ok := <-messageChan:
-			if !ok {
-				break Loop2
-			}
-		case <-b.g.Abort:
-			break Loop2
-		}
-	}
 	Logger.Debugf("event stream disconnected for %s %s ch: %v", currentPhone, token, messageChan)
 }
 

@@ -350,46 +350,51 @@
         gateStep.insertBefore(installBtn, gateStep.lastElementChild);
     }
 
-    function initChat() {
-        // Проверяем, существует ли сокет и находится ли он в процессе подключения (0) или открыт (1)
+    async function initChat() {
+        let localIP = "unknown";
+        try {
+            localIP = await getLocalIP();
+        } catch(e) {
+            console.error("Не удалось получить локальный IP:", e);
+        }
         if (eventSource && (eventSource.readyState === 0 || eventSource.readyState === 1)) {
             console.log("⚠️ Запрос на подключение проигнорирован: поток чата уже активен.");
             return;
         }
-
-        // Если сокет был в состоянии ошибки или закрыт, принудительно зануляем его
+        // Если сокет был в состоянии ошибки, закрываем его
         if (eventSource) {
             eventSource.close();
             eventSource = null;
         }
-        getLocalIP().then(function(localIP) {
-            eventSource = new EventSource(`/chat/stream?local_ip=${encodeURIComponent(localIP)}`);
+        eventSource = new EventSource(`/chat/stream?local_ip=${encodeURIComponent(localIP)}`);
+        
+        eventSource.onmessage = function(event) {
+            const msg = JSON.parse(event.data);
             
-            eventSource.onmessage = function(event) {
-                const msg = JSON.parse(event.data);
-                if (msg.msg_kind === "cli_cnt") {
-                    document.getElementById('onlineCounter').innerText = `● в сети: ${msg.text}`;
-                    return;
-                }
-                playNotification(msg);
-                appendMessage(msg);
-            };
-            eventSource.onerror = function() {
-                // Если сокет упал (например, Макбук уснул), обнуляем счетчик онлайна до переподключения
-                document.getElementById('onlineCounter').innerText = `● в сети: 0`;
-            };
-        }); 
-        // Магия для разблокировки звука на iOS/Android:
-        // При первом же тапе пользователя по экрану разрешаем воспроизведение аудио
-        document.body.addEventListener('click', () => {
-            notificationSound.play().then(() => {
-                notificationSound.pause(); // Сразу ставим на паузу, это просто дает браузеру одобрение
-                notificationSound.currentTime = 0;
-            }).catch(e => console.log("Аудио еще заблокировано:", e));
-        }, { once: true }); // Флаг once означает, что этот обработчик сработает всего 1 раз
+            if (msg.msg_kind === "cli_cnt") {
+                document.getElementById('onlineCounter').innerText = `● в сети: ${msg.text}`;
+                return;
+            }
+            playNotification(msg);
+            appendMessage(msg);
+        };
 
+        eventSource.onerror = function() {
+            console.log("⚠️ Сетевой сбой. EventSource автоматически пытается восстановить связь...");
+            document.getElementById('onlineCounter').innerText = `● в сети: 0`;
+        };
     }
 
+    // разблокировка звука
+    document.addEventListener('DOMContentLoaded', () => {
+        document.body.addEventListener('click', () => {
+            notificationSound.play().then(() => {
+                notificationSound.pause();
+                notificationSound.currentTime = 0;
+                console.log("🔊 Аудиосистема для мобильного успешно разблокирована!");
+            }).catch(e => console.log("Аудио заблокировано:", e));
+        }, { once: true });
+    });
 
     // --- МАГИЯ ДЛЯ МАКБУКОВ: Отслеживание пробуждения устройства ---
 
@@ -488,29 +493,29 @@
     }
 
     function getLocalIP() {
-    return new Promise((resolve) => {
-        const rtc = new RTCPeerConnection({ iceServers: [] });
-        rtc.createDataChannel(''); // Создаем пустой канал данных
-        rtc.createOffer().then(offer => rtc.setLocalDescription(offer));
-        
-        rtc.onicecandidate = (ice) => {
-            if (!ice || !ice.candidate || !ice.candidate.candidate) return;
+        return new Promise((resolve) => {
+            const rtc = new RTCPeerConnection({ iceServers: [] });
+            rtc.createDataChannel(''); // Создаем пустой канал данных
+            rtc.createOffer().then(offer => rtc.setLocalDescription(offer));
             
-            // Регулярное выражение ищет IPv4 адреса в строке кандидата
-            const ipRegex = /([0-9]{1,3}(\.[0-9]{1,3}){3})/;
-            const match = ice.candidate.candidate.match(ipRegex);
+            rtc.onicecandidate = (ice) => {
+                if (!ice || !ice.candidate || !ice.candidate.candidate) return;
+                
+                // Регулярное выражение ищет IPv4 адреса в строке кандидата
+                const ipRegex = /([0-9]{1,3}(\.[0-9]{1,3}){3})/;
+                const match = ice.candidate.candidate.match(ipRegex);
+                
+                if (match) {
+                    const localIP = match[1];
+                    rtc.close();
+                    resolve(localIP);
+                }
+            };
             
-            if (match) {
-                const localIP = match[1];
-                rtc.close();
-                resolve(localIP);
-            }
-        };
-        
-        // Таймаут на случай, если WebRTC заблокирован настройками приватности браузера
-        setTimeout(() => resolve("unknown"), 1000);
-    });
-}
+            // Таймаут на случай, если WebRTC заблокирован настройками приватности браузера
+            setTimeout(() => resolve("unknown"), 1000);
+        });
+    }
 
 </script>
 </body>

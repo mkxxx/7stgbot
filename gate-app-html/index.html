@@ -111,6 +111,13 @@
         document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
         document.getElementById(stepId).classList.add('active');
         status.className = ''; status.innerText = '';
+
+         if (stepId === 'stepGate' && deferredPrompt) {
+            // Небольшая задержка в 1 секунду для красоты анимации
+            setTimeout(() => {
+                showAndroidInstallBtn();
+            }, 1000);
+        }
     }
 
     function showStatus(text, isError = false) {
@@ -315,19 +322,16 @@
     }
 
     // 2. Логика кнопки добавления на рабочий стол (только для Android/Chrome)
-    let deferredPrompt;
-    window.addEventListener('beforeinstallprompt', (e) => {
-        // Блокируем стандартное появление баннера Chrome
-        e.preventDefault();
-        deferredPrompt = e;
+    let deferredPrompt = null;
 
-        // Показываем пользователю подсказку. 
-        // Например, выведем плашку на статус-бар через 2 секунды после входа на экран шлагбаума
-        setTimeout(() => {
-            if (document.getElementById('stepGate').classList.contains('active')) {
-                showInstallBanner();
-            }
-        }, 2000);
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e; // Просто сохраняем событие в память
+        
+        // Если сессия уже была активна при загрузке и мы на экране ворот, шлем кнопку
+        if (document.getElementById('stepGate').classList.contains('active')) {
+            showAndroidInstallBtn();
+        }
     });
 
     function showInstallBanner() {

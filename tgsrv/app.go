@@ -22,9 +22,10 @@ const (
 	sessionCookieName = "gate_session"
 	appDomain         = "gate.7slavka.ru"
 	siteDomain        = "7slavka.ru"
-	msgKindCliCnt     = "cli_cnt"
-	msgKindMsgPer     = "msg_per"
-	msgKindGateOpened = "sys_event"
+
+	msgKindCliCnt = "cli_cnt"
+	msgKindMsgPer = "msg_per"
+	msgKindSys    = "sys_event"
 )
 
 var (
@@ -404,8 +405,18 @@ func (b *ChatBroker) handleGateOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.g.openGate(phone+" web app", "")
-	b.g.sendSystemNotification(fmt.Sprintf("opened by web app %s %s", phone, u.name()))
 
+	ip := r.Header.Get("X-Client-Local-IP")
+	if !IsValidIPv4(ip) {
+		ip = getClientIP(r)
+	}
+	b.g.sendSystemNotification(fmt.Sprintf("OPENED by web app %s %s ip: %s", phone, u.name(), ip))
+
+	if strings.HasPrefix(ip, "10.") {
+		b.g.gateEvents <- "Шлагбаум открывается... (веб-приложение, от шлагбаума)"
+	} else {
+		b.g.gateEvents <- "Шлагбаум открывается... (веб-приложение)"
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -461,13 +472,13 @@ type Message struct {
 	Formatted   string          `json:"formatted_time"`
 	IsMyMessage bool            `json:"is_my_message"`
 	IsHistory   bool            `json:"is_history"`
-	MsgKind     string          `json:"msg_kind"`
+	Kind        string          `json:"kind"`
 	authorized  bool            `json:"-"`
 	target      map[string]bool `json:"-"`
 }
 
 func (m *Message) isHistorical() bool {
-	return m.MsgKind != msgKindCliCnt
+	return m.Kind != msgKindCliCnt
 }
 
 // Запуск брокера в отдельной горутине (вызвать в func main)
@@ -507,10 +518,20 @@ func (b *ChatBroker) run(abort chan struct{}) {
 
 		case msg := <-b.messages:
 			if msg.isHistorical() {
-				// Сохраняем сообщение в историю
 				b.messageHistory = append(b.messageHistory, msg)
 			}
-			// Рассылаем всем активным клиентам
+			b.fanoutMessage(msg)
+
+		case s := <-b.g.gateEvents:
+			now := time.Now()
+			msg := Message{
+				Name:      "System",
+				Text:      s,
+				Time:      now,
+				Formatted: now.Format("15:04"),
+				Kind:      msgKindSys,
+			}
+			b.messageHistory = append(b.messageHistory, msg)
 			b.fanoutMessage(msg)
 
 		case <-cleanupTicker.C:
@@ -543,7 +564,7 @@ func (b *ChatBroker) fanoutMessage(msg Message) {
 }
 
 func (b *ChatBroker) sendClientsCounter() {
-	msg := Message{MsgKind: msgKindCliCnt, Text: fmt.Sprintf("%d", len(b.clients))}
+	msg := Message{Kind: msgKindCliCnt, Text: fmt.Sprintf("%d", len(b.clients))}
 	b.fanoutMessage(msg)
 }
 
@@ -568,11 +589,11 @@ func (b *ChatBroker) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		authorized: authorized,
 		Text:       req.Text,
 		Time:       now,
-		Formatted:  now.Format("15:04"), // Форматируем время в ЧЧ:ММ по серверу
+		Formatted:  now.Format("15:04"),
 	}
 	b.messages <- msg
 	w.WriteHeader(http.StatusOK)
-	m := fmt.Sprintf("web message from %s %s ip: %s mac: %s: %s", msg.Token, msg.Phone, ip, mac, msg.Text)
+	m := fmt.Sprintf("[web app] message from %s %s ip: %s mac: %s: %s", msg.Token, msg.Phone, ip, mac, msg.Text)
 	b.g.sendSystemNotification(m)
 	Logger.Debugf(m)
 }
@@ -618,7 +639,7 @@ func (b *ChatBroker) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 	mac := b.getClientMAC(ip)
 
-	msg := fmt.Sprintf("web app: event stream connected for: %s %s ch: %v ip: %s mac: %s",
+	msg := fmt.Sprintf("[web app] event stream connected for: %s %s ch: %v ip: %s mac: %s",
 		currentPhone, token, messageChan, ip, mac)
 	b.g.sendSystemNotification(msg)
 	Logger.Debugf(msg)
@@ -631,43 +652,45 @@ Loop:
 		select {
 		case msg, ok := <-messageChan:
 			if !ok {
-				Logger.Debugf("event stream disconnected for %s %s ch: %v  broker closed dublicated stream channel", currentPhone, token, messageChan)
+				Logger.Debugf("[web app] event stream disconnected for %s %s ch: %v  broker closed dublicated stream channel", currentPhone, token, messageChan)
 				return
 			}
-			msg.IsMyMessage = token != "" && msg.Token == token || currentPhone != "" && msg.Phone == currentPhone // safe due too we got а copy from channel
-			if msg.target[currentPhone] {
-				msg.MsgKind = msgKindMsgPer
-			}
-			if len(msg.Phone) == 12 && digits(msg.Phone[1:]) {
-				msg.Name = msg.Phone[:3] + "*****" + msg.Phone[8:]
-			} else if len(msg.Token) >= 4 {
-				msg.Name = "Гость " + msg.Token[len(msg.Token)-4:]
-			} else {
-				msg.Name = "Неизвестный"
+			if msg.Kind == "" {
+				msg.IsMyMessage = token != "" && msg.Token == token || currentPhone != "" && msg.Phone == currentPhone // safe due too we got а copy from channel
+				if msg.target[currentPhone] {
+					msg.Kind = msgKindMsgPer
+				}
+				if len(msg.Phone) == 12 && digits(msg.Phone[1:]) {
+					msg.Name = msg.Phone[:3] + "*****" + msg.Phone[8:]
+				} else if len(msg.Token) >= 4 {
+					msg.Name = "Гость " + msg.Token[len(msg.Token)-4:]
+				} else {
+					msg.Name = "Неизвестный"
+				}
 			}
 			jsonBytes, err := json.Marshal(msg)
 			if err != nil {
-				Logger.Debugf("message to %s %s ch: %v error: %v", currentPhone, token, messageChan, err)
+				Logger.Debugf("[web app] message to %s %s ch: %v error: %v", currentPhone, token, messageChan, err)
 				continue
 			}
 			_, err = fmt.Fprintf(w, "data: %s\n\n", string(jsonBytes))
 			if err != nil {
-				Logger.Debugf("event stream disconnected for %s %s ch: %v message whrite error: %v", currentPhone, token, messageChan, err)
+				Logger.Debugf("[web app] event stream disconnected for %s %s ch: %v message whrite error: %v", currentPhone, token, messageChan, err)
 				break Loop
 			}
 			flusher.Flush()
-			Logger.Debugf("message sent to %s %s ch: %v - %s", currentPhone, token, messageChan, string(jsonBytes))
+			Logger.Debugf("[web app] message sent to %s %s ch: %v - %s", currentPhone, token, messageChan, string(jsonBytes))
 
 		case <-pingTicker.C:
 			_, err := fmt.Fprintf(w, ": keepalive ping\n\n")
 			if err != nil {
-				Logger.Debugf("event stream disconnected for %s %s ch: %v ping whrite error: %v", currentPhone, token, messageChan, err)
+				Logger.Debugf("[web app] event stream disconnected for %s %s ch: %v ping whrite error: %v", currentPhone, token, messageChan, err)
 				break Loop
 			}
 			flusher.Flush()
 
 		case <-r.Context().Done():
-			Logger.Debugf("event stream disconnected for %s %s ch: %v  request context is done", currentPhone, token, messageChan)
+			Logger.Debugf("[web app] event stream disconnected for %s %s ch: %v  request context is done", currentPhone, token, messageChan)
 			break Loop
 
 		case <-b.g.Abort:

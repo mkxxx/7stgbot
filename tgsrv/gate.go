@@ -112,6 +112,7 @@ type Gate struct {
 	schedule               chan map[string]int
 	bleSchedule            chan map[string]int
 	Abort                  chan struct{}
+	gateEvents             chan string
 }
 
 type Notification struct {
@@ -349,6 +350,7 @@ func (g *Gate) Init(cfg *config.Config, db *sql.DB) {
 	}
 	g.schedule = make(chan map[string]int, 1)
 	g.bleSchedule = make(chan map[string]int, 1)
+	g.gateEvents = make(chan string, 4)
 }
 
 type PalEsTimeGroups struct {
@@ -517,6 +519,7 @@ Loop:
 				}
 				g.openGate(phone, "")
 				g.sendSystemNotification(fmt.Sprintf("OPENED %s dial2  %s %s", call.timestamp(), phone, g.userName(phone, "")))
+				g.gateEvents <- "Шлагбаум открывается... (звонок)"
 				continue
 			}
 			if call.CalledNumber == g.GateInfoNumber {
@@ -936,6 +939,7 @@ Loop:
 							// assert: remaining < 5*time.Second
 							g.openGate("timer", "")
 							g.sendSystemNotification(fmt.Sprintf("OPENED by timer %s", time.Now().In(Location).Format("15:04:05")))
+							g.gateEvents <- "Шлагбаум открывается... (расписание)"
 						}
 					}
 				}
@@ -1203,6 +1207,7 @@ func (k *BLEGatekeeper) checkAndOpen(p []*BLETracking, cfg *config.Config) {
 		}
 		g.openGate(fmt.Sprintf("%s %s", bt.MAC, phone), "")
 		g.sendSystemNotification(fmt.Sprintf("OPENED by BLE: %s (%s)  %s %s", bt.MAC, bt.timestamp(), phone, u.name()))
+		g.gateEvents <- "Шлагбаум открывается... (1)"
 		break
 	}
 	for _, bt := range p {
@@ -1267,6 +1272,7 @@ func (a *BLETrackingTimer) openAfterPeriodOfActivity(p []*BLETracking, prolonged
 	}
 	if open {
 		a.g.openGate("BLE timer", "OPENED by BLE timer")
+		a.g.gateEvents <- "Шлагбаум открывается... (3)"
 	}
 }
 
@@ -1413,6 +1419,7 @@ Loop:
 				}
 				g.openGate(fmt.Sprintf("WiFi %s %s", ci.MAC, phone), "")
 				g.sendSystemNotification(fmt.Sprintf("OPENED by WiFi: %s (%s)  %s %s", ci.MAC, ci.Time, phone, u.name()))
+				g.gateEvents <- "Шлагбаум открывается... (2)"
 			}
 
 		case m := <-g.bleSchedule:
@@ -1836,6 +1843,17 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 		msg.WriteString(fmt.Sprintf("%s %s %s %s %s %s %s%s %s \n", opened, l.timestamp(), l.typeName(), phone, l.UserId, sn,
 			l.Firstname, l.Lastname, approved))
 
+		if l.Approved {
+			lot := time.Unix(0, g.lastOpenedTime.Load())
+			if lot.Before(l.Time()) {
+				ago := time.Since(l.Time())
+				if ago < 30*time.Second {
+					g.gateEvents <- fmt.Sprintf("Шлагбаум открывается... (PalGate %s)", l.typeName())
+				} else {
+					g.gateEvents <- fmt.Sprintf("Шлагбаум был открыт %s назад (PalGate %s)", ago.Round(time.Second), l.typeName())
+				}
+			}
+		}
 		bb, err := json.Marshal(l)
 		if err != nil {
 			Logger.Debugf("%v", err)
@@ -1867,6 +1885,7 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 	if g.allowedNow(phone) {
 		g.openGate(phone, "")
 		g.sendSystemNotification(fmt.Sprintf("OPENED by received log %s  %s", phone, g.userName(phone, "")))
+		g.gateEvents <- "Шлагбаум открывается... (PalGate log)"
 	}
 	return resp.StatusCode
 }
@@ -2066,6 +2085,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 					if g.allowedNow(phone) {
 						g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
 						g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s %s", c.Code, u.name(), time.Now().In(Location).Format("15:04:05")))
+						g.gateEvents <- "Шлагбаум открывается... (код)"
 						return nil
 					} else {
 						Logger.Warnf("keypad code !OK %s . masked phone is not allowed by register", phone)
@@ -2097,6 +2117,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			}
 			g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
 			g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s %s", c.Code, u.name(), time.Now().In(Location).Format("15:04:05")))
+			g.gateEvents <- "Шлагбаум открывается... (код)"
 			return nil
 		}
 		// phone 79990010203 или 89990010203 или 9990010203
@@ -2168,6 +2189,7 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 			if minLen != 0 && n >= minLen {
 				g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
 				g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s in FAKE mode %s", c.Code, time.Now().In(Location).Format("15:04:05")))
+				g.gateEvents <- "Шлагбаум открывается... (код)"
 				return nil
 			}
 		}
@@ -2183,6 +2205,7 @@ func (g *Gate) openGateByCode(code *gate.KeypadCode) {
 	}
 	g.openGate(fmt.Sprintf("keypad %s", code.Code), "")
 	g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s", code.Code, time.Now().In(Location).Format("15:04:05")))
+	g.gateEvents <- "Шлагбаум открывается... Гость (код)"
 	if code.Temporal() {
 		g.sendUserNotification(fmt.Sprintf("гость %s успешно ввел код", maskPhone(code.RequesterPhone)))
 	}
@@ -2279,6 +2302,7 @@ func (g *Gate) phoneAsCodeEntered(phone string, c KeypadCode, smsIfNotFound bool
 	}
 	g.openGate(fmt.Sprintf("keypad %s", c.Code), "")
 	g.sendSystemNotification(fmt.Sprintf("OPENED by keypad code %s %s %s", c.Code, u.name(), time.Now().In(Location).Format("15:04:05")))
+	g.gateEvents <- "Шлагбаум открывается... (код)"
 	return nil
 }
 
@@ -2690,11 +2714,13 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 					g.openGate(cmd, "")
 					g.sendSystemNotification(fmt.Sprintf("opened by %s %s (minutes). previously opened %s ago", cmd, args,
 						closedTime.Round(time.Second)))
+					g.gateEvents <- "Шлагбаум открывается... (4)"
 				}
 			}()
 		} else {
 			g.openGate(cmd, "")
 			g.sendSystemNotification(fmt.Sprintf("opened by %s", cmd))
+			g.gateEvents <- "Шлагбаум открывается... (4)"
 		}
 		return fmt.Sprintf(
 			"opening after %d minutes at %s", n,

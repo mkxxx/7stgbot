@@ -284,8 +284,13 @@
         gateStatus.innerText = 'Отправка команды...';
         gateStatus.className = '';
 
+        const localIP = await getLocalIP();
+
         try {
-            const res = await fetch('/open', { method: 'POST' });
+            const res = await fetch('/open', {
+                method: 'POST',
+                headers: { 'X-Client-Local-IP': localIP }
+            });
             
             if (res.ok) {
                 gateStatus.innerText = '🟢 Шлагбаум открывается!';
@@ -375,7 +380,7 @@
         eventSource.onmessage = function(event) {
             const msg = JSON.parse(event.data);
             
-            if (msg.msg_kind === "cli_cnt") {
+            if (msg.kind === "cli_cnt") {
                 document.getElementById('onlineCounter').innerText = `● в сети: ${msg.text}`;
                 return;
             }

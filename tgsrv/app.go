@@ -477,6 +477,13 @@ func (b *ChatBroker) run(abort chan struct{}) {
 		select {
 		case p := <-b.newClient:
 			token := p.Value
+			for ch, t := range b.clients {
+				if t == token {
+					delete(b.clients, ch)
+					close(ch)
+					b.sendClientsCounter()
+				}
+			}
 			b.clients[p.Key] = token
 			// При подключении нового клиента (или обновлении страницы)
 			// отправляем ему всю сохраненную историю за последний час
@@ -491,6 +498,9 @@ func (b *ChatBroker) run(abort chan struct{}) {
 			b.sendClientsCounter()
 
 		case ch := <-b.defClient:
+			if _, ok := b.clients[ch]; !ok {
+				continue
+			}
 			delete(b.clients, ch)
 			close(ch)
 			b.sendClientsCounter()
@@ -619,7 +629,11 @@ func (b *ChatBroker) handleChatStream(w http.ResponseWriter, r *http.Request) {
 Loop:
 	for {
 		select {
-		case msg := <-messageChan:
+		case msg, ok := <-messageChan:
+			if !ok {
+				Logger.Debugf("event stream disconnected for %s %s ch: %v  broker closed dublicated stream channel", currentPhone, token, messageChan)
+				return
+			}
 			msg.IsMyMessage = token != "" && msg.Token == token || currentPhone != "" && msg.Phone == currentPhone // safe due too we got а copy from channel
 			if msg.target[currentPhone] {
 				msg.MsgKind = msgKindMsgPer
@@ -638,7 +652,7 @@ Loop:
 			}
 			_, err = fmt.Fprintf(w, "data: %s\n\n", string(jsonBytes))
 			if err != nil {
-				Logger.Debugf("message to %s %s ch: %v error: %v", currentPhone, token, messageChan, err)
+				Logger.Debugf("event stream disconnected for %s %s ch: %v message whrite error: %v", currentPhone, token, messageChan, err)
 				break Loop
 			}
 			flusher.Flush()
@@ -647,11 +661,13 @@ Loop:
 		case <-pingTicker.C:
 			_, err := fmt.Fprintf(w, ": keepalive ping\n\n")
 			if err != nil {
+				Logger.Debugf("event stream disconnected for %s %s ch: %v ping whrite error: %v", currentPhone, token, messageChan, err)
 				break Loop
 			}
 			flusher.Flush()
 
 		case <-r.Context().Done():
+			Logger.Debugf("event stream disconnected for %s %s ch: %v  request context is done", currentPhone, token, messageChan)
 			break Loop
 
 		case <-b.g.Abort:
@@ -659,7 +675,6 @@ Loop:
 		}
 	}
 	b.defClient <- messageChan
-	Logger.Debugf("event stream disconnected for %s %s ch: %v", currentPhone, token, messageChan)
 }
 
 func getClientIP(r *http.Request) string {

@@ -412,11 +412,14 @@ func (b *ChatBroker) handleGateOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	b.g.sendSystemNotification(fmt.Sprintf("OPENED by web app %s %s ip: %s", phone, u.name(), ip))
 
+	var ev GateEvent
 	if strings.HasPrefix(ip, "10.") {
-		b.g.gateEvents <- "Шлагбаум открывается... (веб-приложение, от шлагбаума)"
+		ev = GateEvent{Phone: phone, Text: "Шлагбаум открывается... (веб-приложение, от шлагбаума)"}
 	} else {
-		b.g.gateEvents <- "Шлагбаум открывается... (веб-приложение)"
+		ev = GateEvent{Phone: phone, Text: "Шлагбаум открывается... (веб-приложение)"}
 	}
+	b.g.gateEvents <- ev
+	b.g.sendUserNotification(ev.Text)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -522,11 +525,12 @@ func (b *ChatBroker) run(abort chan struct{}) {
 			}
 			b.fanoutMessage(msg)
 
-		case s := <-b.g.gateEvents:
+		case ev := <-b.g.gateEvents:
 			now := time.Now()
 			msg := Message{
+				Phone:     ev.Phone,
 				Name:      "System",
-				Text:      s,
+				Text:      ev.Text,
 				Time:      now,
 				Formatted: now.Format("15:04"),
 				Kind:      msgKindSys,
@@ -655,8 +659,8 @@ Loop:
 				Logger.Debugf("[web app] event stream disconnected for %s %s ch: %v  broker closed dublicated stream channel", currentPhone, token, messageChan)
 				return
 			}
+			msg.IsMyMessage = token != "" && msg.Token == token || currentPhone != "" && msg.Phone == currentPhone // safe due too we got а copy from channel
 			if msg.Kind == "" {
-				msg.IsMyMessage = token != "" && msg.Token == token || currentPhone != "" && msg.Phone == currentPhone // safe due too we got а copy from channel
 				if msg.target[currentPhone] {
 					msg.Kind = msgKindMsgPer
 				}

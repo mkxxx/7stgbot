@@ -440,7 +440,7 @@
         const container = document.getElementById('chatMessages');
         
         // Защита от дубликатов при переподключениях
-        const msgId = `msg-${msg.name}-${msg.formatted_time}-${btoa(unescape(encodeURIComponent(msg.text))).slice(0,10)}`;
+        const msgId = `msg-${msg.name}-${msg.time}-${btoa(unescape(encodeURIComponent(msg.text))).slice(0,10)}`;
         if (document.getElementById(msgId)) return; 
 
         const bubble = document.createElement('div');

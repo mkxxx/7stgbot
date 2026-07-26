@@ -41,6 +41,11 @@ type Pair[K, V any] struct {
 	Value V
 }
 
+type ChatAuthorization struct {
+	token string
+	phone string
+}
+
 type WebUser struct {
 	Phone       string
 	Credentials []webauthn.Credential
@@ -89,24 +94,24 @@ func (u *WebUser) WebAuthnIcon() string                       { return "" }
 func (u *WebUser) WebAuthnCredentials() []webauthn.Credential { return u.Credentials }
 
 type ChatBroker struct {
-	clients        map[chan Message]string
-	newClient      chan Pair[chan Message, string]
+	newClient      chan Pair[chan Message, ChatAuthorization]
 	defClient      chan chan Message
 	messages       chan Message
 	messageHistory []Message // Хранилище сообщений за последний час
 	g              *Gate
 	ipReq          chan Pair[string, chan string]
+	auth           chan ChatAuthorization
 }
 
 func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq chan Pair[string, chan string]) {
 	br := &ChatBroker{
-		clients:        make(map[chan Message]string),
-		newClient:      make(chan Pair[chan Message, string]),
+		newClient:      make(chan Pair[chan Message, ChatAuthorization]),
 		defClient:      make(chan chan Message),
 		messages:       make(chan Message),
 		messageHistory: make([]Message, 0),
 		g:              g,
 		ipReq:          ipReq,
+		auth:           make(chan ChatAuthorization),
 	}
 
 	mux.Handle("GET /gate/app/{$}", InitSession(http.StripPrefix("/gate/app", http.FileServer(http.Dir(staticDir)))))
@@ -239,6 +244,8 @@ func (b *ChatBroker) handleSmsVerify(w http.ResponseWriter, r *http.Request) {
 	s := HTTPSession{Token: cookie.Value, Phone: normalizePhone(phone)}
 	b.g.Entities.Insert(&s)
 	w.WriteHeader(http.StatusOK)
+	b.auth <- ChatAuthorization{token: s.Token, phone: s.Phone}
+
 }
 
 func (b *ChatBroker) handleCheckSession(w http.ResponseWriter, r *http.Request) {
@@ -312,6 +319,7 @@ func (b *ChatBroker) handleRegisterFinish(w http.ResponseWriter, r *http.Request
 	mu.Unlock()
 
 	w.WriteHeader(http.StatusOK)
+	b.auth <- ChatAuthorization{token: token, phone: phone}
 }
 
 func (b *ChatBroker) handleLoginBegin(w http.ResponseWriter, r *http.Request) {
@@ -386,6 +394,8 @@ func (b *ChatBroker) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "success", "phone": targetUser.Phone})
+
+	b.auth <- ChatAuthorization{token: s.Token, phone: s.Phone}
 }
 
 func (b *ChatBroker) handleGateOpen(w http.ResponseWriter, r *http.Request) {
@@ -484,21 +494,43 @@ func (m *Message) isHistorical() bool {
 	return m.Kind != msgKindCliCnt
 }
 
+type Authorized struct {
+	token    string
+	value    bool
+	deadline time.Time
+	active   bool
+}
+
+func (a *Authorized) isActual(t time.Time) bool {
+	return a.value || a.deadline.After(t)
+}
+
 // Запуск брокера в отдельной горутине (вызвать в func main)
 func (b *ChatBroker) run(abort chan struct{}) {
+	clients := make(map[chan Message]*Authorized)
+	auths := make(map[string]*Authorized)
 	cleanupTicker := time.NewTicker(1 * time.Minute)
 	for {
 		select {
 		case p := <-b.newClient:
-			token := p.Value
-			for ch, t := range b.clients {
-				if t == token {
-					delete(b.clients, ch)
+			auth := &p.Value
+			token := auth.token
+			for ch, a := range clients {
+				if a.token == token {
+					delete(clients, ch)
 					close(ch)
-					b.sendClientsCounter()
+					sendClientsCounter(clients)
 				}
 			}
-			b.clients[p.Key] = token
+			a := Authorized{token: token, value: auth.phone != ""}
+			clients[p.Key] = &a
+			if a.value {
+				auths[token] = &a
+			} else if a0, ok := auths[token]; ok {
+				clients[p.Key] = a0
+			} else {
+				auths[token] = &a
+			}
 			// При подключении нового клиента (или обновлении страницы)
 			// отправляем ему всю сохраненную историю за последний час
 			historyCopy := make([]Message, len(b.messageHistory))
@@ -509,21 +541,34 @@ func (b *ChatBroker) run(abort chan struct{}) {
 					c <- msg
 				}
 			}(p.Key)
-			b.sendClientsCounter()
+			sendClientsCounter(clients)
 
 		case ch := <-b.defClient:
-			if _, ok := b.clients[ch]; !ok {
-				continue
+			if a, ok := clients[ch]; ok {
+				delete(clients, ch)
+				close(ch)
+				if a.value {
+					delete(auths, a.token)
+				}
+				sendClientsCounter(clients)
 			}
-			delete(b.clients, ch)
-			close(ch)
-			b.sendClientsCounter()
+
+		case auth := <-b.auth:
+			if auth.phone != "" {
+				if a, ok := auths[auth.token]; ok {
+					a.value = true
+				}
+			}
 
 		case msg := <-b.messages:
 			if msg.isHistorical() {
 				b.messageHistory = append(b.messageHistory, msg)
 			}
-			b.fanoutMessage(msg)
+			if a, ok := auths[msg.Token]; ok {
+				a.deadline = msg.Time.Add(time.Hour)
+			}
+			now := time.Now()
+			fanoutMessage(clients, msg, func(a *Authorized) bool { return a.isActual(now) })
 
 		case ev := <-b.g.gateEvents:
 			now := time.Now()
@@ -540,7 +585,7 @@ func (b *ChatBroker) run(abort chan struct{}) {
 				Kind:      msgKindSys,
 			}
 			b.messageHistory = append(b.messageHistory, msg)
-			b.fanoutMessage(msg)
+			fanoutMessage(clients, msg, func(a *Authorized) bool { return a.value })
 
 		case <-cleanupTicker.C:
 			// Удаляем сообщения старше 1 часа
@@ -552,9 +597,20 @@ func (b *ChatBroker) run(abort chan struct{}) {
 				}
 			}
 			b.messageHistory = validMessages
+			for _, a := range auths {
+				a.active = false
+			}
+			for _, a := range clients {
+				a.active = true
+			}
+			for t, a := range auths {
+				if !a.active && (a.value || now.After(a.deadline)) {
+					delete(auths, t)
+				}
+			}
 
 		case <-abort:
-			for ch := range b.clients {
+			for ch := range clients {
 				close(ch)
 			}
 			return
@@ -562,18 +618,20 @@ func (b *ChatBroker) run(abort chan struct{}) {
 	}
 }
 
-func (b *ChatBroker) fanoutMessage(msg Message) {
-	for clientChan := range b.clients {
-		select {
-		case clientChan <- msg:
-		default:
+func fanoutMessage(clients map[chan Message]*Authorized, msg Message, f func(a *Authorized) bool) {
+	for ch, a := range clients {
+		if f(a) {
+			select {
+			case ch <- msg:
+			default:
+			}
 		}
 	}
 }
 
-func (b *ChatBroker) sendClientsCounter() {
-	msg := Message{Kind: msgKindCliCnt, Text: fmt.Sprintf("%d", len(b.clients))}
-	b.fanoutMessage(msg)
+func sendClientsCounter(clients map[chan Message]*Authorized) {
+	msg := Message{Kind: msgKindCliCnt, Text: fmt.Sprintf("%d", len(clients))}
+	fanoutMessage(clients, msg, func(a *Authorized) bool { return true })
 }
 
 func (b *ChatBroker) handleChatSend(w http.ResponseWriter, r *http.Request) {
@@ -632,7 +690,7 @@ func (b *ChatBroker) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	messageChan := make(chan Message, 128)
-	b.newClient <- Pair[chan Message, string]{messageChan, token}
+	b.newClient <- Pair[chan Message, ChatAuthorization]{messageChan, ChatAuthorization{token: token, phone: currentPhone}}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -664,8 +722,8 @@ Loop:
 				Logger.Debugf("[web app] event stream disconnected for %s %s ch: %v  broker closed dublicated stream channel", currentPhone, token, messageChan)
 				return
 			}
-			msg.IsMyMessage = token != "" && msg.Token == token || currentPhone != "" && msg.Phone == currentPhone // safe due too we got а copy from channel
 			if msg.Kind == "" {
+				msg.IsMyMessage = token != "" && msg.Token == token || currentPhone != "" && msg.Phone == currentPhone // safe due too we got а copy from channel
 				if msg.target[currentPhone] {
 					msg.Kind = msgKindMsgPer
 				}

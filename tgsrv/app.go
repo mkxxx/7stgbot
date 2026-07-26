@@ -527,8 +527,12 @@ func (b *ChatBroker) run(abort chan struct{}) {
 
 		case ev := <-b.g.gateEvents:
 			now := time.Now()
+			phone := ev.Phone
+			if !strings.HasPrefix(phone, "+") {
+				phone = "+" + phone
+			}
 			msg := Message{
-				Phone:     ev.Phone,
+				Phone:     phone,
 				Name:      "System",
 				Text:      ev.Text,
 				Time:      now,
@@ -599,6 +603,7 @@ func (b *ChatBroker) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	m := fmt.Sprintf("[web app] message from %s %s ip: %s mac: %s: %s", msg.Token, msg.Phone, ip, mac, msg.Text)
 	b.g.sendSystemNotification(m)
+	b.g.sendUserNotification(req.Text)
 	Logger.Debugf(m)
 }
 

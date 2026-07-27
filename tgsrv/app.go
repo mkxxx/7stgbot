@@ -551,6 +551,9 @@ func (b *ChatBroker) run(abort chan struct{}) {
 				copy(historyCopy, b.messageHistory)
 				go func(c chan Message) {
 					for _, msg := range historyCopy {
+						if msg.Kind == msgKindSys && !authorized {
+							continue
+						}
 						msg.IsHistory = true
 						c <- msg
 					}

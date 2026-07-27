@@ -42,8 +42,11 @@ type Pair[K, V any] struct {
 }
 
 type ChatAuthorization struct {
-	token string
-	phone string
+	token   string
+	phone   string
+	localIP string
+	realIP  string
+	mac     string
 }
 
 type WebUser struct {
@@ -522,7 +525,11 @@ func (b *ChatBroker) run(abort chan struct{}) {
 					sendClientsCounter(clients)
 				}
 			}
-			a := Authorized{token: token, value: auth.phone != ""}
+			authorized := auth.phone != "" || auth.mac != "" || 
+			strings.HasPrefix(auth.realIP, "10.66.66.") || 
+			strings.HasPrefix(auth.localIP, "10.79.79.")
+
+			a := Authorized{token: token, value: authorized}
 			clients[p.Key] = &a
 			if a.value {
 				auths[token] = &a
@@ -689,8 +696,20 @@ func (b *ChatBroker) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Transfer-Encoding", "chunked")
 	w.Header().Set("X-Accel-Buffering", "no")
 
+	ip := ""
+	localIP := r.URL.Query().Get("local_ip")
+	realIP := getClientIP(r)
+	if IsValidIPv4(localIP) {
+		ip = localIP
+	} else {
+		localIP = ""
+		ip = realIP
+	}
+	mac := b.getClientMAC(ip)
+
 	messageChan := make(chan Message, 128)
-	b.newClient <- Pair[chan Message, ChatAuthorization]{messageChan, ChatAuthorization{token: token, phone: currentPhone}}
+	b.newClient <- Pair[chan Message, ChatAuthorization]{messageChan,
+		ChatAuthorization{token: token, phone: currentPhone, localIP: localIP, realIP: realIP, mac: mac}}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -699,12 +718,6 @@ func (b *ChatBroker) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, ": ping\n\n")
 	flusher.Flush()
-
-	ip := r.URL.Query().Get("local_ip")
-	if !IsValidIPv4(ip) {
-		ip = getClientIP(r)
-	}
-	mac := b.getClientMAC(ip)
 
 	msg := fmt.Sprintf("[web app] event stream connected for: %s %s ch: %v ip: %s mac: %s",
 		currentPhone, token, messageChan, ip, mac)

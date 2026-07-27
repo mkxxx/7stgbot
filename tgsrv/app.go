@@ -719,8 +719,8 @@ func (b *ChatBroker) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, ": ping\n\n")
 	flusher.Flush()
 
-	msg := fmt.Sprintf("[web app] event stream connected for: %s %s ch: %v ip: %s mac: %s",
-		currentPhone, token, messageChan, ip, mac)
+	msg := fmt.Sprintf("[web app] event stream connected for: %s %s ch: %v local ip: %s real ip: %s mac: %s",
+		currentPhone, token, messageChan, localIP, realIP, mac)
 	b.g.sendSystemNotification(msg)
 	Logger.Debugf(msg)
 

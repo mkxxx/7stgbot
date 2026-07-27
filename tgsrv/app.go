@@ -505,7 +505,7 @@ type Authorized struct {
 }
 
 func (a *Authorized) isActual(t time.Time) bool {
-	return a.value || a.deadline.After(t)
+	return a.value || t.Before(a.deadline)
 }
 
 // Запуск брокера в отдельной горутине (вызвать в func main)
@@ -525,29 +525,37 @@ func (b *ChatBroker) run(abort chan struct{}) {
 					sendClientsCounter(clients)
 				}
 			}
-			authorized := auth.phone != "" || auth.mac != "" || 
-			strings.HasPrefix(auth.realIP, "10.66.66.") || 
-			strings.HasPrefix(auth.localIP, "10.79.79.")
+			now := time.Now()
+			authorized := auth.phone != "" || auth.mac != "" ||
+				strings.HasPrefix(auth.realIP, "10.66.66.") ||
+				strings.HasPrefix(auth.localIP, "10.79.79.")
 
-			a := Authorized{token: token, value: authorized}
-			clients[p.Key] = &a
-			if a.value {
-				auths[token] = &a
-			} else if a0, ok := auths[token]; ok {
-				clients[p.Key] = a0
-			} else {
-				auths[token] = &a
+			a := &Authorized{token: token, value: authorized}
+			if authorized {
+				a.deadline = now.Add(time.Hour)
 			}
-			// При подключении нового клиента (или обновлении страницы)
-			// отправляем ему всю сохраненную историю за последний час
-			historyCopy := make([]Message, len(b.messageHistory))
-			copy(historyCopy, b.messageHistory)
-			go func(c chan Message) {
-				for _, msg := range historyCopy {
-					msg.IsHistory = true
-					c <- msg
-				}
-			}(p.Key)
+			clients[p.Key] = a
+			if a.value {
+				auths[token] = a
+			} else if a0, ok := auths[token]; ok {
+				a0.value = false
+				clients[p.Key] = a0
+				a = a0
+			} else {
+				auths[token] = a
+			}
+			if a.value || now.Before(a.deadline) {
+				// При подключении нового клиента (или обновлении страницы)
+				// отправляем ему всю сохраненную историю за последний час
+				historyCopy := make([]Message, len(b.messageHistory))
+				copy(historyCopy, b.messageHistory)
+				go func(c chan Message) {
+					for _, msg := range historyCopy {
+						msg.IsHistory = true
+						c <- msg
+					}
+				}(p.Key)
+			}
 			sendClientsCounter(clients)
 
 		case ch := <-b.defClient:
@@ -555,7 +563,8 @@ func (b *ChatBroker) run(abort chan struct{}) {
 				delete(clients, ch)
 				close(ch)
 				if a.value {
-					delete(auths, a.token)
+					a.value = false
+					a.deadline = time.Now().Add(time.Hour)
 				}
 				sendClientsCounter(clients)
 			}

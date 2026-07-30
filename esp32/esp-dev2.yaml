@@ -402,12 +402,12 @@ matrix_keypad:
   id: my_keypad
   rows:
     - pin: GPIO13 # 1 (key 7 side)
-    - pin: GPIO21 # 2  Заменили 12 на 32 # ЗАМЕНИЛИ 32 на 21, чтобы не конфликтовать с реле
+    - pin: GPIO22 # 2  Заменили 12 на 32 # ЗАМЕНИЛИ 32 на 21, чтобы не конфликтовать с реле
     - pin: GPIO14 # 3
     - pin: GPIO27 # 4
   columns:
     - pin: GPIO26 # 5
-    - pin: GPIO25 # 6
+    - pin: GPIO19 # 6
     - pin: GPIO33 # 7
   keys: "123456789*0#"
 

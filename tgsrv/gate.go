@@ -1176,12 +1176,15 @@ type BLETrackingAggregator struct {
 	tt []*BLETracking
 }
 
-func (a *BLETrackingAggregator) sendSystemNotification(p []*BLETracking) (empty bool) {
+func (a *BLETrackingAggregator) sendSystemNotification(p []*BLETracking, send bool) (empty bool) {
 	for _, t := range p {
 		a.tt = append(a.tt, t)
 	}
 	if len(a.tt) == 0 {
 		return true
+	}
+	if !send {
+		return false
 	}
 	now := time.Now()
 	var sb strings.Builder
@@ -1196,7 +1199,9 @@ func (a *BLETrackingAggregator) sendSystemNotification(p []*BLETracking) (empty 
 		}
 	}
 	a.tt = a.tt[:0]
-	a.g.sendSystemNotification(sb.String())
+	if sb.Len() > 0 {
+		a.g.sendSystemNotification(sb.String())
+	}
 	return false
 }
 
@@ -1369,11 +1374,14 @@ Loop:
 				continue
 			}
 			bleGatekeeper.checkAndOpen(btbt, cfg)
-			if firstWaitIsOver == nil && nextWaitIsOver == nil {
-				ticker.Reset(firstDuration)
-				firstWaitIsOver = ticker.C
+			if cfg.NtfyLocation == loc {
+				noWaitInProgress := firstWaitIsOver == nil && nextWaitIsOver == nil
+				if noWaitInProgress {
+					ticker.Reset(firstDuration)
+					firstWaitIsOver = ticker.C
+				}
+				aggr.sendSystemNotification(btbt, noWaitInProgress)
 			}
-			aggr.sendSystemNotification(btbt)
 			bleTimer.openAfterPeriodOfActivity(btbt, time.Duration(sch.period(time.Now()))*time.Minute)
 
 		case v := <-g.wifiClients:
@@ -1470,10 +1478,10 @@ Loop:
 			ticker.Reset(nextDuration)
 			firstWaitIsOver = nil
 			nextWaitIsOver = ticker.C
-			aggr.sendSystemNotification(nil)
+			aggr.sendSystemNotification(nil, true)
 
 		case <-nextWaitIsOver:
-			if aggr.sendSystemNotification(nil) {
+			if aggr.sendSystemNotification(nil, true) {
 				nextWaitIsOver = nil
 			}
 
@@ -2806,6 +2814,16 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 
 	case "/7_set":
 		args := strings.TrimSpace(args)
+		if strings.HasPrefix(args, "-d ") {
+			key := strings.TrimSpace(args[3:])
+			s := gate.Setting{Key: key}
+			err := g.Settings.Delete(&s)
+			if err != nil {
+				return "", err
+			}
+			g.SettingsPubSub.CRUD(key)
+			return "deleted", nil
+		}
 		if args == "" || !strings.Contains(args, " ") {
 			ss, err := g.Settings.FindN(args)
 			if err != nil {
@@ -2815,13 +2833,13 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 				return "not found", nil
 			}
 			var msg strings.Builder
-			for i, set := range *ss {
+			for i, s := range *ss {
 				if i != 0 {
 					msg.WriteString("\n")
 				}
-				msg.WriteString(set.Key)
+				msg.WriteString(s.Key)
 				msg.WriteString(" ")
-				msg.WriteString(set.ValueString())
+				msg.WriteString(s.ValueString())
 			}
 			return msg.String(), nil
 		}
@@ -2833,21 +2851,13 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 		if len(value) == n {
 			value = strings.Trim(value, "'")
 		}
-		set := gate.Setting{Key: key}
-		if value == "" {
-			err = g.Settings.Delete(&set)
-			if err != nil {
-				return "", err
-			}
-			g.SettingsPubSub.CRUD(key)
-			return "deleted", nil
-		}
-		set.SetString(value)
-		err := set.Validate()
+		s := gate.Setting{Key: key}
+		s.SetString(value)
+		err := s.Validate()
 		if err != nil {
 			return "", err
 		}
-		err = g.Settings.Update(&set)
+		err = g.Settings.Update(&s)
 		if err != nil {
 			return "", err
 		}

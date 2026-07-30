@@ -58,6 +58,7 @@ type Config struct {
 	LogsTikerMinutes              int64
 	TestLocation                  int
 	LogLocations                  map[string]bool
+	NtfyLocation                  int
 	MQTT                          struct {
 		F struct {
 			URL             string

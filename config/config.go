@@ -49,7 +49,6 @@ type Config struct {
 	NtfyToken                     string
 	OpenSchedule                  map[string]int // "09:00"=10\n"10:30"=5\n"22:00"=15   "hh:mm"=number_of_minutes
 	BLEAutoOpenLagMin             int64          // TODO remove
-	BTMacSystem                   map[string]string
 	BTMacIgnore                   map[string]string
 	BTMacAutoOpenGate             map[string]string
 	BTMacNames                    map[string]string

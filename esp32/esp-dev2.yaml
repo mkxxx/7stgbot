@@ -261,10 +261,10 @@ esp32_ble_tracker:
 
             std::string mac = x.address_str();
 
-            if (mac == "CA:7E:07:37:41:4F" || 
-                mac == "CA:7E:07:37:41:48" || 
-                mac == "CA:7E:07:37:41:4E" || 
-                mac == "E4:AE:E4:50:2A:D5") {
+            if (mac == "E5:2A:1A:F9:4F:92" || 
+                mac == "E5:2A:1A:F9:4F:93" || 
+                mac == "E5:2A:1A:F9:4F:95" || 
+                mac == "18:DE:50:04:33:4C") {
                 
               id(current_location) = "100";
               return;

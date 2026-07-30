@@ -11,7 +11,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const ScheduledSettingsKeyPrefix = "mm-daily."
+const (
+	ScheduledSettingsKeyPrefix = "mm-daily."
+	BannedHTTPTokens           = "http-ban."
+)
 
 var Location *time.Location
 

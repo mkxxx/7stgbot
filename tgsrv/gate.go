@@ -102,6 +102,7 @@ type Gate struct {
 	MattermostUsers        gate.MattermostUsersDAO
 	Entities               gate.EntitiesDAO
 	Settings               gate.SettingsDAO
+	SettingsPubSub         SettingsPubSub
 	SMSSession             map[int]*gate.SMS
 	Stored                 chan struct{}
 	TelegramNotification   chan *Notification
@@ -113,6 +114,22 @@ type Gate struct {
 	bleSchedule            chan map[string]int
 	Abort                  chan struct{}
 	gateEvents             chan GateEvent
+}
+
+type SettingsPubSub struct {
+	subscribers []chan string
+}
+
+func (s *SettingsPubSub) subscribe() <-chan string {
+	ch := make(chan string, 1)
+	s.subscribers = append(s.subscribers, ch)
+	return ch
+}
+
+func (s *SettingsPubSub) CRUD(key string) {
+	for _, ch := range s.subscribers {
+		ch <- key
+	}
 }
 
 type GateEvent struct {
@@ -2067,13 +2084,17 @@ func (g *Gate) keypadCode(c KeypadCode) error {
 	case true:
 		if n <= 5 && strings.HasPrefix(c.Code, "0") {
 			if c.Code == "000" {
-				g.sendUserNotification(fmt.Sprintf(`неизвесный гость ввел код %s "я приехал"`, c.Code))
+				msg := fmt.Sprintf(`неизвесный гость ввел код %s "(я приехал)"`, c.Code)
+				g.sendUserNotification(msg)
+				g.gateEvents <- GateEvent{Text: msg}
 				return nil
 			}
 			if strings.HasPrefix(c.Code, "00") && n >= 3 && n <= 5 {
 				plotN, err := strconv.Atoi(c.Code)
 				if err == nil && plotN >= 1 && plotN <= 315 {
-					g.sendUserNotification(fmt.Sprintf("ввели код %s - гости %d участка запрашивают проезд", c.Code, plotN))
+					msg := fmt.Sprintf("предположительно гость %d участка ввел код %s", plotN, c.Code)
+					g.sendUserNotification(msg)
+					g.gateEvents <- GateEvent{Text: msg}
 					return nil
 				}
 			}
@@ -2818,6 +2839,7 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 			if err != nil {
 				return "", err
 			}
+			g.SettingsPubSub.CRUD(key)
 			return "deleted", nil
 		}
 		set.SetString(value)
@@ -2829,6 +2851,7 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 		if err != nil {
 			return "", err
 		}
+		g.SettingsPubSub.CRUD(key)
 		return "updated", nil
 
 	case "/7_sms":

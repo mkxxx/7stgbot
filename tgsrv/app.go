@@ -1,6 +1,7 @@
 package tgsrv
 
 import (
+	"7stgbot/gate"
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
@@ -513,6 +514,9 @@ func (b *ChatBroker) run(abort chan struct{}) {
 	clients := make(map[chan Message]*Authorized)
 	auths := make(map[string]*Authorized)
 	cleanupTicker := time.NewTicker(1 * time.Minute)
+	settingsTicker := time.NewTicker(time.Hour)
+	settingsListener := b.g.SettingsPubSub.subscribe()
+	bannedTokens := b.loadBannedTokens()
 	for {
 		select {
 		case p := <-b.newClient:
@@ -587,7 +591,15 @@ func (b *ChatBroker) run(abort chan struct{}) {
 				a.deadline = msg.Time.Add(time.Hour)
 			}
 			now := time.Now()
-			fanoutMessage(clients, msg, func(a *Authorized) bool { return a.isActual(now) })
+			fanoutMessage(clients, msg, func(a *Authorized) bool {
+				if !a.isActual(now) {
+					return false
+				}
+				if _, ok := bannedTokens[a.token]; ok {
+					return false
+				}
+				return true
+			})
 
 		case ev := <-b.g.gateEvents:
 			now := time.Now()
@@ -604,7 +616,15 @@ func (b *ChatBroker) run(abort chan struct{}) {
 				Kind:      msgKindSys,
 			}
 			b.messageHistory = append(b.messageHistory, msg)
-			fanoutMessage(clients, msg, func(a *Authorized) bool { return a.value })
+			fanoutMessage(clients, msg, func(a *Authorized) bool {
+				if !a.value {
+					return false
+				}
+				if _, ok := bannedTokens[a.token]; ok {
+					return false
+				}
+				return true
+			})
 
 		case <-cleanupTicker.C:
 			// Удаляем сообщения старше 1 часа
@@ -628,6 +648,15 @@ func (b *ChatBroker) run(abort chan struct{}) {
 				}
 			}
 
+		case key := <-settingsListener:
+			if !strings.HasPrefix(key, gate.BannedHTTPTokens) {
+				continue
+			}
+			bannedTokens = b.loadBannedTokens()
+
+		case <-settingsTicker.C:
+			bannedTokens = b.loadBannedTokens()
+
 		case <-abort:
 			for ch := range clients {
 				close(ch)
@@ -635,6 +664,19 @@ func (b *ChatBroker) run(abort chan struct{}) {
 			return
 		}
 	}
+}
+
+func (b *ChatBroker) loadBannedTokens() map[string]bool {
+	ss, err := b.g.Settings.FindN(gate.BannedHTTPTokens)
+	if err != nil {
+		return nil
+	}
+	res := make(map[string]bool)
+	for i := range *ss {
+		s := &(*ss)[i]
+		res[s.Key[len(gate.BannedHTTPTokens):]] = true
+	}
+	return res
 }
 
 func fanoutMessage(clients map[chan Message]*Authorized, msg Message, f func(a *Authorized) bool) {

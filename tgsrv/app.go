@@ -548,7 +548,8 @@ func (b *ChatBroker) run(abort chan struct{}) {
 			} else {
 				auths[token] = a
 			}
-			if a.value || now.Before(a.deadline) {
+			_, banned := bannedTokens[token]
+			if !banned && (a.value || now.Before(a.deadline)) {
 				// При подключении нового клиента (или обновлении страницы)
 				// отправляем ему всю сохраненную историю за последний час
 				historyCopy := make([]Message, len(b.messageHistory))
@@ -590,8 +591,12 @@ func (b *ChatBroker) run(abort chan struct{}) {
 			if a, ok := auths[msg.Token]; ok {
 				a.deadline = msg.Time.Add(time.Hour)
 			}
+			_, banned := bannedTokens[msg.Token]
 			now := time.Now()
 			fanoutMessage(clients, msg, func(a *Authorized) bool {
+				if banned {
+					return a.token == msg.Token
+				}
 				if !a.isActual(now) {
 					return false
 				}

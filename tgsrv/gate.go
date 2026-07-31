@@ -2837,9 +2837,13 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 				if i != 0 {
 					msg.WriteString("\n")
 				}
+				msg.WriteString("```")
 				msg.WriteString(s.Key)
-				msg.WriteString(" ")
-				msg.WriteString(s.ValueString())
+				if value := s.ValueString(); value != "" {
+					msg.WriteString(" ")
+					msg.WriteString(value)
+				}
+				msg.WriteString("```")
 			}
 			return msg.String(), nil
 		}

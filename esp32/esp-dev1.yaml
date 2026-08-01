@@ -400,14 +400,14 @@ script:
 matrix_keypad:
   id: my_keypad
   rows:
-    - pin: GPIO13 # 1 (key 7 side)
-    - pin: GPIO22 # 2  Заменили 12 на 32 # ЗАМЕНИЛИ 32 на 21, чтобы не конфликтовать с реле
-    - pin: GPIO14 # 3
-    - pin: GPIO27 # 4
+    - pin: GPIO13 # 1 ч  123 (key 7 side)
+    - pin: GPIO22 # 2 б  456
+    - pin: GPIO14 # 3 се 789
+    - pin: GPIO27 # 4 ф  *0#
   columns:
-    - pin: GPIO26 # 5
-    - pin: GPIO19 # 6
-    - pin: GPIO33 # 7
+    - pin: GPIO26 # 5 си 147*
+    - pin: GPIO19 # 6 з  2580
+    - pin: GPIO33 # 7 ж  369#
   keys: "123456789*0#"
 
   on_key:

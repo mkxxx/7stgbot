@@ -430,3 +430,24 @@ func TestGenerateCode(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSMS(t *testing.T) {
+	type test struct {
+		args      string
+		phone     string
+		sms       string
+		relevance time.Duration
+	}
+	tests := []test{
+		{"+79990010705 hi", "+79990010705", "hi", 0},
+		{"1h  +79990010705 hi", "+79990010705", "hi", time.Hour},
+		{"+7  ( 999 )  001- 07-0 5   hi", "+79990010705", "hi", 0},
+		{"8  ( 999 )  001- 07-0 5   привет как дела?", "89990010705", "привет как дела?", 0},
+	}
+	for _, tt := range tests {
+		phone, sms, relevance := parseSMS(tt.args)
+		if phone != tt.phone || sms != tt.sms || relevance != tt.relevance {
+			t.Errorf("got %s %s %v, want %s %s %v", phone, sms, relevance, tt.phone, tt.sms, tt.relevance)
+		}
+	}
+}

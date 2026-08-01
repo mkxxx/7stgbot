@@ -58,7 +58,9 @@ const (
 	OpenedEvent
 )
 
-var phoneRegex = regexp.MustCompile(`^(\+7|7|8)\d{10}$`)
+var (
+	phoneRegex = regexp.MustCompile(`^((?:\+7|8)[\s-]*(?:\([\s-]*\d[\s-]*\d[\s-]*\d[\s-]*\)|\d[\s-]*\d[\s-]*\d)(?:[\s-]*\d){7})(.*)$`)
+)
 
 type GateCommandAndText struct {
 	command            GateCommand
@@ -2869,32 +2871,18 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 		return "updated", nil
 
 	case "/7_sms":
-		args := strings.TrimSpace(args)
-		aa := strings.SplitN(args, " ", 3)
-		if len(aa) != 3 && len(aa) != 2 {
+		phone, sms, relevance := parseSMS(args)
+		if sms == "" {
 			return "usage: /7_sms [<duration>] <phone> <text>", nil
 		}
-		var phone, sms string
-		relevance := 24 * time.Hour
-		if len(aa) == 3 {
-			d, err := time.ParseDuration(aa[0])
-			if err == nil {
-				relevance = d
-				phone = aa[1]
-				sms = aa[2]
-			} else {
-				phone = aa[0]
-				sms = aa[1] + " " + aa[2]
-			}
-		} else {
-			phone = aa[0]
-			sms = aa[1]
-		}
-		if !phoneRegex.MatchString(phone) {
+		if !(strings.HasPrefix(phone, "+") && len(phone) == 12 || len(phone) == 11) {
 			return fmt.Sprintf("phone must start with +7,7,8, and be exactly 11 digits long. %q is invalid.", phone), nil
 		}
 		if len(sms) > 160 {
 			return "text is too long", nil
+		}
+		if relevance == 0 {
+			relevance = 24 * time.Hour
 		}
 		g.sendSMS(phone, sms, time.Now().Add(relevance))
 		return "saved for sending", nil
@@ -2902,6 +2890,27 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 	default:
 		return "", ErrNotFound
 	}
+}
+
+func parseSMS(args string) (phone, sms string, relevance time.Duration) {
+	args = strings.TrimSpace(args)
+	aa := strings.SplitN(args, " ", 2)
+	if len(aa) != 2 {
+		return
+	}
+	d, err := time.ParseDuration(aa[0])
+	if err == nil {
+		relevance = d
+		args = strings.TrimSpace(aa[1])
+	}
+	matches := phoneRegex.FindStringSubmatch(args)
+	if len(matches) != 3 {
+		return
+	}
+	cleaner := strings.NewReplacer(" ", "", "-", "", "(", "", ")", "")
+	phone = cleaner.Replace(matches[1])
+	sms = strings.TrimSpace(matches[2])
+	return
 }
 
 func (g *Gate) handleMattermostUserCommand(req MattermostRequest, urlPath string, mmUser *gate.MattermostUser, encoder *json.Encoder) {

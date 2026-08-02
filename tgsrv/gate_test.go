@@ -1,6 +1,7 @@
 package tgsrv
 
 import (
+	"7stgbot/config"
 	"encoding/json"
 	"testing"
 	"time"
@@ -449,5 +450,43 @@ func TestParseSMS(t *testing.T) {
 		if phone != tt.phone || sms != tt.sms || relevance != tt.relevance {
 			t.Errorf("got %s %s %v, want %s %s %v", phone, sms, relevance, tt.phone, tt.sms, tt.relevance)
 		}
+	}
+}
+
+func TestCheckAndOpen(t *testing.T) {
+	type test struct {
+		args      string
+		phone     string
+		sms       string
+		relevance time.Duration
+	}
+	var unix0 int64 = 1785660000
+	var tests []int64
+	tests = append(tests, unix0)
+	unix0 += 30
+	tests = append(tests, unix0)
+	unix0 += 30
+	tests = append(tests, unix0)
+	unix0 += 121
+	tests = append(tests, unix0)
+	unix0 += 30
+	tests = append(tests, unix0)
+	var gk BLEGatekeeper
+	gk.init()
+	var cfg config.Config
+	cfg.BLEResumeAbsenceDurationSec = 120
+	res := make(map[int64]bool)
+	for _, tt := range tests {
+		bt := BLETracking{MAC: "B8:59:C8:26:28:38", Time: tt}
+		gk.checkAndOpenFunc([]*BLETracking{&bt}, &cfg, bt.AsTime().Add(2*time.Second),
+			func(bt *BLETracking, cfg *config.Config) bool {
+				res[bt.Time] = true
+				return true
+			})
+	}
+	want := 2
+	got := len(res)
+	if got != want {
+		t.Errorf("got %d times opened, want %d", got, want)
 	}
 }

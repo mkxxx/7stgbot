@@ -1216,34 +1216,22 @@ func (k *BLEGatekeeper) init() {
 	k.RecentlyOpened = make(map[string]*BLETracking)
 }
 
-func (k *BLEGatekeeper) checkAndOpen(p []*BLETracking, cfg *config.Config) {
-	k.cleanRecentlyOpenedLongStanding(cfg)
+func (k *BLEGatekeeper) checkAndOpen(p []*BLETracking, cfg *config.Config, now time.Time) {
+	k.checkAndOpenFunc(p, cfg, now, k.checkAndOpenBLETracking)
+}
+
+func (k *BLEGatekeeper) checkAndOpenFunc(p []*BLETracking, cfg *config.Config, now time.Time,
+	f func(bt *BLETracking, cfg *config.Config) bool) {
+
+	k.cleanRecentlyOpenedLongStanding(cfg, now)
 	for _, bt := range p {
 		if _, ok := k.RecentlyOpened[bt.MAC]; ok {
 			continue
 		}
-		phone, ok := cfg.BTMacAutoOpenGate[bt.MAC]
-		if !ok {
-			continue
+		if f(bt, cfg) {
+			k.RecentlyOpened[bt.MAC] = bt
+			break
 		}
-		g := k.g
-		u, ok := g.Phones[phone]
-		if !ok {
-			continue
-		}
-		if !g.allowedNow(phone) {
-			g.sendSystemNotification(fmt.Sprintf("%s BLE restricted %s %s", bt.timestamp(), phone, u.name()))
-			continue
-		}
-		if time.Since(time.Unix(0, g.lastOpenedTime.Load())) < 71*time.Second {
-			continue
-		}
-		g.openGate(fmt.Sprintf("%s %s", bt.MAC, phone), "")
-		g.sendSystemNotification(fmt.Sprintf("OPENED by BLE: %s (%s)  %s %s", bt.MAC, bt.timestamp(), phone, u.name()))
-		ev := GateEvent{Phone: phone, Text: "Шлагбаум открывается... (1)"}
-		g.gateEvents <- ev
-		g.sendUserNotification(ev.Text)
-		break
 	}
 	for _, bt := range p {
 		if t, ok := k.RecentlyOpened[bt.MAC]; ok && t.Time < bt.Time {
@@ -1252,9 +1240,33 @@ func (k *BLEGatekeeper) checkAndOpen(p []*BLETracking, cfg *config.Config) {
 	}
 }
 
-func (k *BLEGatekeeper) cleanRecentlyOpenedLongStanding(cfg *config.Config) {
+func (k *BLEGatekeeper) checkAndOpenBLETracking(bt *BLETracking, cfg *config.Config) bool {
+	phone, ok := cfg.BTMacAutoOpenGate[bt.MAC]
+	if !ok {
+		return false
+	}
+	g := k.g
+	u, ok := g.Phones[phone]
+	if !ok {
+		return false
+	}
+	if !g.allowedNow(phone) {
+		g.sendSystemNotification(fmt.Sprintf("%s BLE restricted %s %s", bt.timestamp(), phone, u.name()))
+		return false
+	}
+	if time.Since(time.Unix(0, g.lastOpenedTime.Load())) < 71*time.Second {
+		return false
+	}
+	g.openGate(fmt.Sprintf("%s %s", bt.MAC, phone), "")
+	g.sendSystemNotification(fmt.Sprintf("OPENED by BLE: %s (%s)  %s %s", bt.MAC, bt.timestamp(), phone, u.name()))
+	ev := GateEvent{Phone: phone, Text: "Шлагбаум открывается... (1)"}
+	g.gateEvents <- ev
+	g.sendUserNotification(ev.Text)
+	return true
+}
+
+func (k *BLEGatekeeper) cleanRecentlyOpenedLongStanding(cfg *config.Config, now time.Time) {
 	BLEResumeAbsenceDuration := time.Duration(cfg.BLEResumeAbsenceDurationSec) * time.Second
-	now := time.Now()
 	for mac, bt := range k.RecentlyOpened {
 		if now.Sub(bt.AsTime()) >= BLEResumeAbsenceDuration {
 			delete(k.RecentlyOpened, mac)
@@ -1375,7 +1387,8 @@ Loop:
 			if len(btbt) == 0 {
 				continue
 			}
-			bleGatekeeper.checkAndOpen(btbt, cfg)
+			now := time.Now()
+			bleGatekeeper.checkAndOpen(btbt, cfg, now)
 			if cfg.NtfyLocation == loc {
 				noWaitInProgress := firstWaitIsOver == nil && nextWaitIsOver == nil
 				if noWaitInProgress {
@@ -1384,7 +1397,7 @@ Loop:
 				}
 				aggr.sendSystemNotification(btbt, noWaitInProgress)
 			}
-			bleTimer.openAfterPeriodOfActivity(btbt, time.Duration(sch.period(time.Now()))*time.Minute)
+			bleTimer.openAfterPeriodOfActivity(btbt, time.Duration(sch.period(now))*time.Minute)
 
 		case v := <-g.wifiClients:
 			switch ci := v.(type) {

@@ -35,7 +35,7 @@ type BLETracking struct {
 }
 
 func (t *BLETracking) timestamp() string {
-	return time.Unix(t.Time, 0).In(Location).Format("2006-01-02 15:04:05")
+	return t.AsTime().In(Location).Format("2006-01-02 15:04:05")
 }
 
 func (t *BLETracking) AsTime() time.Time {

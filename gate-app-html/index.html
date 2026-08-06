@@ -66,23 +66,34 @@
             object-fit: contain;
         }
 
-        /* Кнопка Закрыть (крестик) */
+        /* Кнопка Закрыть (крестик) строго вверху справа */
         .close-gate-btn {
-            position: absolute;
-            top: 20px;
-            right: 30px;
+            position: fixed; /* Изменено с absolute на fixed */
+            top: 15px;
+            right: 20px;
             background: none;
             border: none;
-            color: white;
-            font-size: 45px;
-            font-weight: bold;
+            color: rgba(255, 255, 255, 0.7); /* Чуть приглушенный белый цвет по умолчанию */
+            font-size: 50px; /* Крупный размер для удобного нажатия пальцем */
+            font-family: Arial, sans-serif;
+            line-height: 1;
             cursor: pointer;
-            transition: color 0.2s;
+            z-index: 10001; /* Строго выше самой картинки */
+            transition: color 0.2s, transform 0.2s;
+            padding: 10px; /* Увеличиваем область клика для мобильных */
             -webkit-tap-highlight-color: transparent;
         }
 
+        /* Эффект при наведении на ПК */
         .close-gate-btn:hover {
-            color: #dc3545;
+            color: #ff4d4d;
+            transform: scale(1.1);
+        }
+
+        /* Эффект при нажатии (актуально для смартфонов) */
+        .close-gate-btn:active {
+            color: #ff4d4d;
+            transform: scale(0.9);
         }
 
         /* Служебный класс для скрытия */

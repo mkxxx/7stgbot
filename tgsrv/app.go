@@ -139,7 +139,7 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 	fs := http.FileServer(http.Dir(staticDir))
 	mux.Handle("GET /gate/app/{$}", InitSession(http.StripPrefix("/gate/app", fs)))
 	mux.Handle("GET /gate/app/", http.StripPrefix("/gate/app", fs))
-	mux.Handle("GET /gate/app/gate1.jpg", http.StripPrefix("/gate/app", RePath(fs, "/401.jpg", br.isAuthorized)))
+	mux.Handle("GET /gate/app/gate1.jpg", http.StripPrefix("/gate/app", RePath(fs, "/401.jpg", br.isAuthorizedAndLogger)))
 
 	var err error
 	webAuthnConfig, err = webauthn.New(&webauthn.Config{
@@ -210,8 +210,9 @@ func (b *ChatBroker) getSessionInfo(r *http.Request) (token string, phone string
 	return s.Token, s.Phone, ok
 }
 
-func (b *ChatBroker) isAuthorized(r *http.Request) bool {
+func (b *ChatBroker) isAuthorizedAndLogger(r *http.Request) bool {
 	_, _, authorized := b.getSessionInfo(r)
+	Logger.Debugf("[web app] %s authorized=%v", r.URL.Path, authorized)
 	return authorized
 }
 

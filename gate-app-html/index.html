@@ -388,9 +388,14 @@
     function refreshCameraImage() {
         const img = document.getElementById('gateCameraImg');
         if (img && !img.classList.contains('hidden')) {
-            img.src = `gate1.jpg?t=${Date.now()}`;
+            // Генерируем абсолютно случайную строку + timestamp
+            const randomAntiCache = Math.random().toString(36).substring(2, 15) + Date.now();
+            
+            // Присваиваем новый URL. Браузер будет обязан скачать файл заново с сервера
+            img.src = `gate1.jpg?nocache=${randomAntiCache}`;
         }
     }
+
 
     function openGateCamera() {
         const overlay = document.getElementById('gateCameraOverlay');

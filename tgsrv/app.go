@@ -140,9 +140,23 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 	}
 
 	fs := http.FileServer(http.Dir(staticDir))
+
+	noCacheFileServer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Полностью запрещаем кэширование для всех браузеров
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+
+		// Удаляем ETag и Last-Modified, чтобы браузер даже не пытался сравнивать версии
+		w.Header().Del("ETag")
+		w.Header().Del("Last-Modified")
+
+		fs.ServeHTTP(w, r)
+	})
+
 	mux.Handle("GET /gate/app/{$}", InitSession(http.StripPrefix("/gate/app", fs)))
 	mux.Handle("GET /gate/app/", http.StripPrefix("/gate/app", fs))
-	mux.Handle("GET /gate/app/gate1.jpg", http.StripPrefix("/gate/app", RePath(fs, "/401.jpg", br.isAuthorizedAndLogger)))
+	mux.Handle("GET /gate/app/gate1.jpg", http.StripPrefix("/gate/app", RePath(noCacheFileServer, "/401.jpg", br.isAuthorizedAndLogger)))
 	imgPath := filepath.Join(staticDir, "gate1.jpg")
 
 	var err error

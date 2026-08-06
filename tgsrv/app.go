@@ -10,12 +10,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 )
@@ -28,6 +30,7 @@ const (
 	msgKindCliCnt = "cli_cnt"
 	msgKindMsgPer = "msg_per"
 	msgKindSys    = "sys_event"
+	msgKindCam    = "cam"
 )
 
 var (
@@ -140,6 +143,7 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 	mux.Handle("GET /gate/app/{$}", InitSession(http.StripPrefix("/gate/app", fs)))
 	mux.Handle("GET /gate/app/", http.StripPrefix("/gate/app", fs))
 	mux.Handle("GET /gate/app/gate1.jpg", http.StripPrefix("/gate/app", RePath(fs, "/401.jpg", br.isAuthorizedAndLogger)))
+	imgPath := filepath.Join(staticDir, "gate1.jpg")
 
 	var err error
 	webAuthnConfig, err = webauthn.New(&webauthn.Config{
@@ -174,6 +178,43 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 
 	mux.HandleFunc("POST /gate/app/chat/send", br.handleChatSend)
 	mux.HandleFunc("GET /gate/app/chat/stream", br.handleChatStream)
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		Logger.Errorf("fsnotify error: %v", err)
+	} else {
+		var timerCh <-chan time.Time
+
+		go func() {
+			defer watcher.Close()
+			for {
+				select {
+				case event, ok := <-watcher.Events:
+					if !ok {
+						return
+					}
+					if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
+						timerCh = time.NewTimer(time.Second).C
+					}
+				case err, ok := <-watcher.Errors:
+					if !ok {
+						return
+					}
+					Logger.Errorf("fsnotify %s error: %v", imgPath, err)
+
+				case <-timerCh:
+					br.messages <- Message{Kind: msgKindCam}
+
+				case <-g.Abort:
+					return
+				}
+			}
+		}()
+		err = watcher.Add(imgPath)
+		if err != nil {
+			Logger.Errorf("fsnotify add %s error: %v", imgPath, err)
+		}
+	}
 }
 
 func InitSession(h http.Handler) http.Handler {
@@ -521,7 +562,7 @@ type Message struct {
 }
 
 func (m *Message) isHistorical() bool {
-	return m.Kind != msgKindCliCnt
+	return m.Kind != msgKindCliCnt && m.Kind != msgKindCam
 }
 
 type Authorized struct {
@@ -611,6 +652,18 @@ func (b *ChatBroker) run(abort chan struct{}) {
 			}
 
 		case msg := <-b.messages:
+			if msg.Kind == msgKindCam {
+				fanoutMessage(clients, msg, func(a *Authorized) bool {
+					if !a.value {
+						return false
+					}
+					if _, ok := bannedTokens[a.token]; ok {
+						return false
+					}
+					return true
+				})
+				continue
+			}
 			if msg.isHistorical() {
 				b.messageHistory = append(b.messageHistory, msg)
 			}

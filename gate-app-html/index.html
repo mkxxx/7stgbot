@@ -45,6 +45,51 @@
         .gate-error { color: #dc3545; }
         @keyframes blink { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
 
+        /* Полноэкранный оверлей для камеры */
+        .gate-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: rgba(0, 0, 0, 0.95);
+            z-index: 10000; /* Гарантированно поверх чата и карточки */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Растягивание картинки без искажений пропорций */
+        .gate-overlay img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        /* Кнопка Закрыть (крестик) */
+        .close-gate-btn {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 45px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: color 0.2s;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .close-gate-btn:hover {
+            color: #dc3545;
+        }
+
+        /* Служебный класс для скрытия */
+        .gate-overlay.hidden {
+            display: none !important;
+        }
+
     </style>
 </head>
 <body>
@@ -74,6 +119,7 @@
         <p id="gateUserIdent">Доступ разрешен</p>
         <button class="btn-gate" onclick="openGate()">ОТКРЫТЬ</button>
         <div id="gateStatus"></div>
+        <button class="btn-outline" style="border-color: #007bff; color: #007bff; margin-top: 10px;" onclick="openGateCamera()">📷 Смотреть камеру</button>
         <!-- <button class="btn-outline" id="setupPasskeyBtn" style="display:none;" onclick="registerWebAuthn()">Включить вход по биометрии</button> -->
         <button class="btn-outline" style="border-color:#dc3545; color:#dc3545;" onclick="logout()">Выйти</button>
     </div>
@@ -319,6 +365,40 @@
         window.location.reload();
     }
 
+    let cameraInterval = null;
+    const CAMERA_REFRESH_MS = 2000; // Интервал обновления (2 секунды)
+
+    function refreshCameraImage() {
+        const img = document.getElementById('gateCameraImg');
+        if (img) {
+            // Так как префикс путей в Go равен "/gate/app", используем относительный путь "gate1.jpg".
+            // Добавление ?t=防止 кэширования браузером.
+            img.src = `gate1.jpg?t=${Date.now()}`;
+        }
+    }
+
+    function openGateCamera() {
+        const overlay = document.getElementById('gateCameraOverlay');
+        overlay.classList.remove('hidden');
+        
+        // Сразу загружаем актуальную картинку при открытии кнопки
+        refreshCameraImage();
+        
+        // Включаем таймер цикличного обновления файла
+        cameraInterval = setInterval(refreshCameraImage, CAMERA_REFRESH_MS);
+    }
+
+    function closeGateCamera() {
+        const overlay = document.getElementById('gateCameraOverlay');
+        overlay.classList.add('hidden');
+        
+        // Выключаем таймер, чтобы разгрузить сеть и не гонять запросы к Go вхолостую
+        if (cameraInterval) {
+            clearInterval(cameraInterval);
+            cameraInterval = null;
+        }
+    }
+
     // 1. Регистрация Service Worker
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js')
@@ -527,5 +607,10 @@
     }
 
 </script>
+<!-- Полноэкранный просмотр файла gate1.jpg -->
+<div id="gateCameraOverlay" class="gate-overlay hidden">
+    <button class="close-gate-btn" onclick="closeGateCamera()">&times;</button>
+    <img id="gateCameraImg" src="gate1.jpg" alt="Камера Шлагбаума">
+</div>
 </body>
 </html>

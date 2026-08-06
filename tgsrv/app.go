@@ -9,6 +9,7 @@ import (
 	"hash/crc64"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -107,6 +108,23 @@ type ChatBroker struct {
 	auth           chan ChatAuthorization
 }
 
+func RePath(h http.Handler, path string, f func(r *http.Request) bool) http.Handler {
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if f(r) {
+			h.ServeHTTP(w, r)
+			return
+		}
+		r2 := new(http.Request)
+		*r2 = *r
+		r2.URL = new(url.URL)
+		*r2.URL = *r.URL
+		r2.URL.Path = path
+		r2.URL.RawPath = path
+		h.ServeHTTP(w, r2)
+	})
+}
+
 func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq chan Pair[string, chan string]) {
 	br := &ChatBroker{
 		newClient:      make(chan Pair[chan Message, ChatAuthorization]),
@@ -118,8 +136,10 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 		auth:           make(chan ChatAuthorization),
 	}
 
-	mux.Handle("GET /gate/app/{$}", InitSession(http.StripPrefix("/gate/app", http.FileServer(http.Dir(staticDir)))))
-	mux.Handle("GET /gate/app/", http.StripPrefix("/gate/app", http.FileServer(http.Dir(staticDir))))
+	fs := http.FileServer(http.Dir(staticDir))
+	mux.Handle("GET /gate/app/{$}", InitSession(http.StripPrefix("/gate/app", fs)))
+	mux.Handle("GET /gate/app/", http.StripPrefix("/gate/app", fs))
+	mux.Handle("GET /gate/app/gate1.jpg", http.StripPrefix("/gate/app", RePath(fs, "/401.jpg", br.isAuthorized)))
 
 	var err error
 	webAuthnConfig, err = webauthn.New(&webauthn.Config{
@@ -188,6 +208,11 @@ func (b *ChatBroker) getSessionInfo(r *http.Request) (token string, phone string
 	s := HTTPSession{Token: cookie.Value}
 	ok, _ := b.g.Entities.Load(&s)
 	return s.Token, s.Phone, ok
+}
+
+func (b *ChatBroker) isAuthorized(r *http.Request) bool {
+	_, _, authorized := b.getSessionInfo(r)
+	return authorized
 }
 
 func (b *ChatBroker) handleSmsSend(w http.ResponseWriter, r *http.Request) {

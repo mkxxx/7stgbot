@@ -398,22 +398,23 @@
     function openGateCamera() {
         const overlay = document.getElementById('gateCameraOverlay');
         const img = document.getElementById('gateCameraImg');
-        const errorBlock = document.getElementById('gateCameraError');
+        const stepGateEl = document.getElementById('stepGate'); // Наш экран авторизованного пользователя
         
+        if (!overlay || !img) {
+            console.error("Ошибка: Не найдены HTML-элементы оверлея камеры!");
+            return;
+        }      
         overlay.classList.remove('hidden');
-        
-        const isAuthorized = document.getElementById('stepGate').classList.contains('active');
-        
+        const isAuthorized = stepGateEl && stepGateEl.classList.contains('active');
         if (isAuthorized) {
             img.classList.remove('hidden');
-            errorBlock.classList.add('hidden');
             
-            isCameraOverlayOpen = true; // Выставляем флаг активности
-            refreshCameraImage();       // Загружаем актуальный кадр прямо сейчас
+            isCameraOverlayOpen = true; // Включаем флаг для fsnotify
+            refreshCameraImage();       // Загружаем первый кадр
         } else {
             img.classList.add('hidden');
-            errorBlock.classList.remove('hidden');
-        }
+            isCameraOverlayOpen = false;
+        }  
     }
 
     function closeGateCamera() {

@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -168,7 +167,7 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 			return "/401.jpg"
 		})))
 
-	imgPath := filepath.Join(staticDir, "cam1.jpg")
+	//imgPath := filepath.Join(staticDir, "cam1.jpg")
 
 	var err error
 	webAuthnConfig, err = webauthn.New(&webauthn.Config{
@@ -227,7 +226,7 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 					if !ok {
 						return
 					}
-					Logger.Errorf("fsnotify %s error: %v", imgPath, err)
+					Logger.Errorf("fsnotify %s error: %v", staticDir, err)
 
 				case <-timerCh:
 					br.messages <- Message{Kind: msgKindCam}
@@ -237,9 +236,9 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 				}
 			}
 		}()
-		err = watcher.Add(imgPath)
+		err = watcher.Add(staticDir)
 		if err != nil {
-			Logger.Errorf("fsnotify add %s error: %v", imgPath, err)
+			Logger.Errorf("fsnotify add %s error: %v", staticDir, err)
 		}
 	}
 }

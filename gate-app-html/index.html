@@ -388,11 +388,9 @@
     function refreshCameraImage() {
         const img = document.getElementById('gateCameraImg');
         if (img && !img.classList.contains('hidden')) {
-            // Генерируем абсолютно случайную строку + timestamp
-            const randomAntiCache = Math.random().toString(36).substring(2, 15) + Date.now();
-            
+            const randomAntiCache = Math.random().toString(36).substring(2, 15)           
             // Присваиваем новый URL. Браузер будет обязан скачать файл заново с сервера
-            img.src = `gate1.jpg?nocache=${randomAntiCache}`;
+            img.src = `cam1/${randomAntiCache}.jpg`;
         }
     }
 
@@ -487,7 +485,7 @@
         eventSource.onmessage = function(event) {
             const msg = JSON.parse(event.data);
 
-            if (msg.kind === 'cam') {
+            if (msg.kind === "cam") {
                 if (isCameraOverlayOpen) {
                     refreshCameraImage();
                 }
@@ -640,10 +638,10 @@
     }
 
 </script>
-<!-- Полноэкранный просмотр файла gate1.jpg -->
+<!-- Полноэкранный просмотр файла cam1.jpg -->
 <div id="gateCameraOverlay" class="gate-overlay hidden">
     <button class="close-gate-btn" onclick="closeGateCamera()">&times;</button>
-    <img id="gateCameraImg" src="gate1.jpg" alt="Камера Шлагбаума">
+    <img id="gateCameraImg" src="cam1/432234513.jpg" alt="Камера Шлагбаума">
 </div>
 </body>
 </html>

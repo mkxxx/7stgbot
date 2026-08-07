@@ -111,10 +111,11 @@ type ChatBroker struct {
 	auth           chan ChatAuthorization
 }
 
-func RePath(h http.Handler, path string, f func(r *http.Request) bool) http.Handler {
+func RePath(h http.Handler, f func(r *http.Request) string) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if f(r) {
+		path := f(r)
+		if path == "" {
 			h.ServeHTTP(w, r)
 			return
 		}
@@ -156,8 +157,16 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 
 	mux.Handle("GET /gate/app/{$}", InitSession(http.StripPrefix("/gate/app", fs)))
 	mux.Handle("GET /gate/app/", http.StripPrefix("/gate/app", fs))
-	mux.Handle("GET /gate/app/gate1.jpg", http.StripPrefix("/gate/app", RePath(noCacheFileServer, "/401.jpg", br.isAuthorizedAndLogger)))
-	imgPath := filepath.Join(staticDir, "gate1.jpg")
+	mux.Handle("GET /gate/app/cam1/{filename...}", http.StripPrefix("/gate/app", RePath(noCacheFileServer,
+		func(r *http.Request) string {
+			_, _, authorized := br.getSessionInfo(r)
+			if authorized {
+				return "/cam1.jpg"
+			}
+			return "/401.jpg"
+		})))
+
+	imgPath := filepath.Join(staticDir, "cam1.jpg")
 
 	var err error
 	webAuthnConfig, err = webauthn.New(&webauthn.Config{
@@ -263,12 +272,6 @@ func (b *ChatBroker) getSessionInfo(r *http.Request) (token string, phone string
 	s := HTTPSession{Token: cookie.Value}
 	ok, _ := b.g.Entities.Load(&s)
 	return s.Token, s.Phone, ok
-}
-
-func (b *ChatBroker) isAuthorizedAndLogger(r *http.Request) bool {
-	_, _, authorized := b.getSessionInfo(r)
-	Logger.Debugf("[web app] %s authorized=%v", r.URL.Path, authorized)
-	return authorized
 }
 
 func (b *ChatBroker) handleSmsSend(w http.ResponseWriter, r *http.Request) {

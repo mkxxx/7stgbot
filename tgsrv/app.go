@@ -157,11 +157,13 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 
 	mux.Handle("GET /gate/app/{$}", InitSession(http.StripPrefix("/gate/app", fs)))
 	mux.Handle("GET /gate/app/", http.StripPrefix("/gate/app", fs))
-	mux.Handle("GET /gate/app/cam1/{filename...}", http.StripPrefix("/gate/app", RePath(noCacheFileServer,
+	//mux.Handle("GET /gate/app/cam1/{filename...}", http.StripPrefix("/gate/app", RePath(noCacheFileServer,
+	mux.Handle("GET /gate/app/cam1.jpg", http.StripPrefix("/gate/app", RePath(noCacheFileServer,
 		func(r *http.Request) string {
 			_, _, authorized := br.getSessionInfo(r)
 			if authorized {
-				return "/cam1.jpg"
+				//return "/cam1.jpg"
+				return ""
 			}
 			return "/401.jpg"
 		})))

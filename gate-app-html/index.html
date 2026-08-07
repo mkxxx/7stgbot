@@ -390,7 +390,8 @@
         if (img && !img.classList.contains('hidden')) {
             const randomAntiCache = Math.random().toString(36).substring(2, 15)           
             // Присваиваем новый URL. Браузер будет обязан скачать файл заново с сервера
-            img.src = `cam1/${randomAntiCache}.jpg`;
+            //img.src = `cam1/${randomAntiCache}.jpg`;
+            img.src = `cam1.jpg?nocache=${randomAntiCache}`;
         }
     }
 
@@ -642,7 +643,7 @@
 <!-- Полноэкранный просмотр файла cam1.jpg -->
 <div id="gateCameraOverlay" class="gate-overlay hidden">
     <button class="close-gate-btn" onclick="closeGateCamera()">&times;</button>
-    <img id="gateCameraImg" src="cam1/432234513.jpg" alt="Камера Шлагбаума">
+    <img id="gateCameraImg" src="cam1.jpg" alt="Камера Шлагбаума">
 </div>
 </body>
 </html>

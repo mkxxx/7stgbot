@@ -221,6 +221,8 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 					if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
 						timerCh = time.NewTimer(time.Second).C
 					}
+					Logger.Debugf("file event: %s", event)
+
 				case err, ok := <-watcher.Errors:
 					if !ok {
 						return

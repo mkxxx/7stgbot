@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -167,7 +168,7 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 			return "/401.jpg"
 		})))
 
-	//imgPath := filepath.Join(staticDir, "cam1.jpg")
+	imgPath := filepath.Join(staticDir, "cam1.jpg")
 
 	var err error
 	webAuthnConfig, err = webauthn.New(&webauthn.Config{
@@ -207,8 +208,6 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 	if err != nil {
 		Logger.Errorf("fsnotify error: %v", err)
 	} else {
-		var timerCh <-chan time.Time
-
 		go func() {
 			defer watcher.Close()
 			for {
@@ -217,19 +216,15 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 					if !ok {
 						return
 					}
-					if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
-						timerCh = time.NewTimer(time.Second).C
+					if event.Name == imgPath && (event.Has(fsnotify.Write) || event.Has(fsnotify.Create)) {
+						br.messages <- Message{Kind: msgKindCam}
 					}
-					Logger.Debugf("file event: %s", event)
 
 				case err, ok := <-watcher.Errors:
 					if !ok {
 						return
 					}
 					Logger.Errorf("fsnotify %s error: %v", staticDir, err)
-
-				case <-timerCh:
-					br.messages <- Message{Kind: msgKindCam}
 
 				case <-g.Abort:
 					return

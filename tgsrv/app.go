@@ -703,7 +703,7 @@ func (b *ChatBroker) run(abort chan struct{}) {
 		case ev := <-b.g.gateEvents:
 			now := time.Now()
 			phone := ev.Phone
-			if !strings.HasPrefix(phone, "+") {
+			if phone != "" && !strings.HasPrefix(phone, "+") {
 				phone = "+" + phone
 			}
 			msg := Message{
@@ -912,7 +912,9 @@ Loop:
 				break Loop
 			}
 			flusher.Flush()
-			Logger.Debugf("[web app] message sent to %s %s ch: %v - %s", currentPhone, token, messageChan, string(jsonBytes))
+			if msg.Kind != msgKindCam {
+				Logger.Debugf("[web app] message sent to %s %s ch: %v - %s", currentPhone, token, messageChan, string(jsonBytes))
+			}
 
 		case <-pingTicker.C:
 			_, err := fmt.Fprintf(w, ": keepalive ping\n\n")

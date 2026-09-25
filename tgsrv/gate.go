@@ -1423,7 +1423,11 @@ Loop:
 				sb.WriteString(" ")
 				sb.WriteString(ci.Lastname)
 				for _, c := range conn {
-					sb.WriteString("\n")
+					if len(conn) == 1 {
+						sb.WriteString(" ")
+					} else {
+						sb.WriteString("\n")
+					}
 					sb.WriteString(c.MAC)
 					sb.WriteString(" ")
 					sb.WriteString(c.Hostname)
@@ -1511,6 +1515,10 @@ Loop:
 			g.updateLastOpenedTime(now)
 			Logger.Infof("gate opened %s", t.timestampSent())
 			g.sendSystemNotification(fmt.Sprintf("gate opened %s", t.timestampSent()))
+
+			ev := GateEvent{Text: "Шлагбаум открывается... (PalGate)"}
+			g.gateEvents <- ev
+			g.sendUserNotification(ev.Text)
 
 		case cfg = <-cfgSub:
 
@@ -1897,21 +1905,22 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 		}
 		msg.WriteString(fmt.Sprintf("%s %s %s %s %s %s %s%s %s \n", opened, l.timestamp(), l.typeName(), phone, l.UserId, sn,
 			l.Firstname, l.Lastname, approved))
-
-		if l.Approved {
-			lot := time.Unix(0, g.lastOpenedTime.Load())
-			if lot.Before(l.Time()) {
-				ago := time.Since(l.Time())
-				var ev GateEvent
-				if ago < 30*time.Second {
-					ev = GateEvent{Phone: phone, Text: fmt.Sprintf("Шлагбаум открывается... (PalGate %s)", l.typeName())}
-				} else {
-					ev = GateEvent{Phone: phone, Text: fmt.Sprintf("Шлагбаум был открыт %s назад (PalGate %s)", ago.Round(time.Second), l.typeName())}
+		/*
+			if l.Approved {
+				lot := time.Unix(0, g.lastOpenedTime.Load())
+				if lot.Before(l.Time()) {
+					ago := time.Since(l.Time())
+					var ev GateEvent
+					if ago < 30*time.Second {
+						ev = GateEvent{Phone: phone, Text: fmt.Sprintf("Шлагбаум открывается... (PalGate %s)", l.typeName())}
+					} else {
+						ev = GateEvent{Phone: phone, Text: fmt.Sprintf("Шлагбаум был открыт %s назад (PalGate %s)", ago.Round(time.Second), l.typeName())}
+					}
+					g.gateEvents <- ev
+					g.sendUserNotification(ev.Text)
 				}
-				g.gateEvents <- ev
-				g.sendUserNotification(ev.Text)
 			}
-		}
+		*/
 		bb, err := json.Marshal(l)
 		if err != nil {
 			Logger.Debugf("%v", err)
@@ -1943,9 +1952,11 @@ func (g *Gate) loadPalESLogs(timeout time.Duration) int {
 	if g.allowedNow(phone) {
 		g.openGate(phone, "")
 		g.sendSystemNotification(fmt.Sprintf("OPENED by received log %s  %s", phone, g.userName(phone, "")))
-		ev := GateEvent{Phone: phone, Text: "Шлагбаум открывается... (PalGate log)"}
-		g.gateEvents <- ev
-		g.sendUserNotification(ev.Text)
+		/*
+			ev := GateEvent{Phone: phone, Text: "Шлагбаум открывается... (PalGate log)"}
+			g.gateEvents <- ev
+			g.sendUserNotification(ev.Text)
+		*/
 	}
 	return resp.StatusCode
 }

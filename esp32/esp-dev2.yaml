@@ -23,8 +23,8 @@ logger:
     http_request: DEBUG
 
 wifi:
-  ssid: !secret wifi_netcraze_ssid
-  password: !secret wifi_netcraze_password
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
 
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
@@ -90,7 +90,7 @@ globals:
     restore_value: no
   - id: current_location
     type: std::string
-    initial_value: '"1"'
+    initial_value: '"100"'
 
 
 substitutions:
@@ -101,7 +101,7 @@ switch:
     name: "Main Relay"
     id: relay_1
     pin:
-      number: ${relay_pin}
+      number: ${relay_pin} # 5v -> +, GND (near 23) -> -
       mode:
         output: true
         pulldown: true
@@ -181,7 +181,7 @@ binary_sensor:
     pin:
       number: GPIO16
       mode: INPUT_PULLUP # Важно: используем внутренний резистор ESP32
-      inverted: true     # Теперь нажатие (замыкание на GND) будет давать статус ON
+      #inverted: true     # Теперь нажатие (замыкание на GND) будет давать статус ON
     name: "Gate Status"
     id: gate_status
     filters:
@@ -401,14 +401,14 @@ script:
 matrix_keypad:
   id: my_keypad
   rows:
-    - pin: GPIO13 # 1 ч  123 (key 7 side)
-    - pin: GPIO22 # 2 б  456
-    - pin: GPIO14 # 3 се 789
-    - pin: GPIO27 # 4 ф  *0#
+    - pin: GPIO13 # 1 ч  б  123 (key 7 side)
+    - pin: GPIO22 # 2 б  с  456
+    - pin: GPIO14 # 3 се ж  789
+    - pin: GPIO27 # 4 ф  ф  *0#
   columns:
-    - pin: GPIO26 # 5 си 147*
-    - pin: GPIO19 # 6 з  2580
-    - pin: GPIO33 # 7 ж  369#
+    - pin: GPIO26 # 5 си з  147*
+    - pin: GPIO19 # 6 з  к  2580
+    - pin: GPIO33 # 7 ж  ч  369#
   keys: "123456789*0#"
 
   on_key:
@@ -475,5 +475,5 @@ key_collector:
 
 output:
   - platform: ledc # Используем ledc для плавности, но можно и gpio
-    pin: GPIO18
+    pin: GPIO18 # -> S, GND (near 5v) -> -, + (middle) -> 5v
     id: buzzer_pin

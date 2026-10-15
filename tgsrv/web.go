@@ -54,8 +54,6 @@ const (
 	qrcImgPath          = "/images/qrc.jpg"
 	qrPath              = "/docs/qr"
 
-	site = "https://7slavka.ru"
-
 	QRSalt = "ee1e4a719ddac2689"
 
 	// required
@@ -72,7 +70,7 @@ const (
 	QRNamePayeeINN = "PayeeINN" // <= 12
 
 	mattermostCommandResponseUsername = "anjella"
-	mattermostCommandResponseIconUrl  = "https://7slavka.ru/images/anjella.png"
+	mattermostCommandResponseIconPath = "/images/anjella.png"
 	systemBotId                       = "f1bkn94xnfyutngcbphnzt18zr"
 )
 
@@ -421,7 +419,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request)
 
 	if err != nil {
 		Logger.Errorf("%s cannot read form %v", r.URL.Path, err)
-		encoder.Encode(NewMattermostResponse("произошла ошибка"))
+		encoder.Encode(NewMattermostResponse("произошла ошибка", s.gate.Cfg.SiteDomain))
 		return
 	}
 	Logger.Infof("%s POST: %s", r.URL.Path, r.PostForm.Encode())
@@ -429,7 +427,7 @@ func (s *webSrv) handleMattermostCommand(w http.ResponseWriter, r *http.Request)
 	err = decoder.Decode(&req, r.PostForm)
 	if err != nil {
 		Logger.Errorf("%s cannot read form %v", r.URL.Path, err)
-		encoder.Encode(NewMattermostResponse("произошла ошибка"))
+		encoder.Encode(NewMattermostResponse("произошла ошибка", s.gate.Cfg.SiteDomain))
 		return
 	}
 	s.handleMattermostCommandEncoder(w, r, req, encoder)
@@ -884,13 +882,13 @@ func (s *webSrv) handleMattermostCommandEncoder(w http.ResponseWriter, r *http.R
 	mmUser, err := s.gate.MattermostUsers.Find(req.UserId)
 	if err != nil {
 		Logger.Errorf("db error: %v", err)
-		encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
+		encoder.Encode(NewMattermostResponse("внутренняя ошибка", s.gate.Cfg.SiteDomain))
 		return
 	}
 	token := mattermostToken(req.Command)
 	if token == "" {
 		Logger.Warnf("unknown mattermost command: %s", req.Command)
-		encoder.Encode(NewMattermostResponse("неизвестная команда"))
+		encoder.Encode(NewMattermostResponse("неизвестная команда", s.gate.Cfg.SiteDomain))
 		return
 	}
 	if req.Token != token {
@@ -935,7 +933,7 @@ func QRURL(year string, month string, plotNumber string) string {
 	params.Add("mm", month)
 	params.Add("n", plotNumber)
 	params.Add("h", sha1Hash(year, month, plotNumber))
-	x := site + qrPath + "?" + params.Encode()
+	x := "https://7slavka.ru" + qrPath + "?" + params.Encode() // TODO
 	return x
 }
 

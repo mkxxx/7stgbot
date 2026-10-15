@@ -9,6 +9,8 @@ type Config struct {
 	Port                   int
 	StaticDir              string
 	StaticGateAppDir       string
+	SiteDomain             string
+	AppDomain              string
 	TgToken                string
 	Price                  map[string]float64
 	Coef                   map[string]float64

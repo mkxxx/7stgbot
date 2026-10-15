@@ -609,7 +609,8 @@ Loop:
 					Logger.Errorf("Encrypt(%s, now): %v", phone, err)
 					continue
 				}
-				msg := fmt.Sprintf("https://7slavka.ru/totp/%s/ откройте ссылку, добавьте QR код в Google Authenticator", secret)
+				msg := fmt.Sprintf("https://%s/totp/%s/ откройте ссылку, добавьте QR код в Google Authenticator",
+					g.Cfg.SiteDomain, secret)
 				g.sendSMS(sms.Phone, msg, time.Now().Add(24*time.Hour))
 				continue
 			}
@@ -2701,7 +2702,7 @@ func (g *Gate) handleMattermostSysCommand(cmd, args string, encoder *json.Encode
 	if !isStr {
 		encoder.Encode(res)
 	} else if msg != "" {
-		encoder.Encode(NewMattermostResponse(msg))
+		encoder.Encode(NewMattermostResponse(msg, g.Cfg.SiteDomain))
 	}
 	return true
 }
@@ -2716,7 +2717,7 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 			Type:  UITypeButton,
 			Style: UIStylePrimary,
 			Integration: MMUIIntegration{
-				Url: fmt.Sprintf("%s/gate/mm/action", site),
+				Url: fmt.Sprintf("https://%s/gate/mm/action", g.Cfg.SiteDomain),
 				Context: MMUIContext{
 					Action: UIActionOpen,
 					Value:  true,
@@ -2729,7 +2730,7 @@ func (g *Gate) doHandleMattermostSysCommand(cmd, args string) (res any, err erro
 			Type:  UITypeButton,
 			Style: UIStyleDefault,
 			Integration: MMUIIntegration{
-				Url: fmt.Sprintf("%s/gate/mm/action", site),
+				Url: fmt.Sprintf("https://%s/gate/mm/action", g.Cfg.SiteDomain),
 				Context: MMUIContext{
 					Action: UIActionOpen,
 					Value:  false,
@@ -2945,14 +2946,14 @@ func (g *Gate) handleMattermostUserCommand(req MattermostRequest, urlPath string
 		if text == "" {
 			if mmUser != nil {
 				encoder.Encode(NewMattermostResponse(fmt.Sprintf(
-					"Ваш подтвержденный номер телефона %s", maskPhone(mmUser.Phone))))
+					"Ваш подтвержденный номер телефона %s", maskPhone(mmUser.Phone)), g.Cfg.SiteDomain))
 				return
 			}
 		}
 		i := strings.LastIndex(text, " ")
 		if i < 0 {
 			encoder.Encode(NewMattermostResponse(fmt.Sprintf(
-				"формат команды: %s <номер телефона> <код totp>  например: %s 79990010203 123456", req.Command, req.Command)))
+				"формат команды: %s <номер телефона> <код totp>  например: %s 79990010203 123456", req.Command, req.Command), g.Cfg.SiteDomain))
 			return
 		}
 		phone := text[:i]
@@ -2965,57 +2966,57 @@ func (g *Gate) handleMattermostUserCommand(req MattermostRequest, urlPath string
 			phone = "7" + phone
 		}
 		if len(phone) != 11 {
-			encoder.Encode(NewMattermostResponse("номер телефона не распознан"))
+			encoder.Encode(NewMattermostResponse("номер телефона не распознан", g.Cfg.SiteDomain))
 			return
 		}
 		_, err := strconv.Atoi(phone)
 		if err != nil {
-			encoder.Encode(NewMattermostResponse("номер телефона не распознан"))
+			encoder.Encode(NewMattermostResponse("номер телефона не распознан", g.Cfg.SiteDomain))
 			return
 		}
 		if len(code) != 6 {
-			encoder.Encode(NewMattermostResponse("неверный формат кода TOTP"))
+			encoder.Encode(NewMattermostResponse("неверный формат кода TOTP", g.Cfg.SiteDomain))
 			return
 		}
 		_, err = strconv.Atoi(code)
 		if err != nil {
-			encoder.Encode(NewMattermostResponse("неверный формат кода TOTP"))
+			encoder.Encode(NewMattermostResponse("неверный формат кода TOTP", g.Cfg.SiteDomain))
 			return
 		}
 		valid, err := validateTOTPCodeForPhone(phone, code)
 		if err != nil {
 			Logger.Errorf("%s TOTP validation error phone: %s code: %s  %v", urlPath, phone, code, err)
-			encoder.Encode(NewMattermostResponse("неверный код TOTP"))
+			encoder.Encode(NewMattermostResponse("неверный код TOTP", g.Cfg.SiteDomain))
 			return
 		}
 		if !valid {
 			Logger.Infof("%s TOTP validation is not OK  phone: %s code: %s", urlPath, phone, code)
-			encoder.Encode(NewMattermostResponse("неверный код TOTP"))
+			encoder.Encode(NewMattermostResponse("неверный код TOTP", g.Cfg.SiteDomain))
 			return
 		}
 		u, err := g.MattermostUsers.Find(req.UserId)
 		if err != nil {
 			Logger.Errorf("db error: %v", err)
-			encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
+			encoder.Encode(NewMattermostResponse("внутренняя ошибка", g.Cfg.SiteDomain))
 			return
 		}
 		if u == nil {
 			err = g.MattermostUsers.Insert(&gate.MattermostUser{UserId: req.UserId, Phone: phone})
 			if err != nil {
 				Logger.Errorf("db error: %v", err)
-				encoder.Encode(NewMattermostResponse("внутренняя ошибка"))
+				encoder.Encode(NewMattermostResponse("внутренняя ошибка", g.Cfg.SiteDomain))
 				return
 			}
-			encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден. Вам доступен функционал авторизованного пользоваеля."))
+			encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден. Вам доступен функционал авторизованного пользоваеля.", g.Cfg.SiteDomain))
 			return
 		}
 		if u.Phone == phone {
-			encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден (повторно). Вам доступен функционал авторизованного пользоваеля."))
+			encoder.Encode(NewMattermostResponse("Ваш номер телефона подтвержден (повторно). Вам доступен функционал авторизованного пользоваеля.", g.Cfg.SiteDomain))
 			return
 		}
 		u.Phone = phone
 		g.MattermostUsers.Update(u)
-		encoder.Encode(NewMattermostResponse("Ваш номер телефона изменен."))
+		encoder.Encode(NewMattermostResponse("Ваш номер телефона изменен.", g.Cfg.SiteDomain))
 
 	}
 }

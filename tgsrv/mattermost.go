@@ -16,8 +16,8 @@ const (
 )
 
 /*
-По умолчанию ответ на команду видит только тот, кто её ввёл (Ephemeral). 
-Если вы хотите, чтобы вопрос и результат были видны всем в канале, 
+По умолчанию ответ на команду видит только тот, кто её ввёл (Ephemeral).
+Если вы хотите, чтобы вопрос и результат были видны всем в канале,
 добавьте в корень JSON параметр "response_type": "in_channel"
 */
 
@@ -41,12 +41,12 @@ type MattermostResponse struct {
 	} `json:"company_id"`
 }
 
-func NewMattermostResponse(text string) *MattermostResponse {
+func NewMattermostResponse(text string, siteDomain string) *MattermostResponse {
 	return &MattermostResponse{
 		// ResponseType: "in_channel", так ответ увидят все
-		Text:         text,
-		Username:     mattermostCommandResponseUsername,
-		IconUrl:      mattermostCommandResponseIconUrl,
+		Text:     text,
+		Username: mattermostCommandResponseUsername,
+		IconUrl:  "https://" + siteDomain + mattermostCommandResponseIconPath,
 	}
 }
 
@@ -88,7 +88,7 @@ type MattermostUIAction struct {
 }
 
 type MMUIIntegration struct {
-	Url     string     `json:"url"`
+	Url     string      `json:"url"`
 	Context MMUIContext `json:"context"`
 }
 
@@ -102,13 +102,13 @@ func (a *MattermostUIAttachment) addAction(p *MattermostUIAction) {
 }
 
 type MattermostActionRequest struct {
-	UserId     string     `json:"user_id"`
-	ChannelId  string     `json:"channel_id"`
-	TeamId     string     `json:"team_id"`
-	PostId     string     `json:"post_id"`
-	TriggerId  string     `json:"trigger_id"`
-	Type       string     `json:"type"`
-	DataSource string     `json:"data_source"`
+	UserId     string      `json:"user_id"`
+	ChannelId  string      `json:"channel_id"`
+	TeamId     string      `json:"team_id"`
+	PostId     string      `json:"post_id"`
+	TriggerId  string      `json:"trigger_id"`
+	Type       string      `json:"type"`
+	DataSource string      `json:"data_source"`
 	Context    MMUIContext `json:"context"`
 }
 

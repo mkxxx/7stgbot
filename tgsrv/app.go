@@ -24,8 +24,6 @@ import (
 
 const (
 	sessionCookieName = "gate_session"
-	appDomain         = "gate.7slavka.ru"
-	siteDomain        = "7slavka.ru"
 
 	msgKindCliCnt = "cli_cnt"
 	msgKindMsgPer = "msg_per"
@@ -155,7 +153,7 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 		fs.ServeHTTP(w, r)
 	})
 
-	mux.Handle("GET /gate/app/{$}", InitSession(http.StripPrefix("/gate/app", fs)))
+	mux.Handle("GET /gate/app/{$}", InitSession(http.StripPrefix("/gate/app", fs), g.Cfg.AppDomain))
 	mux.Handle("GET /gate/app/", http.StripPrefix("/gate/app", fs))
 	//mux.Handle("GET /gate/app/cam1/{filename...}", http.StripPrefix("/gate/app", RePath(noCacheFileServer,
 	mux.Handle("GET /gate/app/cam1.jpg", http.StripPrefix("/gate/app", RePath(noCacheFileServer,
@@ -173,10 +171,10 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 	var err error
 	webAuthnConfig, err = webauthn.New(&webauthn.Config{
 		RPDisplayName: "Gate",
-		RPID:          siteDomain,
+		RPID:          g.Cfg.SiteDomain,
 		RPOrigins: []string{
-			"https://" + siteDomain,
-			"https://" + appDomain,
+			"https://" + g.Cfg.SiteDomain,
+			"https://" + g.Cfg.AppDomain,
 		},
 	})
 	if err != nil {
@@ -238,7 +236,7 @@ func (g *Gate) RegisterGateAppHTTP(mux *http.ServeMux, staticDir string, ipReq c
 	}
 }
 
-func InitSession(h http.Handler) http.Handler {
+func InitSession(h http.Handler, appDomain string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := r.Cookie(sessionCookieName); err == nil {
 			h.ServeHTTP(w, r)
@@ -287,7 +285,7 @@ func (b *ChatBroker) handleSmsSend(w http.ResponseWriter, r *http.Request) {
 		sms.Code = generateSMSCode()
 		sms.Updated = now.Unix()
 	}
-	b.g.sendSMS(req.Phone, fmt.Sprintf("%s: введите код подтверждения %s", appDomain, sms.Code), time.Now().Add(time.Minute))
+	b.g.sendSMS(req.Phone, fmt.Sprintf("%s: введите код подтверждения %s", b.g.Cfg.AppDomain, sms.Code), time.Now().Add(time.Minute))
 	w.WriteHeader(http.StatusOK)
 	if exists {
 		b.g.Entities.Update(&sms)

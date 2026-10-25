@@ -104,8 +104,6 @@ switch:
       number: ${relay_pin} # 5v -> +, GND (near 23) -> -
       mode:
         output: true
-        pulldown: true
-      inverted: true
     restore_mode: RESTORE_DEFAULT_OFF
 
 

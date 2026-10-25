@@ -53,6 +53,7 @@ type Config struct {
 	BLEAutoOpenLagMin             int64          // TODO remove
 	BTMacIgnore                   map[string]string
 	BTMacAutoOpenGate             map[string]string
+	BTNameAutoOpenGate            map[string]string
 	BTMacNames                    map[string]string
 	WiFiMACAutoOpenGate           map[string]string
 	WiFiMacNames                  map[string]string

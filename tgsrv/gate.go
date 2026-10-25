@@ -1243,6 +1243,15 @@ func (k *BLEGatekeeper) checkAndOpenFunc(p []*BLETracking, cfg *config.Config, n
 
 func (k *BLEGatekeeper) checkAndOpenBLETracking(bt *BLETracking, cfg *config.Config) bool {
 	phone, ok := cfg.BTMacAutoOpenGate[bt.MAC]
+	if !ok && len(bt.Name) != 0 {
+		for k, ph := range cfg.BTNameAutoOpenGate {
+			if strings.HasPrefix(bt.Name, k) {
+				ok = true
+				phone = ph
+				break
+			}
+		}
+	}
 	if !ok {
 		return false
 	}
